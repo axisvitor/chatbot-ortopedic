@@ -48,37 +48,38 @@ class GroqServices {
                 campos: messageData?.message?.audioMessage ? Object.keys(messageData.message.audioMessage) : []
             });
 
-            if (!messageData?.message?.audioMessage) {
-                throw new Error('Mensagem não contém áudio');
+            const audioMessage = messageData?.message?.audioMessage;
+            if (!audioMessage) {
+                throw new Error('Dados do áudio ausentes ou inválidos');
             }
 
-            const audioMessage = messageData.message.audioMessage;
-            
             // Log detalhado dos campos críticos
             console.log('🎤 Campos do áudio:', {
-                url: audioMessage.url ? audioMessage.url.substring(0, 50) + '...' : 'ausente',
                 mimetype: audioMessage.mimetype,
                 fileLength: audioMessage.fileLength,
                 seconds: audioMessage.seconds,
                 ptt: audioMessage.ptt,
                 mediaKey: audioMessage.mediaKey ? 'presente' : 'ausente',
                 fileEncSha256: audioMessage.fileEncSha256 ? 'presente' : 'ausente',
-                fileSha256: audioMessage.fileSha256 ? 'presente' : 'ausente',
-                directPath: audioMessage.directPath ? 'presente' : 'ausente',
-                mediaKeyTimestamp: audioMessage.mediaKeyTimestamp
+                fileSha256: audioMessage.fileSha256 ? 'presente' : 'ausente'
             });
 
             // Verifica campos obrigatórios
-            const camposObrigatorios = ['url', 'mediaKey', 'fileEncSha256', 'directPath'];
+            const camposObrigatorios = ['mediaKey', 'fileEncSha256', 'fileSha256', 'mimetype'];
             const camposFaltantes = camposObrigatorios.filter(campo => !audioMessage[campo]);
             
             if (camposFaltantes.length > 0) {
                 throw new Error(`Campos obrigatórios ausentes: ${camposFaltantes.join(', ')}`);
             }
 
+            // Verifica o tipo MIME
+            if (!this._isValidAudioMimeType(audioMessage.mimetype)) {
+                throw new Error(`Formato de áudio não suportado: ${audioMessage.mimetype}`);
+            }
+
             let audioPath = null;
             try {
-                // Passa a mensagem de áudio completa para o Baileys
+                // Download e processamento do áudio
                 console.log('🔐 Iniciando descriptografia do áudio...');
                 const stream = await downloadContentFromMessage(audioMessage, 'audio');
                 
@@ -86,22 +87,21 @@ class GroqServices {
                     throw new Error('Stream de áudio não gerado');
                 }
 
-                // Salva o stream em um arquivo temporário
-                audioPath = path.join(this.tempDir, `audio_${Date.now()}.ogg`);
-                const writeStream = fs.createWriteStream(audioPath);
-                
+                let buffer = Buffer.from([]);
                 for await (const chunk of stream) {
-                    writeStream.write(chunk);
+                    buffer = Buffer.concat([buffer, chunk]);
                 }
-                
-                writeStream.end();
-                
-                await new Promise((resolve, reject) => {
-                    writeStream.on('finish', resolve);
-                    writeStream.on('error', reject);
-                });
 
-                console.log('✅ Áudio salvo com sucesso:', {
+                // Salva o áudio temporariamente
+                const tempDir = path.join(__dirname, '../../temp');
+                if (!fs.existsSync(tempDir)) {
+                    await fs.mkdir(tempDir, { recursive: true });
+                }
+
+                audioPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
+                await fs.writeFile(audioPath, buffer);
+
+                console.log('✅ Áudio salvo temporariamente:', {
                     path: audioPath,
                     tamanho: fs.statSync(audioPath).size
                 });
@@ -127,7 +127,7 @@ class GroqServices {
                 }
             }
         } catch (error) {
-            console.error('❌ Erro ao processar áudio do WhatsApp:', error);
+            console.error('❌ Erro ao processar áudio:', error);
             throw error;
         }
     }

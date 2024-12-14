@@ -516,16 +516,34 @@ class WhatsAppService {
                     };
                 }
             } else if (message.message.audioMessage) {
-                console.log('[Media] Processando mensagem de áudio');
-                const extractedMessage = await this.extractMessageFromWebhook(message);
-                
-                if (extractedMessage) {
-                    const result = await this.processWhatsAppAudio(extractedMessage);
+                console.log('[Media] Processando mensagem de áudio:', {
+                    hasMessage: !!message.message,
+                    hasAudioMessage: !!message.message.audioMessage,
+                    audioFields: message.message.audioMessage ? Object.keys(message.message.audioMessage) : []
+                });
+
+                // Verifica se tem os campos necessários
+                const audioMessage = message.message.audioMessage;
+                if (!audioMessage) {
+                    console.error('[Media] Mensagem de áudio inválida');
                     return {
-                        text: result.success ? 
-                            `Transcrição do áudio: "${result.transcription}"` : 
-                            result.message,
+                        text: "Desculpe, não consegui processar seu áudio. Por favor, tente gravar novamente.",
+                        mediaHandled: false
+                    };
+                }
+
+                // Tenta transcrever o áudio
+                try {
+                    const result = await this.groqServices.processWhatsAppAudio(message);
+                    return {
+                        text: result ? `Transcrição do áudio: "${result}"` : "Não foi possível transcrever o áudio.",
                         mediaHandled: true
+                    };
+                } catch (transcriptionError) {
+                    console.error('[Media] Erro na transcrição:', transcriptionError);
+                    return {
+                        text: "Desculpe, houve um problema ao transcrever seu áudio. Por favor, tente novamente ou digite sua mensagem.",
+                        mediaHandled: false
                     };
                 }
             }
