@@ -124,19 +124,23 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             case 'audio':
                 console.log('🎵 Processando áudio...', {
                     from: message.from,
-                    hasAudioUrl: !!message.audioUrl,
-                    hasBuffer: !!message.audioUrl?.buffer,
+                    hasAudioMessage: !!message.audioMessage,
+                    hasBuffer: !!message.audioMessage?.buffer,
                     fromType: typeof message.from,
                     fromLength: message.from?.length
                 });
                 
                 try {
-                    if (!message.audioUrl || !message.audioUrl.buffer) {
+                    if (!message.audioMessage) {
                         throw new Error('Dados do áudio não encontrados');
                     }
 
-                    // Passamos o objeto completo do áudio com o buffer
-                    const transcription = await aiServices.processAudio(message.audioUrl);
+                    // Passamos a mensagem completa com a estrutura esperada pelo Baileys
+                    const transcription = await aiServices.processAudio({
+                        message: {
+                            audioMessage: message.audioMessage
+                        }
+                    });
                     console.log('📝 Transcrição recebida:', transcription);
                     
                     if (!transcription) {

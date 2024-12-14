@@ -206,13 +206,13 @@ class WhatsAppService {
     async extractMessageFromWebhook(body) {
         try {
             console.log('📥 Webhook recebido (raw):', body);
-            console.log('📥 Webhook recebido (stringify):', JSON.stringify(body, null, 2));
             console.log('📥 Estrutura do body:', {
                 hasBody: !!body,
                 hasBodyBody: !!body?.body,
                 hasMessage: !!body?.body?.message,
                 hasKey: !!body?.body?.key,
-                hasRemoteJid: !!body?.body?.key?.remoteJid
+                hasRemoteJid: !!body?.body?.key?.remoteJid,
+                hasAudioMessage: !!body?.body?.message?.audioMessage
             });
             
             if (!body || !body.body || !body.body.message || !body.body.key) {
@@ -221,27 +221,27 @@ class WhatsAppService {
 
             const { message, key } = body.body;
             console.log('🔑 Key do webhook:', key);
-            console.log('💬 Message do webhook:', message);
-
-            const text = message.extendedTextMessage?.text || message.conversation || '';
-            const remoteJid = key.remoteJid;
-            
-            console.log('🔄 Processando remoteJid:', {
-                original: remoteJid,
-                tipo: typeof remoteJid,
-                tamanho: remoteJid?.length,
-                temSufixo: remoteJid?.includes('@s.whatsapp.net')
+            console.log('💬 Message do webhook:', {
+                hasText: !!message.extendedTextMessage || !!message.conversation,
+                hasImage: !!message.imageMessage,
+                hasAudio: !!message.audioMessage,
+                audioDetails: message.audioMessage ? {
+                    mediaKey: !!message.audioMessage.mediaKey,
+                    url: !!message.audioMessage.url,
+                    mimetype: message.audioMessage.mimetype
+                } : null
             });
 
-            // Garante que temos um número válido
+            // Processa o número do remetente
+            const remoteJid = key.remoteJid;
             if (!remoteJid) {
                 throw new Error('RemoteJid não encontrado no webhook');
             }
 
             // Remove o sufixo do WhatsApp e qualquer caractere não numérico
             const from = remoteJid
-                .replace('@s.whatsapp.net', '')  // Remove sufixo do WhatsApp
-                .replace(/\D/g, '');             // Remove caracteres não numéricos
+                .replace('@s.whatsapp.net', '')
+                .replace(/\D/g, '');
             
             if (!from) {
                 throw new Error('Número do remetente inválido após processamento');
@@ -249,83 +249,27 @@ class WhatsAppService {
 
             // Adiciona o código do país se não estiver presente
             const formattedNumber = from.startsWith('55') ? from : `55${from}`;
-            
-            console.log('📱 Dados do remetente processados:', {
-                original: remoteJid,
-                semSufixo: remoteJid.replace('@s.whatsapp.net', ''),
-                somenteNumeros: from,
-                formatado: formattedNumber,
-                tamanhos: {
-                    original: remoteJid.length,
-                    semSufixo: remoteJid.replace('@s.whatsapp.net', '').length,
-                    somenteNumeros: from.length,
-                    formatado: formattedNumber.length
-                }
-            });
 
+            // Determina o tipo de mensagem e extrai o conteúdo
             let type = 'text';
-            let content = text;
-            let mediaUrl = null;
+            let content = {};
 
-            // Verifica se é uma mensagem de áudio
-            if (message.audioMessage) {
-                type = 'audio';
-                console.log('🎵 Dados do áudio recebidos:', message.audioMessage);
-                
-                try {
-                    const audioBuffer = await this.downloadMedia(
-                        message.audioMessage.url,
-                        message.audioMessage.mediaKey,
-                        message.audioMessage.fileEncSha256
-                    );
-                    
-                    mediaUrl = {
-                        ...message.audioMessage,
-                        buffer: audioBuffer
-                    };
-                    
-                    console.log('🎵 Áudio processado:', {
-                        tipo: type,
-                        remetente: formattedNumber,
-                        mimetype: message.audioMessage.mimetype,
-                        temBuffer: !!audioBuffer
-                    });
-                } catch (error) {
-                    console.error('❌ Erro ao baixar áudio:', error);
-                    throw new Error('Falha ao baixar o áudio');
-                }
-            }
-            // Verifica se é uma imagem
-            else if (message.imageMessage) {
+            if (message.imageMessage) {
                 type = 'image';
-                mediaUrl = message.imageMessage.url;
-                console.log('🖼️ Imagem detectada:', mediaUrl);
-            }
-            // Verifica se é um documento
-            else if (message.documentMessage) {
-                type = 'document';
-                mediaUrl = message.documentMessage.url;
-                console.log('📄 Documento detectado:', mediaUrl);
+                content.imageUrl = message.imageMessage;
+            } else if (message.audioMessage) {
+                type = 'audio';
+                content.audioMessage = message.audioMessage;
+            } else {
+                content.text = message.extendedTextMessage?.text || message.conversation || '';
             }
 
-            const extractedMessage = {
+            return {
                 type,
-                text: content,
                 from: formattedNumber,
                 messageId: key.id,
-                audioUrl: type === 'audio' ? mediaUrl : undefined,
-                imageUrl: type === 'image' ? mediaUrl : undefined,
-                documentUrl: type === 'document' ? mediaUrl : undefined
+                ...content
             };
-
-            console.log('📨 Mensagem extraída:', {
-                ...extractedMessage,
-                temNumero: !!extractedMessage.from,
-                tamanhoNumero: extractedMessage.from?.length,
-                tipoMensagem: type
-            });
-
-            return extractedMessage;
         } catch (error) {
             console.error('❌ Erro ao extrair mensagem do webhook:', error);
             throw error;
