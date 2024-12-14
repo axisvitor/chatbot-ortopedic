@@ -107,72 +107,27 @@ class AIServices {
         }
     }
 
-    async processAudio(audioData) {
+    async processAudio(messageData) {
         try {
             console.log('🎙️ Iniciando processamento de áudio...');
-            
-            if (!audioData) {
-                throw new Error('Dados do áudio não fornecidos');
-            }
-
-            // Se for um objeto com informações do áudio do WhatsApp
-            if (typeof audioData === 'object') {
-                console.log('🔍 Dados do áudio recebidos:', {
-                    mimetype: audioData.mimetype,
-                    seconds: audioData.seconds,
-                    fileSize: audioData.fileLength,
-                    hasBuffer: !!audioData.buffer,
-                    hasMsgContent: !!audioData.msgContent
-                });
-            }
-
-            if (!audioData.buffer && !audioData.msgContent) {
-                throw new Error('Dados do áudio não encontrados');
-            }
-
-            try {
-                // Prepara os dados no formato esperado pelo processWhatsAppAudio
-                const messageData = {
-                    message: {
-                        audioMessage: {
-                            url: audioData.url,
-                            mimetype: audioData.mimetype,
-                            seconds: audioData.seconds,
-                            fileLength: audioData.fileLength,
-                            ptt: audioData.ptt
-                        }
-                    },
-                    msgContent: audioData.msgContent
-                };
-
-                const transcription = await this.groqServices.processWhatsAppAudio(messageData);
-                
-                if (!transcription) {
-                    throw new Error('Transcrição vazia');
-                }
-
-                console.log('✅ Áudio processado com sucesso:', transcription);
-                return transcription;
-            } catch (error) {
-                console.error('❌ Erro específico na transcrição:', error);
-                
-                if (error.message.includes('muito grande')) {
-                    throw new Error('O áudio é muito grande. Por favor, envie um áudio menor (máximo 25MB).');
-                }
-                
-                if (error.message.includes('formato')) {
-                    throw new Error('Formato de áudio não suportado. Por favor, envie apenas áudios em formato comum (MP3, OGG, etc).');
-                }
-                
-                if (error.message.includes('vazia ou inválida')) {
-                    throw new Error('Não foi possível entender o áudio. Por favor, tente gravar novamente com mais clareza.');
-                }
-                
-                throw new Error('Não foi possível processar o áudio. Por favor, tente novamente ou envie sua mensagem em texto.');
-            }
+            const transcription = await this.groqServices.processWhatsAppAudio(messageData);
+            console.log('✅ Áudio processado com sucesso:', transcription);
+            return transcription;
         } catch (error) {
-            console.error('❌ Erro geral ao processar áudio:', error);
-            throw error;
+            console.error('❌ Erro no processamento de áudio:', error);
+            
+            // Mensagens de erro personalizadas
+            if (error.message.includes('Dados insuficientes')) {
+                return "Desculpe, não consegui acessar o áudio. Por favor, tente enviar novamente ou digite sua mensagem.";
+            }
+            if (error.message.includes('formato')) {
+                return "Este formato de áudio não é suportado. Por favor, tente gravar novamente.";
+            }
+            if (error.message.includes('muito grande')) {
+                return "O áudio é muito longo. Por favor, tente uma mensagem mais curta.";
+            }
+            
+            return "Sinto muito, estou tendo dificuldades para processar áudios no momento. Por favor, tente digitar sua mensagem.";
         }
     }
 

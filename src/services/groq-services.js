@@ -49,21 +49,28 @@ class GroqServices {
                 seconds: audioMessage.seconds,
                 fileLength: audioMessage.fileLength,
                 mimetype: audioMessage.mimetype,
-                mediaKey: !!audioMessage.mediaKey
+                mediaKey: audioMessage.mediaKey ? 'presente' : 'ausente',
+                url: audioMessage.url ? 'presente' : 'ausente',
+                directPath: audioMessage.directPath ? 'presente' : 'ausente'
             });
 
-            if (!audioMessage.mediaKey) {
-                throw new Error('Chave de mídia não encontrada no áudio');
-            }
-
-            if (!this._isValidAudioMimeType(audioMessage.mimetype)) {
-                throw new Error('Formato de áudio não suportado');
+            // Verifica se temos os dados necessários para processar o áudio
+            if (!audioMessage.mediaKey && !audioMessage.url) {
+                throw new Error('Dados insuficientes para processar o áudio');
             }
 
             let audioPath = null;
             try {
-                // Descriptografa e baixa o áudio usando Baileys
-                const stream = await downloadContentFromMessage(audioMessage, 'audio');
+                // Tenta baixar usando diferentes métodos
+                let stream;
+                if (audioMessage.mediaKey) {
+                    stream = await downloadContentFromMessage(audioMessage, 'audio');
+                } else if (audioMessage.url) {
+                    // Implementar método alternativo usando URL direta
+                    const response = await axios.get(audioMessage.url, { responseType: 'stream' });
+                    stream = response.data;
+                }
+
                 if (!stream) {
                     throw new Error('Não foi possível obter o stream do áudio');
                 }
