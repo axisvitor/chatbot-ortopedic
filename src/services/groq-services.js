@@ -3,6 +3,7 @@ const fs = require('fs');
 const FormData = require('form-data');
 const axios = require('axios');
 const { spawn } = require('child_process');
+const ffmpeg = require('ffmpeg-static');
 const { GROQ_CONFIG } = require('../config/settings');
 const { Readable } = require('stream');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
@@ -172,63 +173,50 @@ class GroqServices {
     }
 
     async _convertToMp3(inputPath) {
-        try {
-            const outputPath = inputPath.replace(/\.[^/.]+$/, '') + '.mp3';
-            
-            console.log('🔄 Convertendo áudio para MP3:', {
-                input: inputPath,
-                output: outputPath
+        return new Promise((resolve, reject) => {
+            console.log('🎵 Iniciando conversão para MP3...');
+            const outputPath = inputPath.replace('.ogg', '.mp3');
+
+            // Usando ffmpeg-static em vez do comando do sistema
+            const process = spawn(ffmpeg, [
+                '-i', inputPath,
+                '-acodec', 'libmp3lame',
+                '-ar', '44100',
+                '-ac', '2',
+                '-b:a', '192k',
+                outputPath
+            ]);
+
+            let errorOutput = '';
+
+            process.stderr.on('data', (data) => {
+                errorOutput += data.toString();
+                console.log('🔄 FFmpeg progresso:', data.toString());
             });
 
-            return new Promise((resolve, reject) => {
-                const ffmpeg = spawn('ffmpeg', [
-                    '-y',                // Sobrescreve arquivo se existir
-                    '-i', inputPath,     // Arquivo de entrada
-                    '-vn',              // Remove vídeo
-                    '-acodec', 'libmp3lame', // Codec MP3
-                    '-ar', '16000',     // Taxa de amostragem para Whisper
-                    '-ac', '1',         // Mono
-                    '-b:a', '64k',      // Bitrate moderado
-                    '-f', 'mp3',        // Força formato MP3
-                    '-hide_banner',     // Remove banner do ffmpeg
-                    '-loglevel', 'error', // Mostra apenas erros
-                    outputPath          // Arquivo de saída
-                ]);
-
-                let stderr = '';
-
-                ffmpeg.stderr.on('data', (data) => {
-                    stderr += data.toString();
-                });
-
-                ffmpeg.on('close', (code) => {
-                    if (code === 0 && fs.existsSync(outputPath)) {
-                        const stats = fs.statSync(outputPath);
-                        console.log('✅ Conversão concluída:', { 
-                            outputPath,
-                            size: stats.size,
-                            exists: true
-                        });
-                        resolve(outputPath);
-                    } else {
-                        console.error('❌ Erro na conversão:', {
-                            code,
-                            stderr,
-                            outputExists: fs.existsSync(outputPath)
-                        });
-                        reject(new Error(`Falha na conversão: ${stderr}`));
-                    }
-                });
-
-                ffmpeg.on('error', (err) => {
-                    console.error('❌ Erro ao executar ffmpeg:', err);
-                    reject(new Error(`Falha ao executar ffmpeg: ${err.message}`));
-                });
+            process.on('close', (code) => {
+                if (code === 0) {
+                    console.log('✅ Conversão para MP3 concluída:', {
+                        entrada: inputPath,
+                        saida: outputPath,
+                        tamanhoEntrada: fs.statSync(inputPath).size,
+                        tamanhoSaida: fs.statSync(outputPath).size
+                    });
+                    resolve(outputPath);
+                } else {
+                    console.error('❌ Erro ao converter áudio:', {
+                        codigo: code,
+                        erro: errorOutput
+                    });
+                    reject(new Error(`FFmpeg falhou com código ${code}: ${errorOutput}`));
+                }
             });
-        } catch (error) {
-            console.error('❌ Erro ao converter áudio:', error);
-            throw new Error(`Falha ao converter áudio: ${error.message}`);
-        }
+
+            process.on('error', (err) => {
+                console.error('❌ Erro ao executar FFmpeg:', err);
+                reject(err);
+            });
+        });
     }
 
     async _transcribeWithGroq(audioPath) {
