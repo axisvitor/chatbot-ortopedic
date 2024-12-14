@@ -14,16 +14,29 @@ class GroqServices {
         })
     }
 
-    async analyzeImage(imageBuffer, mimeType = 'image/jpeg') {
+    async analyzeImage(imageData, mimeType = 'image/jpeg') {
         try {
-            console.log('🖼️ Analisando imagem:', { 
-                bufferSize: imageBuffer.length,
-                mimeType,
-                primeirosBytes: imageBuffer.slice(0, 16).toString('hex')
-            });
-
-            // Converte o buffer para base64
-            const base64Image = imageBuffer.toString('base64');
+            let base64Image;
+            
+            if (Buffer.isBuffer(imageData)) {
+                // Se for um buffer, converte para base64
+                base64Image = imageData.toString('base64');
+                console.log('🖼️ Processando buffer de imagem:', { 
+                    bufferSize: imageData.length,
+                    mimeType
+                });
+            } else if (typeof imageData === 'string') {
+                // Se for um caminho de arquivo, lê o arquivo e converte para base64
+                const buffer = await fs.readFile(imageData);
+                base64Image = buffer.toString('base64');
+                console.log('🖼️ Processando arquivo de imagem:', { 
+                    path: imageData,
+                    bufferSize: buffer.length,
+                    mimeType
+                });
+            } else {
+                throw new Error('Formato de imagem inválido. Esperado: Buffer ou caminho do arquivo');
+            }
 
             const payload = {
                 model: this.models.vision,
@@ -49,33 +62,26 @@ class GroqServices {
 
             console.log('📤 Enviando request para Groq:', {
                 model: this.models.vision,
-                imageSize: base64Image.length,
-                endpoint: '/openai/v1/chat/completions'
+                messageTypes: payload.messages[0].content.map(c => c.type)
             });
 
             const response = await this.axiosInstance.post(
-                'https://api.groq.com/openai/v1/chat/completions',
-                payload,
-                {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    }
-                }
+                'https://api.groq.com/v1/chat/completions',
+                payload
             );
 
-            if (response.data?.choices?.[0]?.message?.content) {
-                return response.data.choices[0].message.content;
-            } else {
-                throw new Error('Resposta inválida do Groq');
-            }
+            console.log('📥 Resposta recebida de Groq:', {
+                status: response.status,
+                messageLength: response.data?.choices?.[0]?.message?.content?.length || 0
+            });
+
+            return response.data?.choices?.[0]?.message?.content || null;
 
         } catch (error) {
-            console.error('❌ Erro ao analisar imagem com Groq:', {
+            console.error('❌ Erro ao analisar imagem:', {
                 message: error.message,
                 status: error.response?.status,
-                data: error.response?.data,
-                stack: error.stack
+                data: error.response?.data
             });
             throw error;
         }

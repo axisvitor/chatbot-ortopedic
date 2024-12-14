@@ -356,7 +356,7 @@ class WhatsAppService {
 
             console.log('[Image] Iniciando processamento da imagem');
             
-            // Download da imagem
+            // Download e decodificação da imagem
             const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'image');
             let buffer = Buffer.from([]);
             
@@ -366,23 +366,15 @@ class WhatsAppService {
 
             console.log('[Image] Download concluído, tamanho:', buffer.length);
 
-            // Salvar a imagem temporariamente
-            const tempDir = path.join(__dirname, '../../temp');
-            if (!fs.existsSync(tempDir)) {
-                fs.mkdirSync(tempDir, { recursive: true });
-            }
-
-            const tempImagePath = path.join(tempDir, `payment_${Date.now()}.jpg`);
-            await fs.promises.writeFile(tempImagePath, buffer);
-
-            console.log('[Image] Imagem salva temporariamente:', tempImagePath);
-
             // Se for um comprovante de pagamento
             if (this.isPaymentProof(messageInfo)) {
                 console.log('[Image] Detectado como comprovante de pagamento');
                 try {
-                    // Analisar a imagem com Groq
-                    const analysis = await this.groqServices.analyzeImage(tempImagePath);
+                    // Analisar a imagem com Groq usando o buffer diretamente
+                    const analysis = await this.groqServices.analyzeImage(
+                        buffer, 
+                        messageInfo.mediaData.message.mimetype || 'image/jpeg'
+                    );
                     console.log('[Image] Análise do comprovante:', analysis);
 
                     // Encaminhar para o setor financeiro
@@ -391,14 +383,6 @@ class WhatsAppService {
                         buffer,
                         analysis
                     }, messageInfo.from);
-
-                    // Limpar arquivo temporário
-                    try {
-                        await fs.promises.unlink(tempImagePath);
-                        console.log('[Image] Arquivo temporário removido:', tempImagePath);
-                    } catch (cleanupError) {
-                        console.error('[Image] Erro ao remover arquivo temporário:', cleanupError);
-                    }
 
                     return {
                         success: true,
