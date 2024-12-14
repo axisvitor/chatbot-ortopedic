@@ -103,9 +103,12 @@ class GroqServices {
                 message: error.message,
                 status: error.response?.status,
                 data: error.response?.data,
-                headers: error.response?.headers
+                headers: error.response?.headers,
+                requestHeaders: error.config?.headers,
+                requestUrl: error.config?.url,
+                requestData: error.config?.data
             });
-            throw error;
+            throw new Error(`Erro na transcrição: ${error.message}. Status: ${error.response?.status}. Detalhes: ${JSON.stringify(error.response?.data)}`);
         }
     }
 }

@@ -1,6 +1,7 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const settings = require('../config/settings');
 
 class AudioService {
     constructor(groqServices) {
@@ -45,10 +46,10 @@ class AudioService {
                 filename: 'audio.ogg',
                 contentType: audioMessage.mimetype || 'audio/ogg; codecs=opus'
             });
-            formData.append('model', 'whisper-large-v3-turbo');
-            formData.append('language', 'pt');
-            formData.append('response_format', 'json');
-            formData.append('temperature', 0.0);
+            formData.append('model', settings.GROQ_CONFIG.models.audio);
+            formData.append('language', settings.GROQ_CONFIG.audioConfig.language);
+            formData.append('response_format', settings.GROQ_CONFIG.audioConfig.response_format);
+            formData.append('temperature', settings.GROQ_CONFIG.audioConfig.temperature);
 
             // Transcreve o áudio
             const transcription = await this.groqServices.transcribeAudio(formData);
