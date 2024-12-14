@@ -445,48 +445,13 @@ class WhatsAppService {
                 throw new Error('Dados do áudio ausentes ou inválidos');
             }
 
-            // Download do áudio usando Baileys
-            console.log('[Audio] Iniciando download com Baileys');
-            const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'audio');
-            
-            if (!stream) {
-                console.error('[Audio] Stream não gerado pelo Baileys');
-                throw new Error('Não foi possível iniciar o download do áudio');
-            }
-
-            // Converter stream em buffer
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-                buffer = Buffer.concat([buffer, chunk]);
-            }
-
-            if (!buffer.length) {
-                console.error('[Audio] Buffer vazio após download');
-                throw new Error('Download do áudio falhou');
-            }
-
-            console.log('[Audio] Download concluído:', {
-                tamanhoBuffer: buffer.length,
-                primeirosBytes: buffer.slice(0, 16).toString('hex')
-            });
-
             // Criar instância do AudioService
             const audioService = new AudioService(this.groqServices);
             
             // Preparar a mensagem no formato correto
             const audioData = {
                 message: {
-                    audioMessage: {
-                        ...messageInfo.mediaData.message,
-                        buffer: buffer, // Incluir o buffer baixado
-                        mimetype: messageInfo.mediaData.mimetype,
-                        fileLength: messageInfo.mediaData.fileLength,
-                        seconds: messageInfo.mediaData.seconds,
-                        ptt: messageInfo.mediaData.ptt,
-                        mediaKey: messageInfo.mediaData.mediaKey,
-                        fileEncSha256: messageInfo.mediaData.fileEncSha256,
-                        fileSha256: messageInfo.mediaData.fileSha256
-                    }
+                    audioMessage: messageInfo.mediaData.message
                 }
             };
 

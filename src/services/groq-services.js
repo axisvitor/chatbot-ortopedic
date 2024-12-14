@@ -51,7 +51,7 @@ class GroqServices {
             });
 
             const response = await this.axiosInstance.post(
-                `/v1/chat/completions`,
+                `/openai/v1/chat/completions`,
                 payload
             );
 
@@ -75,11 +75,16 @@ class GroqServices {
         try {
             console.log('🎤 Iniciando transcrição com Groq');
             
+            // Remove o Content-Type padrão para permitir que o FormData defina o boundary
+            const headers = { ...this.axiosInstance.defaults.headers };
+            delete headers['Content-Type'];
+            
             const response = await this.axiosInstance.post(
-                `/v1/audio/transcriptions`,
+                `/openai/v1/audio/transcriptions`,
                 formData,
                 {
                     headers: {
+                        ...headers,
                         ...formData.getHeaders(),
                         'Accept': 'application/json'
                     },
@@ -99,7 +104,8 @@ class GroqServices {
             console.error('❌ Erro na transcrição com Groq:', {
                 message: error.message,
                 status: error.response?.status,
-                data: error.response?.data
+                data: error.response?.data,
+                headers: error.response?.headers
             });
             throw error;
         }

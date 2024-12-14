@@ -1,5 +1,6 @@
 const axios = require('axios');
 const FormData = require('form-data');
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 class AudioService {
     constructor(groqServices) {
@@ -8,22 +9,39 @@ class AudioService {
 
     async processWhatsAppAudio(messageData) {
         try {
-            const audioMessage = messageData?.audioMessage;
-            if (!audioMessage?.url) {
-                throw new Error('URL do áudio não encontrada');
+            const audioMessage = messageData?.message?.audioMessage;
+            if (!audioMessage) {
+                throw new Error('Mensagem de áudio não encontrada');
             }
 
-            // Download do áudio
-            const response = await axios.get(audioMessage.url, {
-                responseType: 'arraybuffer',
-                headers: {
-                    'Authorization': `Bearer ${process.env.WHATSAPP_API_KEY}`
-                }
+            // Download e descriptografia do áudio usando Baileys
+            console.log('📥 Baixando e descriptografando áudio...');
+            const stream = await downloadContentFromMessage(audioMessage, 'audio');
+            
+            if (!stream) {
+                console.error('❌ Stream não gerado pelo Baileys');
+                throw new Error('Não foi possível iniciar o download do áudio');
+            }
+
+            // Converter stream em buffer
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            if (!buffer.length) {
+                console.error('❌ Buffer vazio após download');
+                throw new Error('Download do áudio falhou');
+            }
+
+            console.log('✅ Áudio baixado e descriptografado:', {
+                tamanhoBuffer: buffer.length,
+                primeirosBytes: buffer.slice(0, 16).toString('hex')
             });
 
-            // Prepara o FormData com o áudio
+            // Prepara o FormData com o áudio descriptografado
             const formData = new FormData();
-            formData.append('file', Buffer.from(response.data), {
+            formData.append('file', buffer, {
                 filename: 'audio.ogg',
                 contentType: audioMessage.mimetype || 'audio/ogg; codecs=opus'
             });
