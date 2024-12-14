@@ -213,8 +213,14 @@ class WhatsAppService {
 
     async extractMessageFromWebhook(webhookData) {
         try {
+            console.log('[Webhook] Dados recebidos:', {
+                type: webhookData?.type,
+                hasBody: !!webhookData?.body,
+                messageType: webhookData?.body?.message ? Object.keys(webhookData.body.message)[0] : 'unknown'
+            });
+
             if (!webhookData?.type || !webhookData?.body) {
-                console.log('[Webhook] Dados inválidos:', { 
+                console.log('[Webhook] Dados ausentes ou inválidos:', { 
                     hasType: !!webhookData?.type,
                     hasBody: !!webhookData?.body 
                 });
@@ -237,13 +243,6 @@ class WhatsAppService {
                 return null;
             }
 
-            console.log('[Webhook] Mensagem recebida:', {
-                type: messageInfo.type,
-                from: messageInfo.from,
-                messageId: messageInfo.messageId,
-                pushName: messageInfo.pushName
-            });
-
             // Processar dados específicos do tipo
             if (messageInfo.type === 'image') {
                 const imageMessage = body.message?.imageMessage;
@@ -255,15 +254,35 @@ class WhatsAppService {
                 messageInfo.mediaData = {
                     mimetype: imageMessage.mimetype,
                     messageType: 'image',
-                    message: imageMessage
+                    message: imageMessage,
+                    caption: imageMessage.caption || '',
+                    fileLength: imageMessage.fileLength,
+                    mediaKey: imageMessage.mediaKey,
+                    fileEncSha256: imageMessage.fileEncSha256
                 };
 
-                console.log('[Webhook] Imagem detectada:', {
+                console.log('[Webhook] Imagem processada:', {
                     mimetype: messageInfo.mediaData.mimetype,
-                    hasMediaKey: !!imageMessage.mediaKey,
-                    fileLength: imageMessage.fileLength
+                    hasMediaKey: !!messageInfo.mediaData.mediaKey,
+                    fileLength: messageInfo.mediaData.fileLength,
+                    hasCaption: !!messageInfo.mediaData.caption
+                });
+            } else if (messageInfo.type === 'text') {
+                messageInfo.text = body.message?.conversation || 
+                                 body.message?.extendedTextMessage?.text || '';
+                
+                console.log('[Webhook] Texto processado:', {
+                    length: messageInfo.text.length,
+                    preview: messageInfo.text.substring(0, 50)
                 });
             }
+
+            console.log('[Webhook] Mensagem extraída com sucesso:', {
+                type: messageInfo.type,
+                from: messageInfo.from,
+                messageId: messageInfo.messageId,
+                pushName: messageInfo.pushName
+            });
 
             return messageInfo;
 
@@ -277,14 +296,23 @@ class WhatsAppService {
     }
 
     getMessageType(body) {
-        if (!body?.message) return 'unknown';
+        if (!body?.message) {
+            console.log('[MessageType] Mensagem ausente no body');
+            return 'unknown';
+        }
         
         const message = body.message;
+        const messageTypes = Object.keys(message);
+        
+        console.log('[MessageType] Tipos encontrados:', messageTypes);
 
         if (message.imageMessage) return 'image';
         if (message.audioMessage) return 'audio';
         if (message.conversation || message.extendedTextMessage) return 'text';
+        if (message.documentMessage) return 'document';
+        if (message.videoMessage) return 'video';
         
+        console.log('[MessageType] Tipo não reconhecido');
         return 'unknown';
     }
 
