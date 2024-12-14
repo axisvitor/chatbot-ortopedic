@@ -5,10 +5,8 @@ const settings = require('../config/settings');
 
 class GroqServices {
     constructor() {
-        this.baseUrl = settings.GROQ_CONFIG.apiUrl
         this.models = settings.GROQ_CONFIG.models
         this.axiosInstance = axios.create({
-            baseURL: this.baseUrl,
             headers: {
                 'Authorization': `Bearer ${settings.GROQ_CONFIG.apiKey}`,
                 'Content-Type': 'application/json'
@@ -51,7 +49,7 @@ class GroqServices {
             });
 
             const response = await this.axiosInstance.post(
-                `/v1/chat/completions`,
+                'https://api.groq.com/openai/v1/chat/completions',
                 payload
             );
 
@@ -80,7 +78,7 @@ class GroqServices {
             delete headers['Content-Type'];
             
             const response = await this.axiosInstance.post(
-                `/v1/audio/transcriptions`,
+                'https://api.groq.com/openai/v1/audio/transcriptions',
                 formData,
                 {
                     headers: {

@@ -14,7 +14,6 @@ const OPENAI_CONFIG = {
 // Groq Configuration
 const GROQ_CONFIG = {
     apiKey: validateEnvVar('GROQ_API_KEY'),
-    apiUrl: process.env.GROQ_API_URL || 'https://api.groq.com/openai',  // Incluindo /openai na URL base
     models: {
         vision: 'llama-3.2-90b-vision-preview',
         audio: 'whisper-large-v3-turbo'  // Modelo mais rápido e com melhor custo-benefício
