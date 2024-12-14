@@ -134,12 +134,14 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                 }
                 break;
 
-            case 'audioMessage':
+            case 'audio':
                 console.log('🎵 Processando áudio...', {
                     from: message.from,
                     hasAudioMessage: !!message.audioMessage,
+                    hasBuffer: !!message.audioMessage?.buffer,
                     hasUrl: !!message.audioMessage?.url,
-                    hasMediaKey: !!message.audioMessage?.mediaKey,
+                    fileLength: message.audioMessage?.fileLength,
+                    seconds: message.audioMessage?.seconds,
                     mimetype: message.audioMessage?.mimetype
                 });
                 
@@ -150,6 +152,7 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
 
                     // Processa o áudio com a estrutura completa
                     const transcription = await audioService.processWhatsAppAudio(message);
+                    console.log('📝 Transcrição recebida:', transcription);
                     
                     if (!transcription) {
                         throw new Error('Transcrição vazia');

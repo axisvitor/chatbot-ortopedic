@@ -216,7 +216,7 @@ class WhatsAppService {
             console.log('[Webhook] Dados recebidos:', {
                 type: webhookData?.type,
                 hasBody: !!webhookData?.body,
-                messageType: this._getMessageType(webhookData?.body)
+                hasMsgContent: !!webhookData?.msgContent
             });
 
             if (!webhookData?.body) {
@@ -226,7 +226,6 @@ class WhatsAppService {
             const messageTypes = this._getMessageTypes(webhookData.body);
             console.log('[MessageType] Tipos encontrados:', messageTypes);
 
-            // Se não houver tipos de mensagem, retorna null
             if (!messageTypes.length) {
                 return null;
             }
@@ -237,18 +236,20 @@ class WhatsAppService {
             let extractedMessage = {
                 type: messageType,
                 from: messageContent?.key?.remoteJid?.replace('@s.whatsapp.net', ''),
-                messageId: messageContent?.key?.id
+                messageId: messageContent?.key?.id,
+                pushName: messageContent?.pushName
             };
 
             switch (messageType) {
                 case 'audioMessage':
                     const audioMessage = messageContent?.message?.audioMessage;
-                    console.log('[Webhook] Áudio processado:', {
+                    console.log('[Webhook] Dados do áudio:', {
                         mimetype: audioMessage?.mimetype,
                         hasMediaKey: !!audioMessage?.mediaKey,
                         isPtt: audioMessage?.ptt,
                         hasUrl: !!audioMessage?.url,
-                        type: 'audio'
+                        fileLength: audioMessage?.fileLength,
+                        seconds: audioMessage?.seconds
                     });
 
                     if (!audioMessage) {
@@ -265,15 +266,25 @@ class WhatsAppService {
                             seconds: audioMessage.seconds,
                             ptt: audioMessage.ptt,
                             mediaKey: audioMessage.mediaKey,
-                            fileEncSha256: audioMessage.fileEncSha256
+                            fileEncSha256: audioMessage.fileEncSha256,
+                            fileSha256: audioMessage.fileSha256,
+                            fileLength: audioMessage.fileLength
                         }
                     };
 
                     // Se tiver msgContent em base64, adiciona ao audioMessage
-                    if (messageContent?.msgContent) {
-                        const base64Data = messageContent.msgContent.split('base64,')[1];
-                        if (base64Data) {
-                            extractedMessage.audioMessage.buffer = Buffer.from(base64Data, 'base64');
+                    if (webhookData?.msgContent) {
+                        try {
+                            const base64Match = webhookData.msgContent.match(/^data:audio\/[^;]+;base64,(.+)$/);
+                            if (base64Match) {
+                                const base64Data = base64Match[1];
+                                extractedMessage.audioMessage.buffer = Buffer.from(base64Data, 'base64');
+                                console.log('[Webhook] Buffer extraído do base64:', {
+                                    tamanhoBuffer: extractedMessage.audioMessage.buffer.length
+                                });
+                            }
+                        } catch (error) {
+                            console.error('[Webhook] Erro ao processar base64:', error);
                         }
                     }
                     break;
@@ -305,6 +316,14 @@ class WhatsAppService {
                     };
                     break;
             }
+
+            console.log('[Webhook] Mensagem extraída:', {
+                type: extractedMessage.type,
+                from: extractedMessage.from,
+                hasAudioMessage: extractedMessage.type === 'audio' ? !!extractedMessage.audioMessage : undefined,
+                hasBuffer: extractedMessage.type === 'audio' ? !!extractedMessage.audioMessage?.buffer : undefined,
+                bufferSize: extractedMessage.type === 'audio' ? extractedMessage.audioMessage?.buffer?.length : undefined
+            });
 
             return extractedMessage;
         } catch (error) {

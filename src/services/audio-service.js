@@ -1,5 +1,6 @@
 const fs = require('fs').promises;
 const path = require('path');
+const axios = require('axios');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { spawn } = require('child_process');
 const ffmpeg = require('ffmpeg-static');
@@ -14,37 +15,37 @@ class AudioService {
     async processWhatsAppAudio(messageData) {
         try {
             // Log detalhado da mensagem para debug
-            console.log('📩 Mensagem de áudio recebida:', {
-                temMensagem: !!messageData?.message,
-                temAudio: !!messageData?.message?.audioMessage,
-                campos: messageData?.message?.audioMessage ? Object.keys(messageData.message.audioMessage) : [],
-                temBuffer: !!messageData?.message?.audioMessage?.buffer,
-                tamanhoBuffer: messageData?.message?.audioMessage?.buffer?.length
+            console.log('📩 Processando áudio do WhatsApp:', {
+                temMensagem: !!messageData,
+                temAudio: !!messageData?.audioMessage,
+                campos: messageData?.audioMessage ? Object.keys(messageData.audioMessage) : [],
+                temBuffer: !!messageData?.audioMessage?.buffer,
+                temUrl: !!messageData?.audioMessage?.url,
+                tamanhoBuffer: messageData?.audioMessage?.buffer?.length,
+                fileLength: messageData?.audioMessage?.fileLength
             });
 
-            const audioMessage = messageData?.message?.audioMessage;
+            const audioMessage = messageData?.audioMessage;
             if (!audioMessage) {
                 console.error('❌ Dados do áudio ausentes');
                 throw new Error('Dados do áudio ausentes ou inválidos');
             }
 
-            // Se não tiver buffer, tentar fazer download
-            if (!audioMessage.buffer || !audioMessage.buffer.length) {
-                console.log('🔄 Buffer não encontrado, tentando download...');
+            let audioBuffer = audioMessage.buffer;
+
+            // Se não tiver buffer mas tiver URL, tenta baixar
+            if (!audioBuffer && audioMessage.url) {
+                console.log('🔄 Buffer não encontrado, tentando download da URL...');
                 try {
-                    const stream = await downloadContentFromMessage(audioMessage, 'audio');
-                    if (!stream) {
-                        throw new Error('Stream não gerado');
-                    }
-
-                    let buffer = Buffer.from([]);
-                    for await (const chunk of stream) {
-                        buffer = Buffer.concat([buffer, chunk]);
-                    }
-
-                    audioMessage.buffer = buffer;
+                    const response = await axios.get(audioMessage.url, {
+                        responseType: 'arraybuffer',
+                        headers: {
+                            'Authorization': `Bearer ${process.env.WHATSAPP_API_KEY}`
+                        }
+                    });
+                    audioBuffer = Buffer.from(response.data);
                     console.log('✅ Download concluído:', {
-                        tamanhoBuffer: buffer.length
+                        tamanhoBuffer: audioBuffer.length
                     });
                 } catch (downloadError) {
                     console.error('❌ Erro no download:', downloadError);
@@ -52,30 +53,18 @@ class AudioService {
                 }
             }
 
-            if (!audioMessage.buffer || !audioMessage.buffer.length) {
+            if (!audioBuffer || !audioBuffer.length) {
                 throw new Error('Dados binários do áudio não encontrados');
             }
 
             // Log detalhado dos campos críticos
-            console.log('🎤 Campos do áudio:', {
+            console.log('🎤 Dados do áudio:', {
                 mimetype: audioMessage.mimetype,
                 fileLength: audioMessage.fileLength,
                 seconds: audioMessage.seconds,
                 ptt: audioMessage.ptt,
-                tamanhoBuffer: audioMessage.buffer.length,
-                mediaKey: audioMessage.mediaKey ? 'presente' : 'ausente',
-                fileEncSha256: audioMessage.fileEncSha256 ? 'presente' : 'ausente',
-                fileSha256: audioMessage.fileSha256 ? 'presente' : 'ausente'
+                tamanhoBuffer: audioBuffer.length
             });
-
-            // Verifica campos obrigatórios
-            const camposObrigatorios = ['buffer', 'mimetype'];
-            const camposFaltantes = camposObrigatorios.filter(campo => !audioMessage[campo]);
-            
-            if (camposFaltantes.length > 0) {
-                console.error('❌ Campos obrigatórios ausentes:', camposFaltantes);
-                throw new Error(`Campos obrigatórios ausentes: ${camposFaltantes.join(', ')}`);
-            }
 
             // Verifica o tipo MIME
             if (!this._isValidAudioMimeType(audioMessage.mimetype)) {
@@ -90,7 +79,7 @@ class AudioService {
                 }
 
                 audioPath = path.join(this.tempDir, `audio_${Date.now()}.ogg`);
-                await fs.writeFile(audioPath, audioMessage.buffer);
+                await fs.writeFile(audioPath, audioBuffer);
 
                 console.log('✅ Áudio salvo temporariamente:', {
                     path: audioPath,
