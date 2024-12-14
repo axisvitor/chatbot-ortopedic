@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { existsSync } = require('fs');
 const fsPromises = require('fs/promises');
 const path = require('path');
 const axios = require('axios');
@@ -112,14 +113,9 @@ class AudioService {
     }
 
     async _ensureTempDir() {
-        try {
-            if (!fs.existsSync(this.tempDir)) {
-                await fsPromises.mkdir(this.tempDir, { recursive: true });
-                console.log('✅ Diretório temporário criado:', this.tempDir);
-            }
-        } catch (error) {
-            console.error('❌ Erro ao criar diretório temporário:', error);
-            throw error;
+        if (!existsSync(this.tempDir)) {
+            await fsPromises.mkdir(this.tempDir, { recursive: true });
+            console.log('✅ Diretório temporário criado:', this.tempDir);
         }
     }
 
@@ -128,13 +124,13 @@ class AudioService {
             const mp3Path = audioPath.replace('.ogg', '.mp3');
             
             // Remove o arquivo OGG se existir
-            if (fs.existsSync(audioPath)) {
+            if (existsSync(audioPath)) {
                 await fsPromises.unlink(audioPath);
                 console.log('🗑️ Arquivo OGG removido:', audioPath);
             }
             
             // Remove o arquivo MP3 se existir
-            if (fs.existsSync(mp3Path)) {
+            if (existsSync(mp3Path)) {
                 await fsPromises.unlink(mp3Path);
                 console.log('🗑️ Arquivo MP3 removido:', mp3Path);
             }
