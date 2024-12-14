@@ -18,6 +18,7 @@ class GroqServices {
         try {
             let buffer;
             let base64Data;
+            let detectedFormat;
 
             // Se for uma string base64 ou data URL
             if (typeof imageData === 'string') {
@@ -31,6 +32,7 @@ class GroqServices {
                         throw new Error('Formato de data URL inválido');
                     }
                     base64Data = dataUrlMatch[2];
+                    detectedFormat = `image/${dataUrlMatch[1]}`;
                 } else {
                     // Assume que é base64 puro
                     base64Data = cleanedData;
@@ -59,33 +61,61 @@ class GroqServices {
                 throw new Error('Imagem muito grande. O limite máximo é 4MB');
             }
 
-            // Verifica se o buffer tem os bytes iniciais de uma imagem válida
-            const magicNumbers = {
-                'ffd8ff': 'image/jpeg',  // JPEG
-                '89504e47': 'image/png', // PNG
-                '47494638': 'image/gif', // GIF
-                '52494646': 'image/webp' // WEBP
-            };
+            // Se o formato ainda não foi detectado via data URL, tenta pelos magic numbers
+            if (!detectedFormat) {
+                const magicNumbers = {
+                    'ffd8': 'image/jpeg',     // JPEG pode começar com ffd8
+                    '89504e47': 'image/png',  // PNG
+                    '47494638': 'image/gif',  // GIF
+                    '52494646': 'image/webp', // WEBP
+                    'FFD8FFE0': 'image/jpeg', // JPEG (JFIF)
+                    'FFD8FFE1': 'image/jpeg', // JPEG (Exif)
+                    'FFD8FFE2': 'image/jpeg', // JPEG (SPIFF)
+                    'FFD8FFE3': 'image/jpeg', // JPEG (JPS)
+                    'FFD8FFE8': 'image/jpeg'  // JPEG (SPIFF)
+                };
 
-            const fileHeader = buffer.slice(0, 4).toString('hex').toLowerCase();
-            let detectedFormat = null;
-            
-            for (const [magic, format] of Object.entries(magicNumbers)) {
-                if (fileHeader.startsWith(magic)) {
-                    detectedFormat = format;
-                    break;
+                const fileHeader = buffer.slice(0, 4).toString('hex').toUpperCase();
+                const shortHeader = fileHeader.slice(0, 4);
+                
+                console.log('🔍 Analisando cabeçalho da imagem:', {
+                    header: fileHeader,
+                    shortHeader,
+                    bufferLength: buffer.length,
+                    firstBytes: buffer.slice(0, 16).toString('hex').toUpperCase()
+                });
+                
+                // Primeiro tenta com o cabeçalho completo
+                for (const [magic, format] of Object.entries(magicNumbers)) {
+                    if (fileHeader.startsWith(magic.toUpperCase())) {
+                        detectedFormat = format;
+                        break;
+                    }
+                }
+
+                // Se não encontrou, tenta com o cabeçalho curto (para JPEG)
+                if (!detectedFormat && magicNumbers[shortHeader]) {
+                    detectedFormat = magicNumbers[shortHeader];
+                }
+
+                // Se ainda não encontrou mas começa com FFD8, assume JPEG
+                if (!detectedFormat && shortHeader.startsWith('FFD8')) {
+                    detectedFormat = 'image/jpeg';
                 }
             }
 
             if (!detectedFormat) {
-                console.error('❌ Cabeçalho da imagem:', fileHeader);
+                console.error('❌ Formato não reconhecido:', {
+                    header: buffer.slice(0, 4).toString('hex').toUpperCase(),
+                    bufferStart: buffer.slice(0, 16).toString('hex').toUpperCase()
+                });
                 throw new Error('Formato de imagem não reconhecido ou corrompido');
             }
 
             console.log('🖼️ Processando imagem:', {
                 formato: detectedFormat,
                 tamanhoMB: sizeInMB.toFixed(2),
-                bytesIniciais: fileHeader
+                bufferLength: buffer.length
             });
 
             // Prepara o payload para o Groq
