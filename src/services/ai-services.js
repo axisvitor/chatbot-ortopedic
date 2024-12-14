@@ -117,14 +117,14 @@ class AIServices {
             console.error('❌ Erro no processamento de áudio:', error);
             
             // Mensagens de erro personalizadas
-            if (error.message.includes('Dados insuficientes para descriptografia')) {
-                return "Desculpe, não consegui acessar o áudio. Parece que houve um problema com a criptografia. Por favor, tente enviar novamente ou digite sua mensagem.";
+            if (error.message.includes('Campos obrigatórios ausentes')) {
+                return "Desculpe, não consegui acessar o áudio corretamente. Por favor, tente enviar novamente ou digite sua mensagem.";
             }
-            if (error.message.includes('Não foi possível obter o stream')) {
-                return "Não consegui baixar o áudio. Por favor, tente enviar novamente ou digite sua mensagem.";
+            if (error.message.includes('Stream de áudio não gerado')) {
+                return "Houve um problema ao processar o áudio. Por favor, tente enviar novamente ou digite sua mensagem.";
             }
             if (error.message.includes('formato')) {
-                return "Este formato de áudio não é suportado. Por favor, tente gravar novamente.";
+                return "Este formato de áudio não é suportado. Por favor, tente gravar novamente usando o gravador padrão do WhatsApp.";
             }
             if (error.message.includes('muito grande')) {
                 return "O áudio é muito longo. Por favor, tente uma mensagem mais curta.";
