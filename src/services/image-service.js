@@ -1,6 +1,6 @@
 const fs = require('fs').promises;
 const path = require('path');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const venom = require('venom-bot');
 
 class ImageService {
     constructor(groqServices) {
@@ -15,52 +15,58 @@ class ImageService {
             'image/heic',
             'image/heif'
         ]);
+        
+        // Cria a pasta temp se não existir
+        this.initTempDir();
+    }
+
+    async initTempDir() {
+        try {
+            await fs.access(this.tempDir);
+        } catch (error) {
+            // Se a pasta não existe, cria
+            if (error.code === 'ENOENT') {
+                try {
+                    await fs.mkdir(this.tempDir, { recursive: true });
+                    console.log(`[ImageService] Pasta temp criada em: ${this.tempDir}`);
+                } catch (mkdirError) {
+                    console.error('[ImageService] Erro ao criar pasta temp:', mkdirError);
+                }
+            } else {
+                console.error('[ImageService] Erro ao verificar pasta temp:', error);
+            }
+        }
     }
 
     async processWhatsAppImage(messageInfo) {
         try {
-            if (!messageInfo?.mediaData?.message?.imageMessage) {
+            if (!messageInfo?.mediaData) {
                 throw new Error('Dados da imagem ausentes ou inválidos');
             }
 
-            const imageMessage = messageInfo.mediaData.message.imageMessage;
             console.log('[Image] Recebida mensagem com imagem:', {
-                type: imageMessage.mimetype,
-                size: imageMessage.fileLength,
-                mediaKey: !!imageMessage.mediaKey,
-                fileEncSha256: !!imageMessage.fileEncSha256,
-                url: !!imageMessage.url,
-                directPath: !!imageMessage.directPath
+                type: messageInfo.type,
+                size: messageInfo.size,
+                mimetype: messageInfo.mimetype,
+                hasMedia: !!messageInfo.mediaData
             });
 
-            const requiredFields = ['mediaKey', 'url', 'directPath', 'mimetype', 'fileEncSha256'];
-            const missingFields = requiredFields.filter(field => !imageMessage[field]);
-            
-            if (missingFields.length > 0) {
-                throw new Error(`Campos obrigatórios ausentes: ${missingFields.join(', ')}`);
+            // Verifica o tipo MIME
+            if (!this.validMimeTypes.has(messageInfo.mimetype)) {
+                throw new Error(`Tipo de imagem não suportado: ${messageInfo.mimetype}`);
             }
 
-            console.log('[Image] Iniciando download e descriptografia...');
-            const stream = await downloadContentFromMessage(imageMessage, 'image');
-            
-            if (!stream) {
-                throw new Error('Falha ao iniciar download');
+            // Verifica o tamanho
+            if (messageInfo.size > this.maxImageSize) {
+                throw new Error(`Imagem muito grande (max: ${this.maxImageSize / (1024 * 1024)}MB)`);
             }
 
-            const chunks = [];
-            let totalSize = 0;
+            console.log('[Image] Iniciando download...');
             
-            for await (const chunk of stream) {
-                chunks.push(chunk);
-                totalSize += chunk.length;
-                
-                if (totalSize > this.maxImageSize) {
-                    throw new Error(`Imagem muito grande (max: ${this.maxImageSize / (1024 * 1024)}MB)`);
-                }
-            }
+            // Download da mídia usando Venom
+            const buffer = await messageInfo.mediaData.download();
             
-            const buffer = Buffer.concat(chunks);
-            if (!buffer.length) {
+            if (!buffer || !buffer.length) {
                 throw new Error('Buffer vazio após download');
             }
 
@@ -70,6 +76,7 @@ class ImageService {
                 header: buffer.slice(0, 8).toString('hex')
             });
 
+            // Análise da imagem com Groq
             const analysis = await this.groqServices.analyzeImage(buffer);
             
             return {
@@ -77,10 +84,9 @@ class ImageService {
                 message: 'Imagem processada com sucesso',
                 analysis,
                 metadata: {
-                    type: imageMessage.mimetype,
+                    type: messageInfo.mimetype,
                     size: buffer.length,
-                    width: imageMessage.width,
-                    height: imageMessage.height
+                    filename: messageInfo.filename || 'image'
                 }
             };
 
@@ -94,68 +100,91 @@ class ImageService {
         }
     }
 
-    async isPaymentProof(messageInfo) {
+    async processWhatsAppDocument(messageInfo) {
         try {
-            const paymentKeywords = [
-                'comprovante',
-                'pagamento',
-                'transferência',
-                'pix',
-                'recibo',
-                'boleto',
-                'ted',
-                'doc',
-                'depósito',
-                'bancário'
-            ];
-
-            // Verifica se há palavras-chave na legenda da imagem
-            if (messageInfo.mediaData?.caption) {
-                const caption = messageInfo.mediaData.caption.toLowerCase();
-                if (paymentKeywords.some(keyword => caption.includes(keyword))) {
-                    return true;
-                }
+            if (!messageInfo?.mediaData) {
+                throw new Error('Dados do documento ausentes ou inválidos');
             }
 
-            // Processa a imagem para análise
+            console.log('[Document] Recebido documento:', {
+                type: messageInfo.type,
+                size: messageInfo.size,
+                mimetype: messageInfo.mimetype,
+                filename: messageInfo.filename
+            });
+
+            // Verifica o tamanho (limite de 10MB para documentos)
+            const maxDocSize = 10 * 1024 * 1024;
+            if (messageInfo.size > maxDocSize) {
+                throw new Error(`Documento muito grande (max: ${maxDocSize / (1024 * 1024)}MB)`);
+            }
+
+            console.log('[Document] Iniciando download...');
+            
+            // Download do documento usando Venom
+            const buffer = await messageInfo.mediaData.download();
+            
+            if (!buffer || !buffer.length) {
+                throw new Error('Buffer vazio após download');
+            }
+
+            // Salva o documento temporariamente se necessário
+            const tempPath = path.join(this.tempDir, messageInfo.filename || 'document');
+            await fs.writeFile(tempPath, buffer);
+
+            console.log('[Document] Download concluído:', {
+                size: buffer.length,
+                sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2),
+                path: tempPath
+            });
+
+            return {
+                success: true,
+                message: 'Documento processado com sucesso',
+                metadata: {
+                    type: messageInfo.mimetype,
+                    size: buffer.length,
+                    filename: messageInfo.filename,
+                    path: tempPath
+                }
+            };
+
+        } catch (error) {
+            console.error('[Document] Erro:', error);
+            return {
+                success: false,
+                message: error.message,
+                error: error.stack
+            };
+        }
+    }
+
+    async isPaymentProof(messageInfo) {
+        try {
             const result = await this.processWhatsAppImage(messageInfo);
             if (!result.success) {
                 return false;
             }
 
-            // Verifica se a análise contém palavras-chave relacionadas a pagamento
-            const analysisText = result.analysis.toLowerCase();
-            return paymentKeywords.some(keyword => analysisText.includes(keyword));
+            const analysis = result.analysis.toLowerCase();
+            const paymentKeywords = [
+                'comprovante',
+                'pagamento',
+                'transferência',
+                'pix',
+                'ted',
+                'doc',
+                'depósito',
+                'bancário',
+                'recibo',
+                'valor'
+            ];
 
+            return paymentKeywords.some(keyword => analysis.includes(keyword.toLowerCase()));
         } catch (error) {
-            console.error('[PaymentProof] Erro ao analisar imagem:', error);
+            console.error('[PaymentCheck] Erro:', error);
             return false;
         }
-    }
-
-    _normalizeImageMimeType(mimetype) {
-        if (!mimetype) return 'image/jpeg'; // default
-        return mimetype.split(';')[0].trim().toLowerCase();
-    }
-
-    _isValidImageMimeType(mimetype) {
-        const normalizedType = this._normalizeImageMimeType(mimetype);
-        return this.validMimeTypes.has(normalizedType);
-    }
-
-    _getErrorMessage(error) {
-        const errorMessages = {
-            'Imagem muito grande': 'A imagem é muito grande. Por favor, envie uma imagem menor que 4MB.',
-            'Formato de imagem não suportado': 'Formato de imagem não suportado. Por favor, envie em JPEG, PNG ou WebP.',
-            'Dados da imagem ausentes': 'Não foi possível processar a imagem. Por favor, tente enviar novamente.',
-            'Download da imagem falhou': 'Falha ao baixar a imagem. Por favor, tente novamente.'
-        };
-
-        for (const [key, message] of Object.entries(errorMessages)) {
-            if (error.message.includes(key)) return message;
-        }
-
-        return 'Desculpe, ocorreu um erro ao processar sua imagem. Por favor, tente novamente.';
     }
 }
 

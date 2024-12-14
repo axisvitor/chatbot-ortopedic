@@ -30,6 +30,7 @@
     "openai": "^4.24.1",
     "redis": "^4.6.11",
     "uuid": "^9.0.1",
+    "venom-bot": "^5.0.21",
     "winston": "^3.17.0"
   },
   "devDependencies": {
