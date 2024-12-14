@@ -134,13 +134,13 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                 }
                 break;
 
-            case 'audio':
+            case 'audioMessage':
                 console.log('🎵 Processando áudio...', {
                     from: message.from,
                     hasAudioMessage: !!message.audioMessage,
-                    hasBuffer: !!message.audioMessage?.buffer,
-                    fromType: typeof message.from,
-                    fromLength: message.from?.length
+                    hasUrl: !!message.audioMessage?.url,
+                    hasMediaKey: !!message.audioMessage?.mediaKey,
+                    mimetype: message.audioMessage?.mimetype
                 });
                 
                 try {
@@ -148,13 +148,8 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                         throw new Error('Dados do áudio não encontrados');
                     }
 
-                    // Passamos a mensagem completa com a estrutura esperada pelo Baileys
-                    const transcription = await aiServices.processAudio({
-                        message: {
-                            audioMessage: message.audioMessage
-                        }
-                    });
-                    console.log('📝 Transcrição recebida:', transcription);
+                    // Processa o áudio com a estrutura completa
+                    const transcription = await audioService.processWhatsAppAudio(message);
                     
                     if (!transcription) {
                         throw new Error('Transcrição vazia');

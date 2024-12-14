@@ -216,146 +216,117 @@ class WhatsAppService {
             console.log('[Webhook] Dados recebidos:', {
                 type: webhookData?.type,
                 hasBody: !!webhookData?.body,
-                messageType: webhookData?.body?.message ? Object.keys(webhookData.body.message)[0] : 'unknown',
-                hasMsgContent: !!webhookData?.msgContent
+                messageType: this._getMessageType(webhookData?.body)
             });
 
-            if (!webhookData?.type || !webhookData?.body) {
-                console.log('[Webhook] Dados ausentes ou inválidos:', { 
-                    hasType: !!webhookData?.type,
-                    hasBody: !!webhookData?.body 
-                });
+            if (!webhookData?.body) {
                 return null;
             }
 
-            const { body, msgContent } = webhookData;
-            
-            // Extrair informações básicas
-            const messageInfo = {
-                type: this.getMessageType(body),
-                from: body.key?.remoteJid?.replace('@s.whatsapp.net', ''),
-                messageId: body.key?.id,
-                timestamp: body.messageTimestamp,
-                pushName: body.pushName
+            const messageTypes = this._getMessageTypes(webhookData.body);
+            console.log('[MessageType] Tipos encontrados:', messageTypes);
+
+            // Se não houver tipos de mensagem, retorna null
+            if (!messageTypes.length) {
+                return null;
+            }
+
+            const messageType = messageTypes[0];
+            const messageContent = webhookData.body;
+
+            let extractedMessage = {
+                type: messageType,
+                from: messageContent?.key?.remoteJid?.replace('@s.whatsapp.net', ''),
+                messageId: messageContent?.key?.id
             };
 
-            if (!messageInfo.from) {
-                console.log('[Webhook] Remetente ausente');
-                return null;
-            }
+            switch (messageType) {
+                case 'audioMessage':
+                    const audioMessage = messageContent?.message?.audioMessage;
+                    console.log('[Webhook] Áudio processado:', {
+                        mimetype: audioMessage?.mimetype,
+                        hasMediaKey: !!audioMessage?.mediaKey,
+                        isPtt: audioMessage?.ptt,
+                        hasUrl: !!audioMessage?.url,
+                        type: 'audio'
+                    });
 
-            // Processar dados específicos do tipo
-            if (messageInfo.type === 'image') {
-                const imageMessage = body.message?.imageMessage;
-                if (!imageMessage) {
-                    console.log('[Webhook] Dados da imagem ausentes');
-                    return null;
-                }
-
-                messageInfo.mediaData = {
-                    mimetype: imageMessage.mimetype,
-                    messageType: 'image',
-                    message: imageMessage,
-                    caption: imageMessage.caption || '',
-                    fileLength: imageMessage.fileLength,
-                    mediaKey: imageMessage.mediaKey,
-                    fileEncSha256: imageMessage.fileEncSha256
-                };
-
-                console.log('[Webhook] Imagem processada:', {
-                    mimetype: messageInfo.mediaData.mimetype,
-                    hasMediaKey: !!messageInfo.mediaData.mediaKey,
-                    fileLength: messageInfo.mediaData.fileLength,
-                    hasCaption: !!messageInfo.mediaData.caption
-                });
-            } else if (messageInfo.type === 'text') {
-                messageInfo.text = body.message?.conversation || 
-                                 body.message?.extendedTextMessage?.text || '';
-                
-                console.log('[Webhook] Texto processado:', {
-                    length: messageInfo.text.length,
-                    preview: messageInfo.text.substring(0, 50)
-                });
-            } else if (messageInfo.type === 'audio') {
-                const audioMessage = body.message?.audioMessage;
-                if (!audioMessage) {
-                    console.log('[Webhook] Dados do áudio ausentes');
-                    return null;
-                }
-
-                // Extrair dados do base64 se disponível
-                let audioBuffer = null;
-                if (msgContent && msgContent.startsWith('data:audio/')) {
-                    try {
-                        const base64Data = msgContent.split(',')[1];
-                        audioBuffer = Buffer.from(base64Data, 'base64');
-                        console.log('[Webhook] Áudio extraído do base64:', {
-                            tamanhoBuffer: audioBuffer.length
-                        });
-                    } catch (error) {
-                        console.error('[Webhook] Erro ao decodificar base64:', error);
+                    if (!audioMessage) {
+                        throw new Error('Dados do áudio ausentes');
                     }
-                }
 
-                messageInfo.mediaData = {
-                    mimetype: audioMessage.mimetype,
-                    messageType: 'audio',
-                    message: audioMessage,
-                    buffer: audioBuffer,
-                    fileLength: audioMessage.fileLength,
-                    seconds: audioMessage.seconds,
-                    ptt: audioMessage.ptt,
-                    mediaKey: audioMessage.mediaKey,
-                    fileEncSha256: audioMessage.fileEncSha256,
-                    fileSha256: audioMessage.fileSha256
-                };
+                    // Extrair dados do áudio
+                    extractedMessage = {
+                        ...extractedMessage,
+                        type: 'audio',
+                        audioMessage: {
+                            url: audioMessage.url,
+                            mimetype: audioMessage.mimetype,
+                            seconds: audioMessage.seconds,
+                            ptt: audioMessage.ptt,
+                            mediaKey: audioMessage.mediaKey,
+                            fileEncSha256: audioMessage.fileEncSha256
+                        }
+                    };
 
-                console.log('[Webhook] Áudio processado:', {
-                    mimetype: messageInfo.mediaData.mimetype,
-                    hasMediaKey: !!messageInfo.mediaData.mediaKey,
-                    fileLength: messageInfo.mediaData.fileLength,
-                    hasBuffer: !!messageInfo.mediaData.buffer,
-                    bufferSize: messageInfo.mediaData.buffer?.length
-                });
+                    // Se tiver msgContent em base64, adiciona ao audioMessage
+                    if (messageContent?.msgContent) {
+                        const base64Data = messageContent.msgContent.split('base64,')[1];
+                        if (base64Data) {
+                            extractedMessage.audioMessage.buffer = Buffer.from(base64Data, 'base64');
+                        }
+                    }
+                    break;
+
+                case 'imageMessage':
+                    const imageMessage = messageContent?.message?.imageMessage;
+                    extractedMessage = {
+                        ...extractedMessage,
+                        type: 'image',
+                        imageUrl: imageMessage?.url
+                    };
+                    break;
+
+                case 'conversation':
+                case 'extendedTextMessage':
+                    extractedMessage = {
+                        ...extractedMessage,
+                        type: 'text',
+                        text: messageContent?.message?.conversation || 
+                              messageContent?.message?.extendedTextMessage?.text
+                    };
+                    break;
+
+                case 'documentMessage':
+                    extractedMessage = {
+                        ...extractedMessage,
+                        type: 'document',
+                        documentUrl: messageContent?.message?.documentMessage?.url
+                    };
+                    break;
             }
 
-            console.log('[Webhook] Mensagem extraída com sucesso:', {
-                type: messageInfo.type,
-                from: messageInfo.from,
-                messageId: messageInfo.messageId,
-                pushName: messageInfo.pushName
-            });
-
-            return messageInfo;
-
+            return extractedMessage;
         } catch (error) {
-            console.error('[Webhook] Erro ao extrair mensagem:', {
-                message: error.message,
-                stack: error.stack
-            });
-            return null;
+            console.error('[Webhook] Erro ao extrair mensagem:', error);
+            throw error;
         }
     }
 
-    getMessageType(body) {
-        if (!body?.message) {
-            console.log('[MessageType] Mensagem ausente no body');
-            return 'unknown';
-        }
-        
-        const message = body.message;
-        const messageTypes = Object.keys(message);
-        
-        console.log('[MessageType] Tipos encontrados:', messageTypes);
+    _getMessageTypes(messageData) {
+        const types = [];
+        const message = messageData?.message;
 
-        if (message.imageMessage) return 'image';
-        if (message.audioMessage) return 'audio';
-        if (message.conversation || message.extendedTextMessage) return 'text';
-        if (message.documentMessage) return 'document';
-        if (message.videoMessage) return 'video';
-        
-        console.log('[MessageType] Tipo não reconhecido');
-        return 'unknown';
+        if (!message) return types;
+
+        // Verifica cada tipo possível de mensagem
+        if (message.audioMessage) types.push('audioMessage');
+        if (message.imageMessage) types.push('imageMessage');
+        if (message.conversation) types.push('conversation');
+        if (message.extendedTextMessage) types.push('extendedTextMessage');
+        if (message.documentMessage) types.push('documentMessage');
+
+        return types;
     }
 
     async processWhatsAppImage(messageInfo) {
