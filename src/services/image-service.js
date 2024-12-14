@@ -19,42 +19,34 @@ class ImageService {
 
     async processWhatsAppImage(messageInfo) {
         try {
-            // Verifica se temos uma mensagem com imagem
             if (!messageInfo?.mediaData?.message?.imageMessage) {
                 throw new Error('Dados da imagem ausentes ou inválidos');
             }
 
             const imageMessage = messageInfo.mediaData.message.imageMessage;
-
-            // Log dos metadados da imagem
-            console.log('[Image] Metadados da imagem recebida:', {
+            console.log('[Image] Recebida mensagem com imagem:', {
                 type: imageMessage.mimetype,
                 size: imageMessage.fileLength,
-                mediaKey: imageMessage.mediaKey ? '✓' : '✗',
-                fileEncSha256: imageMessage.fileEncSha256 ? '✓' : '✗',
-                fileSha256: imageMessage.fileSha256 ? '✓' : '✗',
-                mediaKeyTimestamp: imageMessage.mediaKeyTimestamp,
-                url: imageMessage.url ? '✓' : '✗',
-                directPath: imageMessage.directPath ? '✓' : '✗'
+                mediaKey: !!imageMessage.mediaKey,
+                fileEncSha256: !!imageMessage.fileEncSha256,
+                url: !!imageMessage.url,
+                directPath: !!imageMessage.directPath
             });
 
-            // Verifica se temos todos os dados necessários para descriptografia
             const requiredFields = ['mediaKey', 'url', 'directPath', 'mimetype', 'fileEncSha256'];
             const missingFields = requiredFields.filter(field => !imageMessage[field]);
             
             if (missingFields.length > 0) {
-                throw new Error(`Dados de mídia incompletos para descriptografia. Campos faltando: ${missingFields.join(', ')}`);
+                throw new Error(`Campos obrigatórios ausentes: ${missingFields.join(', ')}`);
             }
 
-            // Download e descriptografia da imagem usando Baileys
             console.log('[Image] Iniciando download e descriptografia...');
             const stream = await downloadContentFromMessage(imageMessage, 'image');
             
             if (!stream) {
-                throw new Error('Falha ao iniciar download e descriptografia da imagem');
+                throw new Error('Falha ao iniciar download');
             }
 
-            // Converter stream em buffer
             const chunks = [];
             let totalSize = 0;
             
@@ -63,54 +55,41 @@ class ImageService {
                 totalSize += chunk.length;
                 
                 if (totalSize > this.maxImageSize) {
-                    throw new Error(`Imagem excede o tamanho máximo permitido de ${this.maxImageSize / (1024 * 1024)}MB`);
+                    throw new Error(`Imagem muito grande (max: ${this.maxImageSize / (1024 * 1024)}MB)`);
                 }
             }
             
             const buffer = Buffer.concat(chunks);
-
             if (!buffer.length) {
-                throw new Error('Download e descriptografia falharam - buffer vazio');
+                throw new Error('Buffer vazio após download');
             }
 
-            // Verifica os primeiros bytes do buffer descriptografado
-            const fileHeader = buffer.slice(0, 8).toString('hex').toUpperCase();
-            console.log('[Image] Imagem descriptografada:', {
-                bufferSize: buffer.length,
-                sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2) + 'MB',
-                chunks: chunks.length,
-                mimeType: imageMessage.mimetype,
-                fileHeader: fileHeader
+            console.log('[Image] Download concluído:', {
+                size: buffer.length,
+                sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2),
+                header: buffer.slice(0, 8).toString('hex')
             });
 
-            // Analisar a imagem descriptografada com Groq
             const analysis = await this.groqServices.analyzeImage(buffer);
             
             return {
                 success: true,
-                message: 'Imagem descriptografada e analisada com sucesso',
+                message: 'Imagem processada com sucesso',
                 analysis,
                 metadata: {
                     type: imageMessage.mimetype,
                     size: buffer.length,
                     width: imageMessage.width,
-                    height: imageMessage.height,
-                    fileHeader: fileHeader
+                    height: imageMessage.height
                 }
             };
 
         } catch (error) {
-            console.error('[Image] Erro ao processar imagem:', {
-                message: error.message,
-                type: error.type,
-                code: error.code,
-                stack: error.stack
-            });
-
+            console.error('[Image] Erro:', error);
             return {
                 success: false,
-                message: this._getErrorMessage(error),
-                error: error.message
+                message: error.message,
+                error: error.stack
             };
         }
     }
