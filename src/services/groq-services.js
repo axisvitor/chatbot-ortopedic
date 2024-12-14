@@ -286,6 +286,75 @@ class GroqServices {
         }
     }
 
+    async analyzeImage(imagePath) {
+        try {
+            console.log('🖼️ Analisando imagem:', { path: imagePath });
+
+            // Verificar se o arquivo existe
+            if (!fs.existsSync(imagePath)) {
+                throw new Error(`Arquivo de imagem não encontrado: ${imagePath}`);
+            }
+
+            // Ler o arquivo e converter para base64
+            const imageBuffer = await fs.promises.readFile(imagePath);
+            const base64Image = imageBuffer.toString('base64');
+
+            // Determinar o tipo MIME baseado na extensão
+            const mimeType = path.extname(imagePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
+            
+            const response = await this.axiosInstance.post(
+                `${this.baseUrl}/chat/completions`,
+                {
+                    model: this.models.vision,
+                    messages: [
+                        {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: "Analise este comprovante de pagamento e extraia as seguintes informações:\n" +
+                                          "1. Valor da transação\n" +
+                                          "2. Banco ou instituição financeira\n" +
+                                          "3. Tipo de transação (PIX, TED, DOC, etc)\n" +
+                                          "4. Data e hora da transação\n" +
+                                          "5. Nome do beneficiário (se disponível)\n" +
+                                          "6. Outros detalhes relevantes\n\n" +
+                                          "Forneça uma análise detalhada e organizada."
+                                },
+                                {
+                                    type: "image_url",
+                                    image_url: {
+                                        url: `data:${mimeType};base64,${base64Image}`
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    temperature: 0.5,
+                    max_tokens: 1024
+                }
+            );
+
+            console.log('✅ Análise do comprovante concluída com sucesso');
+            return response.data.choices[0].message.content;
+        } catch (error) {
+            console.error('❌ Erro ao analisar comprovante:', {
+                message: error.message,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data
+            });
+
+            if (error.response?.status === 413) {
+                return "A imagem é muito grande. Por favor, envie uma imagem menor (máximo 50MB).";
+            }
+            if (error.response?.status === 415) {
+                return "Formato de imagem não suportado. Por favor, envie apenas imagens JPG ou PNG.";
+            }
+            return "Desculpe, não foi possível analisar o comprovante no momento. Por favor, tente novamente em alguns instantes.";
+        }
+    }
+
     _cleanupTempFile(filePath) {
         try {
             if (fs.existsSync(filePath)) {
@@ -327,55 +396,6 @@ class GroqServices {
         const isWebmOpus = cleanMimeType === 'audio/webm' && mimetype.toLowerCase().includes('codecs=opus');
         
         return isSupported || isOggOpus || isWebmOpus;
-    }
-
-    async analyzeImage(imageUrl) {
-        try {
-            console.log('🖼️ Analisando imagem:', { url: imageUrl });
-            
-            const response = await this.axiosInstance.post(
-                `${this.baseUrl}/chat/completions`,
-                {
-                    model: this.models.vision,
-                    messages: [
-                        {
-                            role: "user",
-                            content: [
-                                {
-                                    type: "text",
-                                    text: "Analise este comprovante de pagamento e extraia as seguintes informações:\n" +
-                                          "1. Valor da transação\n" +
-                                          "2. Banco ou instituição financeira\n" +
-                                          "3. Tipo de transação (PIX, TED, DOC, etc)\n" +
-                                          "4. Data e hora da transação\n" +
-                                          "5. Nome do beneficiário (se disponível)\n" +
-                                          "6. Outros detalhes relevantes\n\n" +
-                                          "Forneça uma análise detalhada e organizada."
-                                },
-                                {
-                                    type: "image_url",
-                                    image_url: imageUrl
-                                }
-                            ]
-                        }
-                    ],
-                    temperature: 0.5,
-                    max_tokens: 1024
-                }
-            );
-
-            console.log('✅ Análise do comprovante concluída com sucesso');
-            return response.data.choices[0].message.content;
-        } catch (error) {
-            console.error('❌ Erro ao analisar comprovante:', error);
-            if (error.response?.status === 413) {
-                return "A imagem é muito grande. Por favor, envie uma imagem menor (máximo 50MB).";
-            }
-            if (error.response?.status === 415) {
-                return "Formato de imagem não suportado. Por favor, envie apenas imagens JPG ou PNG.";
-            }
-            return "Desculpe, não foi possível analisar o comprovante no momento. Por favor, tente novamente em alguns instantes.";
-        }
     }
 }
 

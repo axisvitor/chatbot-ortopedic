@@ -334,13 +334,52 @@ class WhatsAppService {
 
             console.log('[Image] Download concluído, tamanho:', buffer.length);
 
+            // Salvar a imagem temporariamente
+            const tempDir = path.join(__dirname, '../../temp');
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+
+            const tempImagePath = path.join(tempDir, `payment_${Date.now()}.jpg`);
+            await fs.promises.writeFile(tempImagePath, buffer);
+
+            console.log('[Image] Imagem salva temporariamente:', tempImagePath);
+
             // Se for um comprovante de pagamento
             if (this.isPaymentProof(messageInfo)) {
                 console.log('[Image] Detectado como comprovante de pagamento');
-                return this.forwardPaymentProof({
-                    ...messageInfo.mediaData,
-                    buffer
-                }, messageInfo.from);
+                try {
+                    // Analisar a imagem com Groq
+                    const analysis = await this.groqServices.analyzeImage(tempImagePath);
+                    console.log('[Image] Análise do comprovante:', analysis);
+
+                    // Encaminhar para o setor financeiro
+                    await this.forwardPaymentProof({
+                        ...messageInfo.mediaData,
+                        buffer,
+                        analysis
+                    }, messageInfo.from);
+
+                    // Limpar arquivo temporário
+                    try {
+                        await fs.promises.unlink(tempImagePath);
+                        console.log('[Image] Arquivo temporário removido:', tempImagePath);
+                    } catch (cleanupError) {
+                        console.error('[Image] Erro ao remover arquivo temporário:', cleanupError);
+                    }
+
+                    return {
+                        success: true,
+                        message: 'Comprovante recebido e analisado com sucesso',
+                        analysis
+                    };
+                } catch (analysisError) {
+                    console.error('[Image] Erro ao analisar comprovante:', analysisError);
+                    return {
+                        success: false,
+                        message: 'Desculpe, não foi possível analisar o comprovante no momento. Por favor, tente novamente em alguns instantes.'
+                    };
+                }
             }
 
             return {
