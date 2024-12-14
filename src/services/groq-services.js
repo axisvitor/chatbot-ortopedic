@@ -286,6 +286,49 @@ class GroqServices {
         }
     }
 
+    _cleanupTempFile(filePath) {
+        try {
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+                console.log('🗑️ Arquivo temporário removido:', { path: filePath });
+            }
+        } catch (error) {
+            console.error('⚠️ Erro ao remover arquivo temporário:', error);
+        }
+    }
+
+    _isValidAudioMimeType(mimetype) {
+        if (!mimetype) return false;
+
+        // Limpa o mimetype removendo parâmetros adicionais
+        const cleanMimeType = mimetype.split(';')[0].trim().toLowerCase();
+        
+        const validTypes = [
+            'audio/opus',
+            'audio/ogg',
+            'audio/mpeg',
+            'audio/mp3',
+            'audio/wav',
+            'audio/x-m4a',
+            'audio/aac',
+            'audio/mp4',
+            'audio/webm',
+            'audio/amr',
+            'audio/x-wav'
+        ];
+
+        // Verifica se o formato base é suportado
+        const isSupported = validTypes.includes(cleanMimeType);
+        
+        // Se for audio/ogg com codec opus, também é suportado
+        const isOggOpus = cleanMimeType === 'audio/ogg' && mimetype.toLowerCase().includes('codecs=opus');
+        
+        // Se for audio/webm com codec opus, também é suportado
+        const isWebmOpus = cleanMimeType === 'audio/webm' && mimetype.toLowerCase().includes('codecs=opus');
+        
+        return isSupported || isOggOpus || isWebmOpus;
+    }
+
     async analyzeImage(imagePath) {
         try {
             console.log('🖼️ Analisando imagem:', { path: imagePath });
@@ -353,49 +396,6 @@ class GroqServices {
             }
             return "Desculpe, não foi possível analisar o comprovante no momento. Por favor, tente novamente em alguns instantes.";
         }
-    }
-
-    _cleanupTempFile(filePath) {
-        try {
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-                console.log('🗑️ Arquivo temporário removido:', { path: filePath });
-            }
-        } catch (error) {
-            console.error('⚠️ Erro ao remover arquivo temporário:', error);
-        }
-    }
-
-    _isValidAudioMimeType(mimetype) {
-        if (!mimetype) return false;
-
-        // Limpa o mimetype removendo parâmetros adicionais
-        const cleanMimeType = mimetype.split(';')[0].trim().toLowerCase();
-        
-        const validTypes = [
-            'audio/opus',
-            'audio/ogg',
-            'audio/mpeg',
-            'audio/mp3',
-            'audio/wav',
-            'audio/x-m4a',
-            'audio/aac',
-            'audio/mp4',
-            'audio/webm',
-            'audio/amr',
-            'audio/x-wav'
-        ];
-
-        // Verifica se o formato base é suportado
-        const isSupported = validTypes.includes(cleanMimeType);
-        
-        // Se for audio/ogg com codec opus, também é suportado
-        const isOggOpus = cleanMimeType === 'audio/ogg' && mimetype.toLowerCase().includes('codecs=opus');
-        
-        // Se for audio/webm com codec opus, também é suportado
-        const isWebmOpus = cleanMimeType === 'audio/webm' && mimetype.toLowerCase().includes('codecs=opus');
-        
-        return isSupported || isOggOpus || isWebmOpus;
     }
 }
 

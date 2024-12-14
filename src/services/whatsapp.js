@@ -401,6 +401,76 @@ class WhatsAppService {
         }
     }
 
+    async processWhatsAppAudio(messageInfo) {
+        try {
+            if (!messageInfo?.mediaData?.message) {
+                throw new Error('Dados do áudio ausentes ou inválidos');
+            }
+
+            console.log('[Audio] Iniciando processamento do áudio');
+            
+            // Download do áudio
+            const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'audio');
+            let buffer = Buffer.from([]);
+            
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            console.log('[Audio] Download concluído, tamanho:', buffer.length);
+
+            // Salvar o áudio temporariamente
+            const tempDir = path.join(__dirname, '../../temp');
+            if (!fs.existsSync(tempDir)) {
+                await fs.mkdir(tempDir, { recursive: true });
+            }
+
+            const tempAudioPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
+            await fs.writeFile(tempAudioPath, buffer);
+
+            console.log('[Audio] Áudio salvo temporariamente:', tempAudioPath);
+
+            try {
+                // Transcrever o áudio usando o Groq
+                const transcription = await this.groqServices.processWhatsAppAudio(messageInfo);
+                console.log('[Audio] Transcrição concluída:', transcription);
+
+                // Limpar arquivo temporário
+                try {
+                    await fs.unlink(tempAudioPath);
+                    console.log('[Audio] Arquivo temporário removido:', tempAudioPath);
+                } catch (cleanupError) {
+                    console.error('[Audio] Erro ao remover arquivo temporário:', cleanupError);
+                }
+
+                return {
+                    success: true,
+                    message: 'Áudio processado com sucesso',
+                    transcription
+                };
+
+            } catch (transcriptionError) {
+                console.error('[Audio] Erro na transcrição:', transcriptionError);
+                return {
+                    success: false,
+                    message: 'Desculpe, não foi possível transcrever o áudio no momento. Por favor, tente novamente em alguns instantes.'
+                };
+            }
+
+        } catch (error) {
+            console.error('[Audio] Erro ao processar áudio:', {
+                message: error.message,
+                type: error.type,
+                code: error.code
+            });
+
+            return {
+                success: false,
+                message: 'Desculpe, não foi possível processar seu áudio. Por favor, tente novamente.'
+            };
+        }
+    }
+
     isPaymentProof(messageInfo) {
         // Implementar lógica para detectar se é um comprovante
         // Por exemplo, verificar se a conversa está em um contexto de pagamento
@@ -445,13 +515,29 @@ class WhatsAppService {
                         mediaHandled: true
                     };
                 }
+            } else if (message.message.audioMessage) {
+                console.log('[Media] Processando mensagem de áudio');
+                const extractedMessage = await this.extractMessageFromWebhook(message);
+                
+                if (extractedMessage) {
+                    const result = await this.processWhatsAppAudio(extractedMessage);
+                    return {
+                        text: result.success ? 
+                            `Transcrição do áudio: "${result.transcription}"` : 
+                            result.message,
+                        mediaHandled: true
+                    };
+                }
             }
 
-            // Processa outros tipos de mídia normalmente...
-            return await super.handleMediaMessage(message);
+            // Se não for nenhum tipo específico, retorna null para processamento padrão
+            return null;
         } catch (error) {
-            console.error(' Erro ao processar mídia:', error);
-            throw error;
+            console.error('[Media] Erro ao processar mídia:', error);
+            return {
+                text: "Desculpe, ocorreu um erro ao processar sua mídia. Por favor, tente novamente.",
+                mediaHandled: false
+            };
         }
     }
 
