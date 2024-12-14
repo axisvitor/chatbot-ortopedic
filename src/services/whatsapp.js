@@ -213,29 +213,23 @@ class WhatsAppService {
 
     async extractMessageFromWebhook(webhookData) {
         try {
-            if (!webhookData?.data?.[0]) {
-                console.log('[Webhook] Dados ausentes ou inválidos');
+            if (!webhookData?.type || !webhookData?.body) {
+                console.log('[Webhook] Dados inválidos:', { 
+                    hasType: !!webhookData?.type,
+                    hasBody: !!webhookData?.body 
+                });
                 return null;
             }
 
-            const messageData = webhookData.data[0];
-            const { messages, contacts } = messageData;
-
-            if (!messages?.[0]) {
-                console.log('[Webhook] Mensagem ausente no webhook');
-                return null;
-            }
-
-            const message = messages[0];
-            const contact = contacts?.[0] || {};
+            const { body } = webhookData;
             
             // Extrair informações básicas
             const messageInfo = {
-                type: this.getMessageType(message),
-                from: message.from,
-                messageId: message.id,
-                timestamp: message.timestamp,
-                contactName: contact.profile?.name || ''
+                type: this.getMessageType(body),
+                from: body.key?.remoteJid?.replace('@s.whatsapp.net', ''),
+                messageId: body.key?.id,
+                timestamp: body.messageTimestamp,
+                pushName: body.pushName
             };
 
             if (!messageInfo.from) {
@@ -246,12 +240,13 @@ class WhatsAppService {
             console.log('[Webhook] Mensagem recebida:', {
                 type: messageInfo.type,
                 from: messageInfo.from,
-                messageId: messageInfo.messageId
+                messageId: messageInfo.messageId,
+                pushName: messageInfo.pushName
             });
 
             // Processar dados específicos do tipo
             if (messageInfo.type === 'image') {
-                const imageMessage = message.image || message.message?.imageMessage;
+                const imageMessage = body.message?.imageMessage;
                 if (!imageMessage) {
                     console.log('[Webhook] Dados da imagem ausentes');
                     return null;
@@ -265,7 +260,8 @@ class WhatsAppService {
 
                 console.log('[Webhook] Imagem detectada:', {
                     mimetype: messageInfo.mediaData.mimetype,
-                    hasMediaKey: !!imageMessage.mediaKey
+                    hasMediaKey: !!imageMessage.mediaKey,
+                    fileLength: imageMessage.fileLength
                 });
             }
 
@@ -280,15 +276,14 @@ class WhatsAppService {
         }
     }
 
-    getMessageType(message) {
-        if (!message) return 'unknown';
+    getMessageType(body) {
+        if (!body?.message) return 'unknown';
         
-        // Verificar a estrutura da mensagem
-        const messageContent = message.message || message;
+        const message = body.message;
 
-        if (messageContent.imageMessage || messageContent.image) return 'image';
-        if (messageContent.audioMessage || messageContent.audio) return 'audio';
-        if (messageContent.conversation || messageContent.extendedTextMessage?.text) return 'text';
+        if (message.imageMessage) return 'image';
+        if (message.audioMessage) return 'audio';
+        if (message.conversation || message.extendedTextMessage) return 'text';
         
         return 'unknown';
     }
