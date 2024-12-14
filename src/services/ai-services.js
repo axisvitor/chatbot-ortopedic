@@ -1,17 +1,19 @@
 'use strict';
 
 const { OpenAI } = require('openai');
-const { OPENAI_CONFIG } = require('../config/settings');
+const settings = require('../config/settings');
 const businessHours = require('./business-hours');
 
 class AIServices {
     constructor(trackingService, whatsappService, groqServices, redisStore) {
-        this.openai = new OpenAI({ apiKey: OPENAI_CONFIG.apiKey });
+        this.openai = new OpenAI({
+            apiKey: settings.OPENAI_CONFIG.apiKey
+        });
         this.trackingService = trackingService;
         this.whatsappService = whatsappService;
         this.groqServices = groqServices;
         this.redisStore = redisStore;
-        this.assistantId = OPENAI_CONFIG.assistantId;
+        this.assistantId = settings.OPENAI_CONFIG.assistantId;
     }
 
     async createThread() {

@@ -1,9 +1,9 @@
 const moment = require('moment-timezone');
-const { BUSINESS_HOURS } = require('../config/settings');
+const settings = require('../config/settings');
 
 class BusinessHoursService {
     constructor() {
-        this.config = BUSINESS_HOURS;
+        this.config = settings.BUSINESS_HOURS;
     }
 
     getCurrentTime() {

@@ -14,7 +14,7 @@ class WhatsAppService {
         this.config = settings.WHATSAPP_CONFIG;
         this.financialDeptNumber = process.env.FINANCIAL_DEPT_NUMBER;
         this.httpClient = httpClient;
-        this.groqServices = new GroqServices(); // Instanciar corretamente
+        this.groqServices = new GroqServices();
         
         // Garantir que a URL base tenha o protocolo https://
         if (!this.config.apiUrl.startsWith('http://') && !this.config.apiUrl.startsWith('https://')) {
