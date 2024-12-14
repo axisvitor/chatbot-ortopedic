@@ -56,10 +56,42 @@ const TRACKING_CONFIG = {
     carriers: ['correios', 'jadlog', 'fedex', 'dhl']
 };
 
+// Business Hours Configuration
+const BUSINESS_HOURS = {
+    timezone: 'America/Sao_Paulo',
+    schedule: {
+        monday: { start: '08:00', end: '18:00' },
+        tuesday: { start: '08:00', end: '18:00' },
+        wednesday: { start: '08:00', end: '18:00' },
+        thursday: { start: '08:00', end: '18:00' },
+        friday: { start: '08:00', end: '18:00' },
+        saturday: { start: '08:00', end: '12:00' },
+        sunday: { start: null, end: null }
+    },
+    holidays: [], // Lista de feriados no formato 'YYYY-MM-DD'
+    autoReply: {
+        humanSupportNeeded: "Entendo que você precisa de atendimento humano. No momento estamos fora do horário comercial (seg-sex 8h-18h, sáb 8h-12h). Sua solicitação será encaminhada para nossa equipe e retornaremos no próximo horário de atendimento. Enquanto isso, posso tentar ajudar com outras questões?",
+        financialDepartment: "Sua solicitação será encaminhada para nosso setor financeiro. Durante o horário comercial (seg-sex 8h-18h, sáb 8h-12h), nossa equipe entrará em contato. Há mais alguma coisa em que eu possa ajudar?"
+    },
+    departments: {
+        financial: {
+            email: 'financeiro@empresa.com',
+            phone: '11999999999',
+            paymentProofs: {
+                saveDir: './uploads/payments',
+                allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+                maxSize: 5 * 1024 * 1024, // 5MB
+                webhook: 'https://api.empresa.com/financial/payment-proofs'
+            }
+        }
+    }
+};
+
 module.exports = {
     OPENAI_CONFIG,
     GROQ_CONFIG,
     REDIS_CONFIG,
     WHATSAPP_CONFIG,
-    TRACKING_CONFIG
+    TRACKING_CONFIG,
+    BUSINESS_HOURS
 };

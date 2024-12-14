@@ -1,12 +1,21 @@
 const { WHATSAPP_CONFIG } = require('../config/settings');
 const httpClient = require('../utils/http-client');
 const { URL } = require('url');
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const businessHours = require('./business-hours');
+const fs = require('fs').promises;
+const path = require('path');
+const axios = require('axios');
+const FormData = require('form-data');
+const { WHATSAPP_CONFIG, BUSINESS_HOURS } = require('../config/settings');
+const groqServices = require('./groq-services'); // Import the Groq services
 
 class WhatsAppService {
     constructor() {
         this.config = WHATSAPP_CONFIG;
         this.financialDeptNumber = process.env.FINANCIAL_DEPT_NUMBER;
         this.httpClient = httpClient;
+        this.groqServices = groqServices; // Initialize the Groq services
         
         // Garantir que a URL base tenha o protocolo https://
         if (!this.config.apiUrl.startsWith('http://') && !this.config.apiUrl.startsWith('https://')) {
@@ -272,6 +281,176 @@ class WhatsAppService {
             };
         } catch (error) {
             console.error('❌ Erro ao extrair mensagem do webhook:', error);
+            throw error;
+        }
+    }
+
+    async handleIncomingMessage(message) {
+        try {
+            const autoReply = businessHours.getAutoReplyMessage();
+            if (autoReply) {
+                await this.sendMessage(message.key.remoteJid, autoReply);
+                return;
+            }
+
+            // Processar a mensagem normalmente
+            const extractedMessage = this.extractMessageFromWebhook(message);
+            if (!extractedMessage) {
+                console.warn('⚠️ Mensagem não reconhecida:', message);
+                return;
+            }
+
+            // Resto do código de processamento da mensagem...
+        } catch (error) {
+            console.error('❌ Erro ao processar mensagem:', error);
+            throw error;
+        }
+    }
+
+    async handleMediaMessage(message) {
+        try {
+            if (message.message.imageMessage) {
+                const imageMessage = message.message.imageMessage;
+                const isPaymentProof = await this._isPaymentProof(imageMessage);
+                
+                if (isPaymentProof) {
+                    // Baixa e encaminha o comprovante
+                    const mediaData = await this.downloadMedia(message);
+                    await this.forwardPaymentProof(mediaData, message.key.remoteJid);
+                    return {
+                        text: "Recebi seu comprovante de pagamento! Ele será analisado pelo setor financeiro durante o horário comercial. Posso ajudar com mais alguma coisa?",
+                        mediaHandled: true
+                    };
+                }
+            }
+
+            // Processa outros tipos de mídia normalmente...
+            return await super.handleMediaMessage(message);
+        } catch (error) {
+            console.error('❌ Erro ao processar mídia:', error);
+            throw error;
+        }
+    }
+
+    async _isPaymentProof(imageMessage) {
+        try {
+            // Palavras-chave no texto da imagem ou na mensagem
+            const paymentKeywords = [
+                'comprovante',
+                'pagamento',
+                'transferência',
+                'pix',
+                'recibo',
+                'boleto'
+            ];
+
+            // Verifica se há palavras-chave na legenda da imagem
+            if (imageMessage.caption) {
+                const caption = imageMessage.caption.toLowerCase();
+                if (paymentKeywords.some(keyword => caption.includes(keyword))) {
+                    return true;
+                }
+            }
+
+            // Analisa a imagem com Vision
+            const imageUrl = imageMessage.url;
+            if (imageUrl) {
+                console.log('🔍 Analisando imagem com Vision:', { url: imageUrl });
+                const analysis = await this.groqServices.analyzeImage(imageUrl);
+                
+                // Se a análise contiver palavras-chave relacionadas a pagamento
+                const analysisText = analysis.toLowerCase();
+                const isPaymentProof = paymentKeywords.some(keyword => 
+                    analysisText.includes(keyword)
+                );
+
+                console.log('✅ Análise Vision concluída:', {
+                    isPaymentProof,
+                    analysisExcerpt: analysis.substring(0, 100) + '...'
+                });
+
+                return isPaymentProof;
+            }
+
+            return false;
+        } catch (error) {
+            console.error('❌ Erro ao analisar imagem:', error);
+            // Em caso de erro, assume que não é comprovante
+            return false;
+        }
+    }
+
+    async forwardPaymentProof(mediaData, userContact) {
+        try {
+            const config = BUSINESS_HOURS.departments.financial.paymentProofs;
+            
+            // Validar tipo de arquivo
+            if (!config.allowedTypes.includes(mediaData.mimetype)) {
+                throw new Error(`Tipo de arquivo não permitido: ${mediaData.mimetype}`);
+            }
+
+            // Validar tamanho
+            if (mediaData.size > config.maxSize) {
+                throw new Error(`Arquivo muito grande: ${mediaData.size} bytes`);
+            }
+
+            // Criar diretório se não existir
+            await fs.mkdir(config.saveDir, { recursive: true });
+
+            // Salvar arquivo localmente
+            const extension = mediaData.mimetype.split('/')[1];
+            const fileName = `payment_proof_${Date.now()}_${userContact.replace(/[^0-9]/g, '')}.${extension}`;
+            const filePath = path.join(config.saveDir, fileName);
+            
+            await fs.writeFile(filePath, mediaData.buffer);
+
+            // Analisar o comprovante com Vision
+            const imageUrl = mediaData.url || `file://${filePath}`;
+            const analysis = await this.groqServices.analyzeImage(imageUrl);
+
+            // Estruturar dados do comprovante
+            const proofData = {
+                timestamp: new Date().toISOString(),
+                userContact,
+                mediaType: mediaData.mimetype,
+                mediaSize: mediaData.size,
+                filePath,
+                fileName,
+                analysis // Inclui a análise do Vision
+            };
+
+            // Log do encaminhamento
+            console.log('💰 Comprovante processado:', {
+                ...proofData,
+                analysisExcerpt: analysis.substring(0, 100) + '...',
+                buffer: '<<binary data>>'
+            });
+
+            // Enviar para webhook se configurado
+            if (config.webhook) {
+                const formData = new FormData();
+                Object.entries(proofData).forEach(([key, value]) => {
+                    formData.append(key, value);
+                });
+                formData.append('file', mediaData.buffer, fileName);
+
+                await axios.post(config.webhook, formData, {
+                    headers: {
+                        ...formData.getHeaders(),
+                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                    }
+                });
+
+                console.log('📤 Comprovante enviado para webhook');
+            }
+
+            // Enviar resposta com detalhes da análise
+            const responseMessage = `✅ Comprovante recebido e analisado:\n\n${analysis}\n\nO comprovante será verificado pelo setor financeiro. Posso ajudar com mais alguma coisa?`;
+            await this.sendTextMessage(userContact, responseMessage);
+
+            return true;
+        } catch (error) {
+            console.error('❌ Erro ao encaminhar comprovante:', error);
             throw error;
         }
     }

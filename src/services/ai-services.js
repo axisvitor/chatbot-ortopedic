@@ -2,6 +2,7 @@
 
 const { OpenAI } = require('openai');
 const { OPENAI_CONFIG } = require('../config/settings');
+const businessHours = require('./business-hours');
 
 class AIServices {
     constructor(trackingService, whatsappService, groqServices, redisStore) {
@@ -19,6 +20,29 @@ class AIServices {
 
     async processMessage(message, context = {}) {
         try {
+            // Verifica se é uma solicitação que requer atendimento humano
+            if (await this._requiresHumanSupport(message)) {
+                const humanSupportMessage = businessHours.getHumanSupportMessage();
+                if (humanSupportMessage) {
+                    return {
+                        text: humanSupportMessage,
+                        requiresHuman: true
+                    };
+                }
+            }
+
+            // Verifica se é uma questão financeira
+            if (await this._isFinancialIssue(message)) {
+                const financialResponse = await businessHours.forwardToFinancial(
+                    message.text,
+                    message.key.remoteJid
+                );
+                return {
+                    text: financialResponse,
+                    forwardedToFinancial: true
+                };
+            }
+
             if (!message || message.trim() === '') {
                 throw new Error('Mensagem vazia ou inválida');
             }
@@ -95,6 +119,39 @@ class AIServices {
             console.error('Error processing message:', error);
             throw error;
         }
+    }
+
+    async _requiresHumanSupport(message) {
+        // Implementar lógica para detectar se precisa de humano
+        // Por exemplo, verificar palavras-chave ou intenção do usuário
+        const humanSupportKeywords = [
+            'falar com humano',
+            'atendente',
+            'pessoa real',
+            'funcionário',
+            'gerente'
+        ];
+
+        return humanSupportKeywords.some(keyword => 
+            message.text.toLowerCase().includes(keyword)
+        );
+    }
+
+    async _isFinancialIssue(message) {
+        // Implementar lógica para detectar questões financeiras
+        const financialKeywords = [
+            'pagamento',
+            'boleto',
+            'fatura',
+            'cobrança',
+            'financeiro',
+            'reembolso',
+            'estorno'
+        ];
+
+        return financialKeywords.some(keyword => 
+            message.text.toLowerCase().includes(keyword)
+        );
     }
 
     async checkOrderStatus(trackingNumber, cpf) {
