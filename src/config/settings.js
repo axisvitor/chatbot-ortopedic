@@ -14,10 +14,15 @@ const OPENAI_CONFIG = {
 // Groq Configuration
 const GROQ_CONFIG = {
     apiKey: validateEnvVar('GROQ_API_KEY'),
-    apiUrl: process.env.GROQ_API_URL || 'https://api.groq.com',
+    apiUrl: process.env.GROQ_API_URL || 'https://api.groq.com/openai',
     models: {
         vision: 'llama-3.2-90b-vision-preview',
-        audio: 'whisper-large-v3-turbo'
+        audio: 'whisper-large-v3-turbo'  // Modelo mais rápido e com melhor custo-benefício
+    },
+    audioConfig: {
+        language: 'pt',  // Português
+        response_format: 'json',
+        temperature: 0.0  // Mais preciso
     }
 };
 

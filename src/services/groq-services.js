@@ -5,15 +5,15 @@ const settings = require('../config/settings');
 
 class GroqServices {
     constructor() {
-        this.baseUrl = settings.GROQ_CONFIG.apiUrl;
-        this.models = settings.GROQ_CONFIG.models;
+        this.baseUrl = settings.GROQ_CONFIG.apiUrl
+        this.models = settings.GROQ_CONFIG.models
         this.axiosInstance = axios.create({
             baseURL: this.baseUrl,
             headers: {
                 'Authorization': `Bearer ${settings.GROQ_CONFIG.apiKey}`,
                 'Content-Type': 'application/json'
             }
-        });
+        })
     }
 
     async analyzeImage(imagePath) {
@@ -51,7 +51,7 @@ class GroqServices {
             });
 
             const response = await this.axiosInstance.post(
-                `/chat/completions`,
+                `/v1/chat/completions`,
                 payload
             );
 

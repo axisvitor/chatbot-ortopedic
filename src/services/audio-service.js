@@ -27,8 +27,10 @@ class AudioService {
                 filename: 'audio.ogg',
                 contentType: audioMessage.mimetype || 'audio/ogg; codecs=opus'
             });
-            formData.append('model', 'whisper-1');
+            formData.append('model', 'whisper-large-v3-turbo');
             formData.append('language', 'pt');
+            formData.append('response_format', 'json');
+            formData.append('temperature', 0.0);
 
             // Transcreve o áudio
             const transcription = await this.groqServices.transcribeAudio(formData);
