@@ -14,17 +14,26 @@ class ImageService {
                 throw new Error('Dados da imagem ausentes ou inválidos');
             }
 
-            const mimeType = messageInfo.mediaData.message.mimetype || 'image/jpeg';
+            const imageMessage = messageInfo.mediaData.message;
+            const mimeType = imageMessage.mimetype || 'image/jpeg';
 
             console.log('[Image] Iniciando processamento da imagem:', {
                 type: mimeType,
-                size: messageInfo.mediaData.message.fileLength
+                size: imageMessage.fileLength,
+                mediaKey: imageMessage.mediaKey ? '✓' : '✗',
+                fileEncSha256: imageMessage.fileEncSha256 ? '✓' : '✗'
             });
             
             // Download e descriptografia da imagem usando Baileys
-            const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'image');
-            let buffer = Buffer.from([]);
+            console.log('[Image] Baixando e descriptografando imagem...');
+            const stream = await downloadContentFromMessage(imageMessage, 'image');
             
+            if (!stream) {
+                throw new Error('Não foi possível iniciar o download da imagem');
+            }
+
+            // Converter stream em buffer
+            let buffer = Buffer.from([]);
             for await (const chunk of stream) {
                 buffer = Buffer.concat([buffer, chunk]);
             }
@@ -34,7 +43,10 @@ class ImageService {
                 throw new Error('Download da imagem falhou');
             }
 
-            console.log('[Image] Download concluído, tamanho:', buffer.length);
+            console.log('[Image] Download e descriptografia concluídos:', {
+                bufferSize: buffer.length,
+                primeirosBytes: buffer.slice(0, 16).toString('hex')
+            });
 
             // Analisar a imagem com Groq
             const analysis = await this.groqServices.analyzeImage(buffer, mimeType);
@@ -51,7 +63,8 @@ class ImageService {
                 message: error.message,
                 type: error.type,
                 code: error.code,
-                stack: error.stack
+                stack: error.stack,
+                mediaData: messageInfo?.mediaData
             });
 
             return {

@@ -22,34 +22,45 @@ class GroqServices {
                 primeirosBytes: imageBuffer.slice(0, 16).toString('hex')
             });
 
-            // Prepara o FormData com a imagem
-            const formData = new FormData();
-            formData.append('file', imageBuffer, {
-                filename: 'image.jpg',
-                contentType: mimeType
-            });
-            formData.append('model', this.models.vision);
+            // Converte o buffer para base64
+            const base64Image = imageBuffer.toString('base64');
 
-            // Remove o Content-Type padrão para permitir que o FormData defina o boundary
-            const headers = { ...this.axiosInstance.defaults.headers };
-            delete headers['Content-Type'];
+            const payload = {
+                model: this.models.vision,
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: "Analise esta imagem e me diga se é um comprovante de pagamento. Se for, extraia as informações relevantes como valor, data, tipo de pagamento (PIX, TED, etc), banco origem e destino. Se não for um comprovante, apenas diga que não é um comprovante de pagamento."
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${mimeType};base64,${base64Image}`
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 1000
+            };
 
             console.log('📤 Enviando request para Groq:', {
                 model: this.models.vision,
-                imageSize: imageBuffer.length
+                imageSize: base64Image.length,
+                endpoint: '/openai/v1/chat/completions'
             });
 
             const response = await this.axiosInstance.post(
                 'https://api.groq.com/openai/v1/chat/completions',
-                formData,
+                payload,
                 {
                     headers: {
-                        ...headers,
-                        ...formData.getHeaders(),
+                        'Content-Type': 'application/json',
                         'Accept': 'application/json'
-                    },
-                    maxBodyLength: Infinity,
-                    maxContentLength: Infinity
+                    }
                 }
             );
 
