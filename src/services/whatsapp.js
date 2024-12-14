@@ -211,77 +211,119 @@ class WhatsAppService {
         }
     }
 
-    async extractMessageFromWebhook(body) {
+    async extractMessageFromWebhook(webhookData) {
         try {
-            console.log(' Webhook recebido (raw):', body);
-            console.log(' Estrutura do body:', {
-                hasBody: !!body,
-                hasBodyBody: !!body?.body,
-                hasMessage: !!body?.body?.message,
-                hasKey: !!body?.body?.key,
-                hasRemoteJid: !!body?.body?.key?.remoteJid,
-                hasAudioMessage: !!body?.body?.message?.audioMessage
-            });
+            const messageData = webhookData?.data?.[0];
+            if (!messageData) {
+                console.log('[Webhook] Dados da mensagem ausentes');
+                return null;
+            }
+
+            const { messages, contacts } = messageData;
+            if (!messages?.[0]) {
+                console.log('[Webhook] Mensagem ausente no webhook');
+                return null;
+            }
+
+            const message = messages[0];
+            const contact = contacts?.[0] || {};
             
-            if (!body || !body.body || !body.body.message || !body.body.key) {
-                throw new Error('Invalid webhook format');
-            }
+            // Extrair informações básicas
+            const messageInfo = {
+                type: this.getMessageType(message),
+                from: message.from,
+                messageId: message.id,
+                timestamp: message.timestamp,
+                contactName: contact.profile?.name || '',
+            };
 
-            const { message, key } = body.body;
-            console.log(' Key do webhook:', key);
-            console.log(' Message do webhook:', {
-                hasText: !!message.extendedTextMessage || !!message.conversation,
-                hasImage: !!message.imageMessage,
-                hasAudio: !!message.audioMessage,
-                audioDetails: message.audioMessage ? {
-                    mediaKey: !!message.audioMessage.mediaKey,
-                    url: !!message.audioMessage.url,
-                    mimetype: message.audioMessage.mimetype
-                } : null
+            console.log('[Webhook] Mensagem recebida:', {
+                type: messageInfo.type,
+                from: messageInfo.from,
+                messageId: messageInfo.messageId
             });
 
-            // Processa o número do remetente
-            const remoteJid = key.remoteJid;
-            if (!remoteJid) {
-                throw new Error('RemoteJid não encontrado no webhook');
+            // Processar baseado no tipo
+            if (messageInfo.type === 'image') {
+                const imageMessage = message.image || message.message?.imageMessage;
+                if (!imageMessage) {
+                    console.log('[Webhook] Dados da imagem ausentes');
+                    return null;
+                }
+
+                messageInfo.mediaData = {
+                    mimetype: imageMessage.mimetype,
+                    messageType: 'image',
+                    message: imageMessage
+                };
+
+                console.log('[Webhook] Imagem detectada:', {
+                    mimetype: messageInfo.mediaData.mimetype,
+                    hasMediaKey: !!imageMessage.mediaKey
+                });
             }
 
-            // Remove o sufixo do WhatsApp e qualquer caractere não numérico
-            const from = remoteJid
-                .replace('@s.whatsapp.net', '')
-                .replace(/\D/g, '');
+            return messageInfo;
+        } catch (error) {
+            console.error('[Webhook] Erro ao extrair mensagem:', {
+                message: error.message,
+                stack: error.stack
+            });
+            return null;
+        }
+    }
+
+    async processWhatsAppImage(messageInfo) {
+        try {
+            if (!messageInfo?.mediaData?.message) {
+                throw new Error('Dados da imagem ausentes ou inválidos');
+            }
+
+            console.log('[Image] Iniciando processamento da imagem');
             
-            if (!from) {
-                throw new Error('Número do remetente inválido após processamento');
+            // Download da imagem
+            const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'image');
+            let buffer = Buffer.from([]);
+            
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // Adiciona o código do país se não estiver presente
-            const formattedNumber = from.startsWith('55') ? from : `55${from}`;
+            console.log('[Image] Download concluído, tamanho:', buffer.length);
 
-            // Determina o tipo de mensagem e extrai o conteúdo
-            let type = 'text';
-            let content = {};
-
-            if (message.imageMessage) {
-                type = 'image';
-                content.imageUrl = message.imageMessage;
-            } else if (message.audioMessage) {
-                type = 'audio';
-                content.audioMessage = message.audioMessage;
-            } else {
-                content.text = message.extendedTextMessage?.text || message.conversation || '';
+            // Se for um comprovante de pagamento
+            if (this.isPaymentProof(messageInfo)) {
+                console.log('[Image] Detectado como comprovante de pagamento');
+                return this.forwardPaymentProof({
+                    ...messageInfo.mediaData,
+                    buffer
+                }, messageInfo.from);
             }
 
             return {
-                type,
-                from: formattedNumber,
-                messageId: key.id,
-                ...content
+                success: true,
+                message: 'Imagem recebida com sucesso'
             };
+
         } catch (error) {
-            console.error(' Erro ao extrair mensagem do webhook:', error);
-            throw error;
+            console.error('[Image] Erro ao processar imagem:', {
+                message: error.message,
+                type: error.type,
+                code: error.code
+            });
+
+            return {
+                success: false,
+                message: 'Desculpe, não foi possível processar sua imagem. Por favor, tente novamente.'
+            };
         }
+    }
+
+    isPaymentProof(messageInfo) {
+        // Implementar lógica para detectar se é um comprovante
+        // Por exemplo, verificar se a conversa está em um contexto de pagamento
+        // ou se o usuário indicou que está enviando um comprovante
+        return true; // Por enquanto, tratamos todas as imagens como comprovantes
     }
 
     async handleIncomingMessage(message) {
@@ -293,7 +335,7 @@ class WhatsAppService {
             }
 
             // Processar a mensagem normalmente
-            const extractedMessage = this.extractMessageFromWebhook(message);
+            const extractedMessage = await this.extractMessageFromWebhook(message);
             if (!extractedMessage) {
                 console.warn(' Mensagem não reconhecida:', message);
                 return;
