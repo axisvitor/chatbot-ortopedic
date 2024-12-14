@@ -17,11 +17,15 @@ class AudioService {
             console.log('📩 Mensagem de áudio recebida:', {
                 temMensagem: !!messageData?.message,
                 temAudio: !!messageData?.message?.audioMessage,
-                campos: messageData?.message?.audioMessage ? Object.keys(messageData.message.audioMessage) : []
+                campos: messageData?.message?.audioMessage ? Object.keys(messageData.message.audioMessage) : [],
+                estruturaCompleta: JSON.stringify(messageData, null, 2)
             });
 
             const audioMessage = messageData?.message?.audioMessage;
             if (!audioMessage) {
+                console.error('❌ Dados do áudio ausentes:', {
+                    messageData: JSON.stringify(messageData, null, 2)
+                });
                 throw new Error('Dados do áudio ausentes ou inválidos');
             }
 
@@ -33,7 +37,9 @@ class AudioService {
                 ptt: audioMessage.ptt,
                 mediaKey: audioMessage.mediaKey ? 'presente' : 'ausente',
                 fileEncSha256: audioMessage.fileEncSha256 ? 'presente' : 'ausente',
-                fileSha256: audioMessage.fileSha256 ? 'presente' : 'ausente'
+                fileSha256: audioMessage.fileSha256 ? 'presente' : 'ausente',
+                url: audioMessage.url ? 'presente' : 'ausente',
+                directPath: audioMessage.directPath ? 'presente' : 'ausente'
             });
 
             // Verifica campos obrigatórios
@@ -41,6 +47,10 @@ class AudioService {
             const camposFaltantes = camposObrigatorios.filter(campo => !audioMessage[campo]);
             
             if (camposFaltantes.length > 0) {
+                console.error('❌ Campos obrigatórios ausentes:', {
+                    faltando: camposFaltantes,
+                    audioMessage: JSON.stringify(audioMessage, null, 2)
+                });
                 throw new Error(`Campos obrigatórios ausentes: ${camposFaltantes.join(', ')}`);
             }
 

@@ -437,71 +437,22 @@ class WhatsAppService {
                 throw new Error('Dados do áudio ausentes ou inválidos');
             }
 
-            const audioMessage = messageInfo.mediaData.message;
-            
-            // Validar campos obrigatórios
-            const requiredFields = ['mediaKey', 'fileEncSha256', 'fileSha256', 'mimetype'];
-            const missingFields = requiredFields.filter(field => !audioMessage[field]);
-            
-            if (missingFields.length > 0) {
-                console.error('[Audio] Campos obrigatórios ausentes:', missingFields);
-                throw new Error(`Campos obrigatórios ausentes: ${missingFields.join(', ')}`);
-            }
-
-            console.log('[Audio] Iniciando processamento do áudio:', {
-                mimetype: audioMessage.mimetype,
-                fileLength: audioMessage.fileLength,
-                seconds: audioMessage.seconds,
-                ptt: audioMessage.ptt
-            });
-            
-            // Download do áudio
-            const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'audio');
-            let buffer = Buffer.from([]);
-            
-            for await (const chunk of stream) {
-                buffer = Buffer.concat([buffer, chunk]);
-            }
-
-            console.log('[Audio] Download concluído, tamanho:', buffer.length);
-
-            // Salvar o áudio temporariamente
-            const tempDir = path.join(__dirname, '../../temp');
-            if (!fs.existsSync(tempDir)) {
-                await fs.mkdir(tempDir, { recursive: true });
-            }
-
-            const tempAudioPath = path.join(tempDir, `audio_${Date.now()}.ogg`);
-            await fs.writeFile(tempAudioPath, buffer);
-
-            console.log('[Audio] Áudio salvo temporariamente:', tempAudioPath);
-
-            try {
-                // Transcrever o áudio usando o Groq
-                const transcription = await this.groqServices.processWhatsAppAudio(messageInfo);
-                console.log('[Audio] Transcrição concluída:', transcription);
-
-                // Limpar arquivo temporário
-                try {
-                    await fs.unlink(tempAudioPath);
-                    console.log('[Audio] Arquivo temporário removido:', tempAudioPath);
-                } catch (cleanupError) {
-                    console.error('[Audio] Erro ao remover arquivo temporário:', cleanupError);
+            // Preparar a mensagem no formato esperado pelo AudioService
+            const formattedMessage = {
+                message: {
+                    audioMessage: messageInfo.mediaData.message
                 }
+            };
 
-                return {
-                    success: true,
-                    message: 'Áudio processado com sucesso',
-                    transcription
-                };
+            // Processar o áudio usando o AudioService
+            const audioService = new AudioService(this.groqServices);
+            const result = await audioService.processWhatsAppAudio(formattedMessage);
 
-            } catch (transcriptionError) {
-                console.error('[Audio] Erro na transcrição:', transcriptionError);
-                return {
-                    success: false,
-                    message: 'Desculpe, não foi possível transcrever o áudio no momento. Por favor, tente novamente em alguns instantes.'
-                };
-            }
+            return {
+                success: true,
+                message: 'Áudio processado com sucesso',
+                transcription: result
+            };
 
         } catch (error) {
             console.error('[Audio] Erro ao processar áudio:', {
