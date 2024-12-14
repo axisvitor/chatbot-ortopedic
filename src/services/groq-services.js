@@ -14,12 +14,14 @@ class GroqServices {
         })
     }
 
-    async analyzeImage(imagePath) {
+    async analyzeImage(imageBuffer) {
         try {
-            console.log('🖼️ Analisando imagem:', { path: imagePath });
+            console.log('🖼️ Analisando imagem:', { 
+                bufferSize: imageBuffer.length,
+                primeirosBytes: imageBuffer.slice(0, 16).toString('hex')
+            });
 
-            // Converte a imagem para base64
-            const imageBuffer = await fs.readFile(imagePath);
+            // Converte o buffer para base64
             const base64Image = imageBuffer.toString('base64');
 
             const payload = {
@@ -65,7 +67,7 @@ class GroqServices {
                 status: error.response?.status,
                 data: error.response?.data
             });
-            return "Desculpe, não foi possível analisar o comprovante no momento. Por favor, tente novamente em alguns instantes.";
+            throw error;
         }
     }
 

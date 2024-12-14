@@ -14,9 +14,12 @@ class ImageService {
                 throw new Error('Dados da imagem ausentes ou inválidos');
             }
 
-            console.log('[Image] Iniciando processamento da imagem');
+            console.log('[Image] Iniciando processamento da imagem:', {
+                type: messageInfo.mediaData.message.mimetype,
+                size: messageInfo.mediaData.message.fileLength
+            });
             
-            // Download da imagem
+            // Download e descriptografia da imagem usando Baileys
             const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'image');
             let buffer = Buffer.from([]);
             
@@ -24,44 +27,29 @@ class ImageService {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
+            if (!buffer.length) {
+                console.error('❌ Buffer vazio após download');
+                throw new Error('Download da imagem falhou');
+            }
+
             console.log('[Image] Download concluído, tamanho:', buffer.length);
 
-            // Salvar a imagem temporariamente
-            if (!fs.existsSync(this.tempDir)) {
-                await fs.mkdir(this.tempDir, { recursive: true });
-            }
+            // Analisar a imagem com Groq
+            const analysis = await this.groqServices.analyzeImage(buffer);
+            console.log('[Image] Análise concluída:', analysis);
 
-            const tempImagePath = path.join(this.tempDir, `image_${Date.now()}.jpg`);
-            await fs.writeFile(tempImagePath, buffer);
-
-            console.log('[Image] Imagem salva temporariamente:', tempImagePath);
-
-            try {
-                // Analisar a imagem com Groq
-                const analysis = await this.groqServices.analyzeImage(tempImagePath);
-                console.log('[Image] Análise concluída:', analysis);
-
-                return {
-                    success: true,
-                    message: 'Imagem analisada com sucesso',
-                    analysis
-                };
-                
-            } finally {
-                // Limpar arquivo temporário
-                try {
-                    await fs.unlink(tempImagePath);
-                    console.log('[Image] Arquivo temporário removido:', tempImagePath);
-                } catch (cleanupError) {
-                    console.error('[Image] Erro ao remover arquivo temporário:', cleanupError);
-                }
-            }
+            return {
+                success: true,
+                message: 'Imagem analisada com sucesso',
+                analysis
+            };
 
         } catch (error) {
             console.error('[Image] Erro ao processar imagem:', {
                 message: error.message,
                 type: error.type,
-                code: error.code
+                code: error.code,
+                stack: error.stack
             });
 
             return {
