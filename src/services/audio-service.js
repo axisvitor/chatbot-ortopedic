@@ -1,5 +1,5 @@
 const fs = require('fs');
-const fsp = fs.promises;
+const fsPromises = require('fs/promises');
 const path = require('path');
 const axios = require('axios');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
@@ -79,18 +79,18 @@ class AudioService {
 
                 // Salva o áudio temporariamente
                 audioPath = path.join(this.tempDir, `audio_${Date.now()}.ogg`);
-                await fsp.writeFile(audioPath, audioBuffer);
+                await fsPromises.writeFile(audioPath, audioBuffer);
 
                 console.log('✅ Áudio salvo temporariamente:', {
                     path: audioPath,
-                    tamanho: (await fsp.stat(audioPath)).size
+                    tamanho: (await fsPromises.stat(audioPath)).size
                 });
 
                 // Converte para MP3
                 const mp3Path = await this._convertToMp3(audioPath);
                 console.log('✅ Áudio convertido para MP3:', {
                     path: mp3Path,
-                    tamanho: (await fsp.stat(mp3Path)).size
+                    tamanho: (await fsPromises.stat(mp3Path)).size
                 });
                 
                 // Transcreve o áudio
@@ -114,7 +114,7 @@ class AudioService {
     async _ensureTempDir() {
         try {
             if (!fs.existsSync(this.tempDir)) {
-                await fsp.mkdir(this.tempDir, { recursive: true });
+                await fsPromises.mkdir(this.tempDir, { recursive: true });
                 console.log('✅ Diretório temporário criado:', this.tempDir);
             }
         } catch (error) {
@@ -129,13 +129,13 @@ class AudioService {
             
             // Remove o arquivo OGG se existir
             if (fs.existsSync(audioPath)) {
-                await fsp.unlink(audioPath);
+                await fsPromises.unlink(audioPath);
                 console.log('🗑️ Arquivo OGG removido:', audioPath);
             }
             
             // Remove o arquivo MP3 se existir
             if (fs.existsSync(mp3Path)) {
-                await fsp.unlink(mp3Path);
+                await fsPromises.unlink(mp3Path);
                 console.log('🗑️ Arquivo MP3 removido:', mp3Path);
             }
         } catch (error) {
@@ -200,7 +200,7 @@ class AudioService {
             console.log('🎯 Iniciando transcrição com Groq:', audioPath);
             
             // Lê o arquivo MP3
-            const audioData = await fsp.readFile(audioPath);
+            const audioData = await fsPromises.readFile(audioPath);
             
             // Transcreve usando o Groq
             const formData = new FormData();
