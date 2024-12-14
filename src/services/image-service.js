@@ -24,23 +24,13 @@ class ImageService {
             }
 
             const imageMessage = messageInfo.mediaData.message;
-            const mimeType = this._normalizeImageMimeType(imageMessage.mimetype);
-
-            if (!this._isValidImageMimeType(mimeType)) {
-                throw new Error(`Formato de imagem não suportado: ${mimeType}`);
-            }
 
             console.log('[Image] Iniciando processamento da imagem:', {
-                type: mimeType,
+                type: imageMessage.mimetype,
                 size: imageMessage.fileLength,
                 mediaKey: imageMessage.mediaKey ? '✓' : '✗',
                 fileEncSha256: imageMessage.fileEncSha256 ? '✓' : '✗'
             });
-
-            // Verificar tamanho antes do download
-            if (imageMessage.fileLength > this.maxImageSize) {
-                throw new Error(`Imagem muito grande. Tamanho máximo permitido: ${this.maxImageSize / (1024 * 1024)}MB`);
-            }
             
             // Download e descriptografia da imagem usando Baileys
             console.log('[Image] Baixando e descriptografando imagem...');
@@ -50,15 +40,9 @@ class ImageService {
                 throw new Error('Não foi possível iniciar o download da imagem');
             }
 
-            // Converter stream em buffer com verificação de tamanho
+            // Converter stream em buffer
             let buffer = Buffer.from([]);
-            let totalSize = 0;
-            
             for await (const chunk of stream) {
-                totalSize += chunk.length;
-                if (totalSize > this.maxImageSize) {
-                    throw new Error(`Imagem excede o tamanho máximo permitido de ${this.maxImageSize / (1024 * 1024)}MB`);
-                }
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
@@ -68,24 +52,17 @@ class ImageService {
 
             console.log('[Image] Download e descriptografia concluídos:', {
                 bufferSize: buffer.length,
-                sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2) + 'MB',
-                mimeType,
-                primeirosBytes: buffer.slice(0, 16).toString('hex')
+                sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2) + 'MB'
             });
 
             // Analisar a imagem com Groq
             const analysis = await this.groqServices.analyzeImage(buffer);
-            console.log('[Image] Análise concluída:', {
-                success: true,
-                analysisLength: analysis?.length || 0
-            });
-
+            
             return {
                 success: true,
                 message: 'Imagem analisada com sucesso',
                 analysis,
                 metadata: {
-                    mimeType,
                     size: buffer.length,
                     sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2)
                 }

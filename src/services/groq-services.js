@@ -17,46 +17,73 @@ class GroqServices {
     async analyzeImage(imageData) {
         try {
             let buffer;
-            let mimeType;
-            let base64Image;
+            let base64Data;
 
-            // Handle base64 data URL input
-            if (typeof imageData === 'string' && imageData.startsWith('data:')) {
-                const matches = imageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-                if (!matches || matches.length !== 3) {
-                    throw new Error('Invalid base64 data URL format');
+            // Se for uma string data URL
+            if (typeof imageData === 'string') {
+                // Remove espaços em branco e quebras de linha
+                const cleanedData = imageData.trim().replace(/[\n\r]/g, '');
+                
+                // Verifica se é uma data URL válida
+                const dataUrlMatch = cleanedData.match(/^data:image\/([a-zA-Z]+);base64,(.+)$/);
+                if (!dataUrlMatch) {
+                    throw new Error('Formato de data URL inválido');
                 }
-                mimeType = matches[1];
-                base64Image = matches[2];
-                buffer = Buffer.from(base64Image, 'base64');
-            } 
-            // Handle buffer input
+
+                // Extrai apenas o base64, removendo o prefixo
+                base64Data = dataUrlMatch[2];
+                
+                // Converte para buffer
+                try {
+                    buffer = Buffer.from(base64Data, 'base64');
+                } catch (e) {
+                    throw new Error('Base64 inválido: não foi possível converter para buffer');
+                }
+            }
+            // Se já for um Buffer
             else if (Buffer.isBuffer(imageData)) {
                 buffer = imageData;
-                mimeType = this.detectMimeType(buffer);
-                base64Image = buffer.toString('base64');
-            } 
+                base64Data = buffer.toString('base64');
+            }
             else {
-                throw new Error('Formato de imagem inválido. Esperado: Buffer de imagem decodificada ou data URL base64');
+                throw new Error('Formato de imagem inválido. Esperado: Buffer ou data URL base64');
             }
 
-            // Check size limits
+            // Verifica o tamanho do buffer
             const sizeInMB = buffer.length / (1024 * 1024);
             if (sizeInMB > 4) {
-                throw new Error('Imagem muito grande. O limite máximo é 4MB para imagens base64');
+                throw new Error('Imagem muito grande. O limite máximo é 4MB');
             }
+
+            // Verifica se o buffer tem os bytes iniciais de uma imagem válida
+            const magicNumbers = {
+                'ffd8ff': 'image/jpeg',  // JPEG
+                '89504e47': 'image/png', // PNG
+                '47494638': 'image/gif', // GIF
+                '52494646': 'image/webp' // WEBP
+            };
+
+            const fileHeader = buffer.slice(0, 4).toString('hex').toLowerCase();
+            let detectedFormat = null;
             
-            console.log('🖼️ Processando buffer de imagem:', { 
-                bufferSize: buffer.length,
-                sizeInMB: sizeInMB.toFixed(2) + 'MB',
-                mimeType,
-                primeirosBytes: buffer.slice(0, 8).toString('hex')
+            for (const [magic, format] of Object.entries(magicNumbers)) {
+                if (fileHeader.startsWith(magic)) {
+                    detectedFormat = format;
+                    break;
+                }
+            }
+
+            if (!detectedFormat) {
+                throw new Error('Formato de imagem não reconhecido. Por favor, use JPEG, PNG, GIF ou WEBP');
+            }
+
+            console.log('🖼️ Processando imagem:', {
+                formato: detectedFormat,
+                tamanhoMB: sizeInMB.toFixed(2),
+                bytesIniciais: fileHeader
             });
 
-            if (!base64Image || base64Image.length === 0) {
-                throw new Error('Falha ao processar imagem base64');
-            }
-
+            // Prepara o payload para o Groq
             const payload = {
                 model: this.models.vision,
                 messages: [
@@ -70,7 +97,7 @@ class GroqServices {
                             {
                                 type: "image_url",
                                 image_url: {
-                                    url: `data:${mimeType};base64,${base64Image}`
+                                    url: `data:${detectedFormat};base64,${base64Data}`
                                 }
                             }
                         ]
@@ -80,14 +107,8 @@ class GroqServices {
                 temperature: 0.7
             };
 
-            console.log('📤 Enviando request para Groq:', {
-                model: this.models.vision,
-                messageTypes: payload.messages[0].content.map(c => c.type),
-                imageSize: base64Image.length
-            });
-
             const response = await this.axiosInstance.post(
-                'https://api.groq.com/v1/chat/completions',
+                'https://api.groq.com/openai/v1/chat/completions',
                 payload
             );
 
@@ -95,43 +116,15 @@ class GroqServices {
                 throw new Error('Resposta inválida do Groq');
             }
 
-            console.log('📥 Resposta recebida de Groq:', {
-                status: response.status,
-                messageLength: response.data.choices[0].message.content.length
-            });
-
             return response.data.choices[0].message.content;
 
         } catch (error) {
             console.error('❌ Erro ao analisar imagem:', {
-                message: error.message,
-                status: error.response?.status,
-                data: error.response?.data
+                erro: error.message,
+                stack: error.stack
             });
             throw error;
         }
-    }
-
-    detectMimeType(buffer) {
-        // Detecta o tipo MIME baseado nos primeiros bytes
-        const header = buffer.slice(0, 4).toString('hex').toLowerCase();
-        
-        // Magic numbers comuns
-        if (header.startsWith('ffd8ff')) {
-            return 'image/jpeg';
-        }
-        if (header.startsWith('89504e47')) {
-            return 'image/png';
-        }
-        if (header.startsWith('47494638')) {
-            return 'image/gif';
-        }
-        if (header.startsWith('424d')) {
-            return 'image/bmp';
-        }
-        
-        // Default para JPEG se não conseguir detectar
-        return 'image/jpeg';
     }
 
     async transcribeAudio(formData) {
