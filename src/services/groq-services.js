@@ -1,5 +1,5 @@
 const axios = require('axios');
-const fs = require('fs');
+const fs = require('fs').promises;
 const FormData = require('form-data');
 const settings = require('../config/settings');
 
@@ -20,7 +20,7 @@ class GroqServices {
             console.log('🖼️ Analisando imagem:', { path: imagePath });
 
             // Converte a imagem para base64
-            const imageBuffer = await fs.promises.readFile(imagePath);
+            const imageBuffer = await fs.readFile(imagePath);
             const base64Image = imageBuffer.toString('base64');
 
             const payload = {
