@@ -26,16 +26,33 @@ class GroqServices {
                     mimeType
                 });
             } else if (typeof imageData === 'string') {
-                // Se for um caminho de arquivo, lê o arquivo e converte para base64
-                const buffer = await fs.readFile(imageData);
-                base64Image = buffer.toString('base64');
-                console.log('🖼️ Processando arquivo de imagem:', { 
-                    path: imageData,
-                    bufferSize: buffer.length,
-                    mimeType
-                });
+                if (imageData.startsWith('http://') || imageData.startsWith('https://')) {
+                    // Se for uma URL, faz o download primeiro
+                    console.log('🖼️ Baixando imagem da URL:', imageData);
+                    const response = await axios.get(imageData, {
+                        responseType: 'arraybuffer',
+                        headers: {
+                            'Accept': 'image/*'
+                        }
+                    });
+                    const buffer = Buffer.from(response.data);
+                    base64Image = buffer.toString('base64');
+                    console.log('🖼️ Download concluído:', {
+                        bufferSize: buffer.length,
+                        mimeType: response.headers['content-type'] || mimeType
+                    });
+                } else {
+                    // Se for um caminho local, lê o arquivo
+                    const buffer = await fs.readFile(imageData);
+                    base64Image = buffer.toString('base64');
+                    console.log('🖼️ Lendo arquivo local:', {
+                        path: imageData,
+                        bufferSize: buffer.length,
+                        mimeType
+                    });
+                }
             } else {
-                throw new Error('Formato de imagem inválido. Esperado: Buffer ou caminho do arquivo');
+                throw new Error('Formato de imagem inválido. Esperado: Buffer, URL ou caminho do arquivo');
             }
 
             const payload = {

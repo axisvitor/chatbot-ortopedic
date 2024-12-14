@@ -350,21 +350,31 @@ class WhatsAppService {
 
     async processWhatsAppImage(messageInfo) {
         try {
-            if (!messageInfo?.mediaData?.message) {
+            if (!messageInfo?.mediaData?.message?.imageMessage) {
                 throw new Error('Dados da imagem ausentes ou inválidos');
             }
 
-            console.log('[Image] Iniciando processamento da imagem');
+            console.log('[Image] Iniciando processamento da imagem:', {
+                mimetype: messageInfo.mediaData.message.imageMessage.mimetype,
+                filesize: messageInfo.mediaData.message.imageMessage.fileLength,
+                hasMediaKey: !!messageInfo.mediaData.message.imageMessage.mediaKey
+            });
             
-            // Download e decodificação da imagem
-            const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'image');
+            // Download e decodificação da imagem usando Baileys
+            const stream = await downloadContentFromMessage(
+                messageInfo.mediaData.message.imageMessage,
+                'image'
+            );
+            
             let buffer = Buffer.from([]);
-            
             for await (const chunk of stream) {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            console.log('[Image] Download concluído, tamanho:', buffer.length);
+            console.log('[Image] Download e decodificação concluídos:', {
+                bufferSize: buffer.length,
+                primeirosBytes: buffer.slice(0, 4).toString('hex')
+            });
 
             // Se for um comprovante de pagamento
             if (this.isPaymentProof(messageInfo)) {
@@ -373,7 +383,7 @@ class WhatsAppService {
                     // Analisar a imagem com Groq usando o buffer diretamente
                     const analysis = await this.groqServices.analyzeImage(
                         buffer, 
-                        messageInfo.mediaData.message.mimetype || 'image/jpeg'
+                        messageInfo.mediaData.message.imageMessage.mimetype || 'image/jpeg'
                     );
                     console.log('[Image] Análise do comprovante:', analysis);
 
@@ -407,7 +417,8 @@ class WhatsAppService {
             console.error('[Image] Erro ao processar imagem:', {
                 message: error.message,
                 type: error.type,
-                code: error.code
+                code: error.code,
+                stack: error.stack
             });
 
             return {
