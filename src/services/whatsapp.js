@@ -351,12 +351,14 @@ class WhatsAppService {
     async processWhatsAppImage(webhookData) {
         try {
             // Extrair dados da mensagem
-            const { message, key, messageTimestamp, device } = webhookData;
+            const { message, key, messageTimestamp, device, msgContent } = webhookData;
             const imageMessage = message?.imageMessage;
             
-            if (!imageMessage) {
+            if (!imageMessage && !msgContent) {
                 throw new Error('Mensagem não contém dados de imagem');
             }
+
+            let buffer;
 
             // Log detalhado dos metadados
             console.log('📸 Processando mensagem de imagem:', {
@@ -364,51 +366,65 @@ class WhatsAppService {
                 from: key?.remoteJid,
                 timestamp: messageTimestamp,
                 device,
-                mimetype: imageMessage.mimetype,
-                fileSize: imageMessage.fileLength,
-                dimensions: {
-                    width: imageMessage.width,
-                    height: imageMessage.height
-                },
-                hasMediaKey: !!imageMessage.mediaKey,
-                isForwarded: imageMessage.contextInfo?.isForwarded,
-                forwardingScore: imageMessage.contextInfo?.forwardingScore
+                mimetype: imageMessage?.mimetype,
+                fileSize: imageMessage?.fileLength,
+                hasMsgContent: !!msgContent,
+                msgContentLength: msgContent?.length
             });
 
-            // Download e processamento da imagem
-            const stream = await downloadContentFromMessage(imageMessage, 'image');
-            let chunks = [];
-            let totalSize = 0;
-            
-            for await (const chunk of stream) {
-                chunks.push(chunk);
-                totalSize += chunk.length;
-                
-                // Log do progresso a cada 500KB
-                if (totalSize % 512000 < chunk.length) {
-                    console.log('📥 Download em progresso:', {
-                        totalSize: Math.round(totalSize / 1024) + 'KB'
-                    });
+            // Tenta extrair o buffer do msgContent primeiro
+            if (msgContent) {
+                try {
+                    // Verifica se é base64
+                    const base64Match = msgContent.match(/^data:image\/[^;]+;base64,(.+)$/);
+                    if (base64Match) {
+                        buffer = Buffer.from(base64Match[1], 'base64');
+                        console.log('📥 Buffer extraído do base64:', {
+                            bufferSize: buffer.length,
+                            primeirosBytes: buffer.slice(0, 8).toString('hex')
+                        });
+                    } else if (Buffer.isBuffer(msgContent)) {
+                        buffer = msgContent;
+                    } else {
+                        // Tenta converter diretamente para buffer
+                        buffer = Buffer.from(msgContent, 'base64');
+                    }
+                } catch (error) {
+                    console.warn('⚠️ Erro ao processar msgContent:', error.message);
                 }
             }
 
-            const buffer = Buffer.concat(chunks);
+            // Se não conseguiu extrair do msgContent, tenta download normal
+            if (!buffer && imageMessage) {
+                console.log('🔄 Tentando download da imagem via stream...');
+                
+                const stream = await downloadContentFromMessage(imageMessage, 'image');
+                let chunks = [];
+                let totalSize = 0;
+                
+                for await (const chunk of stream) {
+                    chunks.push(chunk);
+                    totalSize += chunk.length;
+                    
+                    // Log do progresso a cada 500KB
+                    if (totalSize % 512000 < chunk.length) {
+                        console.log('📥 Download em progresso:', {
+                            totalSize: Math.round(totalSize / 1024) + 'KB'
+                        });
+                    }
+                }
+
+                buffer = Buffer.concat(chunks);
+            }
 
             if (!buffer || buffer.length === 0) {
-                throw new Error('Download da imagem falhou - buffer vazio');
+                throw new Error('Não foi possível obter dados válidos da imagem');
             }
 
-            // Validação do buffer
-            if (buffer.length !== totalSize) {
-                throw new Error(`Tamanho do buffer inconsistente. Esperado: ${totalSize}, Recebido: ${buffer.length}`);
-            }
-
-            console.log('📥 Download concluído:', {
+            console.log('📥 Processamento de imagem concluído:', {
                 bufferSize: buffer.length,
                 primeirosBytes: buffer.slice(0, 8).toString('hex'),
-                ultimosBytes: buffer.slice(-8).toString('hex'),
-                sha256: imageMessage.fileSha256?.toString('hex'),
-                mimeType: this.groqServices.detectMimeType(buffer)
+                ultimosBytes: buffer.slice(-8).toString('hex')
             });
 
             // Análise da imagem
@@ -433,15 +449,10 @@ class WhatsAppService {
                     from: key?.remoteJid,
                     timestamp: messageTimestamp,
                     type: 'image',
-                    mimetype: imageMessage.mimetype,
-                    fileSize: imageMessage.fileLength,
-                    isForwarded: imageMessage.contextInfo?.isForwarded,
-                    dimensions: {
-                        width: imageMessage.width,
-                        height: imageMessage.height
-                    }
-                },
-                buffer: buffer // Incluindo o buffer para uso posterior se necessário
+                    mimetype: imageMessage?.mimetype || 'image/jpeg',
+                    fileSize: buffer.length,
+                    source: msgContent ? 'msgContent' : 'download'
+                }
             };
 
         } catch (error) {
@@ -454,17 +465,8 @@ class WhatsAppService {
                 code: error.code
             });
 
-            return {
-                success: false,
-                error: error.message,
-                metadata: {
-                    messageId: webhookData.key?.id,
-                    from: webhookData.key?.remoteJid,
-                    timestamp: webhookData.messageTimestamp,
-                    errorType: error.name,
-                    errorCode: error.code
-                }
-            };
+            // Retorna erro mais descritivo
+            throw new Error(`Erro ao processar imagem: ${error.message}`);
         }
     }
 
