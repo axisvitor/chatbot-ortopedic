@@ -66,6 +66,14 @@ async function initializeServices() {
     }
 }
 
+// Rota padrão para healthcheck
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        message: 'Chatbot Ortopedic API is running'
+    });
+});
+
 // Webhook principal
 app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
