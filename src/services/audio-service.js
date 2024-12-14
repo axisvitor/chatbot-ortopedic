@@ -10,14 +10,16 @@ class AudioService {
 
     async processWhatsAppAudio(messageData) {
         try {
-            const audioMessage = messageData?.message?.audioMessage;
-            if (!audioMessage) {
+            console.log('📝 Estrutura da mensagem recebida:', JSON.stringify(messageData, null, 2));
+
+            // Verifica se é uma mensagem de áudio válida
+            if (!messageData?.message) {
                 throw new Error('Mensagem de áudio não encontrada');
             }
 
             // Download e descriptografia do áudio usando Baileys
             console.log('📥 Baixando e descriptografando áudio...');
-            const stream = await downloadContentFromMessage(audioMessage, 'audio');
+            const stream = await downloadContentFromMessage(messageData.message, 'audio');
             
             if (!stream) {
                 console.error('❌ Stream não gerado pelo Baileys');
@@ -44,7 +46,7 @@ class AudioService {
             const formData = new FormData();
             formData.append('file', buffer, {
                 filename: 'audio.ogg',
-                contentType: audioMessage.mimetype || 'audio/ogg; codecs=opus'
+                contentType: messageData.message.mimetype || 'audio/ogg; codecs=opus'
             });
             formData.append('model', settings.GROQ_CONFIG.models.audio);
             formData.append('language', settings.GROQ_CONFIG.audioConfig.language);
@@ -56,7 +58,11 @@ class AudioService {
             return transcription;
 
         } catch (error) {
-            console.error('❌ Erro ao processar áudio:', error);
+            console.error('❌ Erro ao processar áudio:', {
+                message: error.message,
+                stack: error.stack,
+                messageData: JSON.stringify(messageData, null, 2)
+            });
             throw error;
         }
     }
