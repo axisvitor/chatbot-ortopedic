@@ -8,6 +8,7 @@ class GroqServices {
         this.baseUrl = settings.GROQ_CONFIG.apiUrl;
         this.models = settings.GROQ_CONFIG.models;
         this.axiosInstance = axios.create({
+            baseURL: this.baseUrl,
             headers: {
                 'Authorization': `Bearer ${settings.GROQ_CONFIG.apiKey}`,
                 'Content-Type': 'application/json'
@@ -50,7 +51,7 @@ class GroqServices {
             });
 
             const response = await this.axiosInstance.post(
-                `${this.baseUrl}/chat/completions`,
+                `/chat/completions`,
                 payload
             );
 
@@ -75,7 +76,7 @@ class GroqServices {
             console.log('🎤 Iniciando transcrição com Groq');
             
             const response = await this.axiosInstance.post(
-                `${this.baseUrl}/v1/audio/transcriptions`,
+                `/v1/audio/transcriptions`,
                 formData,
                 {
                     headers: {
