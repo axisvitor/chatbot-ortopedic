@@ -28,8 +28,31 @@ class AudioService {
                 throw new Error('Dados do áudio ausentes ou inválidos');
             }
 
+            // Se não tiver buffer, tentar fazer download
             if (!audioMessage.buffer || !audioMessage.buffer.length) {
-                console.error('❌ Buffer do áudio ausente ou vazio');
+                console.log('🔄 Buffer não encontrado, tentando download...');
+                try {
+                    const stream = await downloadContentFromMessage(audioMessage, 'audio');
+                    if (!stream) {
+                        throw new Error('Stream não gerado');
+                    }
+
+                    let buffer = Buffer.from([]);
+                    for await (const chunk of stream) {
+                        buffer = Buffer.concat([buffer, chunk]);
+                    }
+
+                    audioMessage.buffer = buffer;
+                    console.log('✅ Download concluído:', {
+                        tamanhoBuffer: buffer.length
+                    });
+                } catch (downloadError) {
+                    console.error('❌ Erro no download:', downloadError);
+                    throw new Error('Falha ao baixar áudio: ' + downloadError.message);
+                }
+            }
+
+            if (!audioMessage.buffer || !audioMessage.buffer.length) {
                 throw new Error('Dados binários do áudio não encontrados');
             }
 

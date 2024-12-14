@@ -216,7 +216,8 @@ class WhatsAppService {
             console.log('[Webhook] Dados recebidos:', {
                 type: webhookData?.type,
                 hasBody: !!webhookData?.body,
-                messageType: webhookData?.body?.message ? Object.keys(webhookData.body.message)[0] : 'unknown'
+                messageType: webhookData?.body?.message ? Object.keys(webhookData.body.message)[0] : 'unknown',
+                hasMsgContent: !!webhookData?.msgContent
             });
 
             if (!webhookData?.type || !webhookData?.body) {
@@ -227,7 +228,7 @@ class WhatsAppService {
                 return null;
             }
 
-            const { body } = webhookData;
+            const { body, msgContent } = webhookData;
             
             // Extrair informações básicas
             const messageInfo = {
@@ -282,23 +283,39 @@ class WhatsAppService {
                     return null;
                 }
 
+                // Extrair dados do base64 se disponível
+                let audioBuffer = null;
+                if (msgContent && msgContent.startsWith('data:audio/')) {
+                    try {
+                        const base64Data = msgContent.split(',')[1];
+                        audioBuffer = Buffer.from(base64Data, 'base64');
+                        console.log('[Webhook] Áudio extraído do base64:', {
+                            tamanhoBuffer: audioBuffer.length
+                        });
+                    } catch (error) {
+                        console.error('[Webhook] Erro ao decodificar base64:', error);
+                    }
+                }
+
                 messageInfo.mediaData = {
                     mimetype: audioMessage.mimetype,
                     messageType: 'audio',
                     message: audioMessage,
+                    buffer: audioBuffer,
                     fileLength: audioMessage.fileLength,
                     seconds: audioMessage.seconds,
                     ptt: audioMessage.ptt,
                     mediaKey: audioMessage.mediaKey,
-                    fileEncSha256: audioMessage.fileEncSha256
+                    fileEncSha256: audioMessage.fileEncSha256,
+                    fileSha256: audioMessage.fileSha256
                 };
 
                 console.log('[Webhook] Áudio processado:', {
                     mimetype: messageInfo.mediaData.mimetype,
                     hasMediaKey: !!messageInfo.mediaData.mediaKey,
                     fileLength: messageInfo.mediaData.fileLength,
-                    seconds: messageInfo.mediaData.seconds,
-                    isPtt: messageInfo.mediaData.ptt
+                    hasBuffer: !!messageInfo.mediaData.buffer,
+                    bufferSize: messageInfo.mediaData.buffer?.length
                 });
             }
 
