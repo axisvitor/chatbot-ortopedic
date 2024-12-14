@@ -13,13 +13,18 @@ class AudioService {
             console.log('📝 Estrutura da mensagem recebida:', JSON.stringify(messageData, null, 2));
 
             // Verifica se é uma mensagem de áudio válida
-            if (!messageData?.message) {
+            if (!messageData?.audioMessage) {
                 throw new Error('Mensagem de áudio não encontrada');
             }
 
             // Download e descriptografia do áudio usando Baileys
-            console.log('📥 Baixando e descriptografando áudio...');
-            const stream = await downloadContentFromMessage(messageData.message, 'audio');
+            console.log('📥 Baixando e descriptografando áudio...', {
+                mimetype: messageData.audioMessage.mimetype,
+                seconds: messageData.audioMessage.seconds,
+                fileLength: messageData.audioMessage.fileLength
+            });
+            
+            const stream = await downloadContentFromMessage(messageData.audioMessage, 'audio');
             
             if (!stream) {
                 console.error('❌ Stream não gerado pelo Baileys');
@@ -46,7 +51,7 @@ class AudioService {
             const formData = new FormData();
             formData.append('file', buffer, {
                 filename: 'audio.ogg',
-                contentType: messageData.message.mimetype || 'audio/ogg; codecs=opus'
+                contentType: messageData.audioMessage.mimetype || 'audio/ogg; codecs=opus'
             });
             formData.append('model', settings.GROQ_CONFIG.models.audio);
             formData.append('language', settings.GROQ_CONFIG.audioConfig.language);
