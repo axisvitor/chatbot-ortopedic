@@ -438,7 +438,8 @@ class WhatsAppService {
             console.log('[Audio] Iniciando processamento:', {
                 hasMediaData: !!messageInfo?.mediaData,
                 messageType: messageInfo?.mediaData?.messageType,
-                hasMessage: !!messageInfo?.mediaData?.message
+                hasMessage: !!messageInfo?.mediaData?.message,
+                messageContent: messageInfo?.mediaData?.message
             });
 
             if (!messageInfo?.mediaData?.message) {
@@ -448,15 +449,8 @@ class WhatsAppService {
             // Criar instância do AudioService
             const audioService = new AudioService(this.groqServices);
             
-            // Preparar a mensagem no formato correto
-            const audioData = {
-                message: {
-                    audioMessage: messageInfo.mediaData.message
-                }
-            };
-
-            // Processar o áudio
-            const result = await audioService.processWhatsAppAudio(audioData);
+            // Processar o áudio com a estrutura correta
+            const result = await audioService.processWhatsAppAudio(messageInfo.mediaData);
 
             return {
                 success: true,
@@ -467,7 +461,8 @@ class WhatsAppService {
         } catch (error) {
             console.error('[Audio] Erro ao processar áudio:', {
                 message: error.message,
-                stack: error.stack
+                stack: error.stack,
+                mediaData: messageInfo?.mediaData
             });
 
             return {
