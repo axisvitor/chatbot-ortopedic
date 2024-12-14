@@ -51,7 +51,7 @@ class GroqServices {
             });
 
             const response = await this.axiosInstance.post(
-                `/openai/v1/chat/completions`,
+                `/v1/chat/completions`,
                 payload
             );
 
@@ -80,7 +80,7 @@ class GroqServices {
             delete headers['Content-Type'];
             
             const response = await this.axiosInstance.post(
-                `/openai/v1/audio/transcriptions`,
+                `/v1/audio/transcriptions`,
                 formData,
                 {
                     headers: {
