@@ -1,4 +1,5 @@
-const fs = require('fs').promises;
+const fs = require('fs');
+const fsp = fs.promises;
 const path = require('path');
 const axios = require('axios');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
@@ -73,24 +74,23 @@ class AudioService {
 
             let audioPath = null;
             try {
-                // Salva o áudio temporariamente
-                if (!fs.existsSync(this.tempDir)) {
-                    await fs.mkdir(this.tempDir, { recursive: true });
-                }
+                // Garante que o diretório temporário existe
+                await this._ensureTempDir();
 
+                // Salva o áudio temporariamente
                 audioPath = path.join(this.tempDir, `audio_${Date.now()}.ogg`);
-                await fs.writeFile(audioPath, audioBuffer);
+                await fsp.writeFile(audioPath, audioBuffer);
 
                 console.log('✅ Áudio salvo temporariamente:', {
                     path: audioPath,
-                    tamanho: (await fs.stat(audioPath)).size
+                    tamanho: (await fsp.stat(audioPath)).size
                 });
 
                 // Converte para MP3
                 const mp3Path = await this._convertToMp3(audioPath);
                 console.log('✅ Áudio convertido para MP3:', {
                     path: mp3Path,
-                    tamanho: (await fs.stat(mp3Path)).size
+                    tamanho: (await fsp.stat(mp3Path)).size
                 });
                 
                 // Transcreve o áudio
@@ -102,14 +102,60 @@ class AudioService {
             } finally {
                 // Limpa os arquivos temporários
                 if (audioPath) {
-                    await this._cleanupTempFile(audioPath);
-                    await this._cleanupTempFile(audioPath.replace('.ogg', '.mp3'));
+                    await this._cleanupTempFiles(audioPath);
                 }
             }
         } catch (error) {
             console.error('❌ Erro ao processar áudio:', error);
             throw error;
         }
+    }
+
+    async _ensureTempDir() {
+        try {
+            if (!fs.existsSync(this.tempDir)) {
+                await fsp.mkdir(this.tempDir, { recursive: true });
+                console.log('✅ Diretório temporário criado:', this.tempDir);
+            }
+        } catch (error) {
+            console.error('❌ Erro ao criar diretório temporário:', error);
+            throw error;
+        }
+    }
+
+    async _cleanupTempFiles(audioPath) {
+        try {
+            const mp3Path = audioPath.replace('.ogg', '.mp3');
+            
+            // Remove o arquivo OGG se existir
+            if (fs.existsSync(audioPath)) {
+                await fsp.unlink(audioPath);
+                console.log('🗑️ Arquivo OGG removido:', audioPath);
+            }
+            
+            // Remove o arquivo MP3 se existir
+            if (fs.existsSync(mp3Path)) {
+                await fsp.unlink(mp3Path);
+                console.log('🗑️ Arquivo MP3 removido:', mp3Path);
+            }
+        } catch (error) {
+            console.error('⚠️ Erro ao limpar arquivos temporários:', error);
+            // Não lança o erro para não interromper o fluxo principal
+        }
+    }
+
+    _isValidAudioMimeType(mimetype) {
+        const validMimeTypes = [
+            'audio/ogg',
+            'audio/ogg; codecs=opus',
+            'audio/mpeg',
+            'audio/mp3',
+            'audio/wav',
+            'audio/wave',
+            'audio/webm',
+            'audio/aac'
+        ];
+        return validMimeTypes.some(valid => mimetype?.toLowerCase().startsWith(valid));
     }
 
     async _convertToMp3(inputPath) {
@@ -128,10 +174,8 @@ class AudioService {
                 outputPath
             ]);
 
-            let stderr = '';
-
             ffmpegProcess.stderr.on('data', (data) => {
-                stderr += data.toString();
+                console.log('🎵 FFmpeg:', data.toString());
             });
 
             ffmpegProcess.on('close', (code) => {
@@ -139,88 +183,43 @@ class AudioService {
                     console.log('✅ Conversão concluída com sucesso');
                     resolve(outputPath);
                 } else {
-                    console.error('❌ Erro na conversão:', {
-                        codigo: code,
-                        erro: stderr
-                    });
-                    reject(new Error(`Falha na conversão do áudio: ${stderr}`));
+                    console.error('❌ Erro na conversão:', code);
+                    reject(new Error(`FFmpeg process exited with code ${code}`));
                 }
             });
 
-            ffmpegProcess.on('error', (error) => {
-                console.error('❌ Erro ao iniciar ffmpeg:', error);
-                reject(error);
+            ffmpegProcess.on('error', (err) => {
+                console.error('❌ Erro no processo FFmpeg:', err);
+                reject(err);
             });
         });
     }
 
     async _transcribeWithGroq(audioPath) {
         try {
-            console.log('🎯 Preparando transcrição com Groq:', { path: audioPath });
+            console.log('🎯 Iniciando transcrição com Groq:', audioPath);
             
-            if (!fs.existsSync(audioPath)) {
-                throw new Error(`Arquivo de áudio não encontrado: ${audioPath}`);
-            }
-
+            // Lê o arquivo MP3
+            const audioData = await fsp.readFile(audioPath);
+            
+            // Transcreve usando o Groq
             const formData = new FormData();
-            
-            // Lê o arquivo como stream
-            const fileStream = fs.createReadStream(audioPath);
-            const stats = await fs.stat(audioPath);
-
-            // Adiciona o arquivo com o nome e tipo correto
-            formData.append('file', fileStream, {
+            formData.append('file', audioData, {
                 filename: 'audio.mp3',
                 contentType: 'audio/mpeg',
-                knownLength: stats.size
+                knownLength: audioData.length
             });
+            const transcription = await this.groqServices.transcribeAudio(formData);
             
-            return await this.groqServices.transcribeAudio(formData);
-
+            if (!transcription) {
+                throw new Error('Transcrição retornou vazia');
+            }
+            
+            return transcription;
         } catch (error) {
-            console.error('❌ Erro na transcrição com Groq:', {
-                message: error.message,
-                status: error.response?.status,
-                statusText: error.response?.statusText,
-                data: error.response?.data,
-                headers: error.response?.headers,
-                config: {
-                    url: error.config?.url,
-                    method: error.config?.method,
-                    headers: error.config?.headers
-                }
-            });
+            console.error('❌ Erro na transcrição:', error);
             throw error;
         }
-    }
-
-    async _cleanupTempFile(filePath) {
-        try {
-            if (filePath && await fs.access(filePath).then(() => true).catch(() => false)) {
-                await fs.unlink(filePath);
-                console.log('🧹 Arquivo temporário removido:', filePath);
-            }
-        } catch (error) {
-            console.error('❌ Erro ao remover arquivo temporário:', {
-                path: filePath,
-                error: error.message
-            });
-        }
-    }
-
-    _isValidAudioMimeType(mimetype) {
-        const validMimeTypes = [
-            'audio/ogg',
-            'audio/ogg; codecs=opus',
-            'audio/mpeg',
-            'audio/mp3',
-            'audio/wav',
-            'audio/webm',
-            'audio/aac'
-        ];
-        return validMimeTypes.some(validType => 
-            mimetype.toLowerCase().startsWith(validType.toLowerCase())
-        );
     }
 }
 
