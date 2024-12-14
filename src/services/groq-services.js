@@ -14,20 +14,26 @@ class GroqServices {
         })
     }
 
-    async analyzeImage(imageData, mimeType = 'image/jpeg') {
+    async analyzeImage(imageData) {
         try {
-            let base64Image;
-            
-            if (Buffer.isBuffer(imageData)) {
-                // Se for um buffer, converte para base64
-                base64Image = imageData.toString('base64');
-                console.log('🖼️ Processando buffer de imagem:', { 
-                    bufferSize: imageData.length,
-                    mimeType,
-                    primeirosBytes: imageData.slice(0, 4).toString('hex')
-                });
-            } else {
+            if (!Buffer.isBuffer(imageData)) {
                 throw new Error('Formato de imagem inválido. Esperado: Buffer de imagem decodificada');
+            }
+
+            // Detecta o tipo MIME baseado nos primeiros bytes
+            const mimeType = this.detectMimeType(imageData);
+            
+            console.log('🖼️ Processando buffer de imagem:', { 
+                bufferSize: imageData.length,
+                mimeType,
+                primeirosBytes: imageData.slice(0, 8).toString('hex')
+            });
+
+            // Converte para base64
+            const base64Image = imageData.toString('base64');
+
+            if (!base64Image || base64Image.length === 0) {
+                throw new Error('Falha ao converter imagem para base64');
             }
 
             const payload = {
@@ -63,12 +69,16 @@ class GroqServices {
                 payload
             );
 
+            if (!response.data?.choices?.[0]?.message?.content) {
+                throw new Error('Resposta inválida do Groq');
+            }
+
             console.log('📥 Resposta recebida de Groq:', {
                 status: response.status,
-                messageLength: response.data?.choices?.[0]?.message?.content?.length || 0
+                messageLength: response.data.choices[0].message.content.length
             });
 
-            return response.data?.choices?.[0]?.message?.content || null;
+            return response.data.choices[0].message.content;
 
         } catch (error) {
             console.error('❌ Erro ao analisar imagem:', {
@@ -78,6 +88,28 @@ class GroqServices {
             });
             throw error;
         }
+    }
+
+    detectMimeType(buffer) {
+        // Detecta o tipo MIME baseado nos primeiros bytes
+        const header = buffer.slice(0, 4).toString('hex').toLowerCase();
+        
+        // Magic numbers comuns
+        if (header.startsWith('ffd8ff')) {
+            return 'image/jpeg';
+        }
+        if (header.startsWith('89504e47')) {
+            return 'image/png';
+        }
+        if (header.startsWith('47494638')) {
+            return 'image/gif';
+        }
+        if (header.startsWith('424d')) {
+            return 'image/bmp';
+        }
+        
+        // Default para JPEG se não conseguir detectar
+        return 'image/jpeg';
     }
 
     async transcribeAudio(formData) {
