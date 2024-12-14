@@ -1,0 +1,20 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+[service]
+name = "chatbot-whatsapp"
+internal_port = 1988
+auto_deploy = true
+
+[[services.ports]]
+port = 1988
+handlers = ["http"]
+force_https = true 
