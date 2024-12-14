@@ -19,24 +19,28 @@ class GroqServices {
             let buffer;
             let base64Data;
 
-            // Se for uma string data URL
+            // Se for uma string base64 ou data URL
             if (typeof imageData === 'string') {
                 // Remove espaços em branco e quebras de linha
                 const cleanedData = imageData.trim().replace(/[\n\r]/g, '');
                 
-                // Verifica se é uma data URL válida
-                const dataUrlMatch = cleanedData.match(/^data:image\/([a-zA-Z]+);base64,(.+)$/);
-                if (!dataUrlMatch) {
-                    throw new Error('Formato de data URL inválido');
+                // Verifica se é uma data URL
+                if (cleanedData.startsWith('data:')) {
+                    const dataUrlMatch = cleanedData.match(/^data:image\/([a-zA-Z]+);base64,(.+)$/);
+                    if (!dataUrlMatch) {
+                        throw new Error('Formato de data URL inválido');
+                    }
+                    base64Data = dataUrlMatch[2];
+                } else {
+                    // Assume que é base64 puro
+                    base64Data = cleanedData;
                 }
 
-                // Extrai apenas o base64, removendo o prefixo
-                base64Data = dataUrlMatch[2];
-                
                 // Converte para buffer
                 try {
                     buffer = Buffer.from(base64Data, 'base64');
                 } catch (e) {
+                    console.error('❌ Erro ao converter base64:', e);
                     throw new Error('Base64 inválido: não foi possível converter para buffer');
                 }
             }
@@ -46,7 +50,7 @@ class GroqServices {
                 base64Data = buffer.toString('base64');
             }
             else {
-                throw new Error('Formato de imagem inválido. Esperado: Buffer ou data URL base64');
+                throw new Error('Formato de imagem inválido. Esperado: Buffer ou string base64');
             }
 
             // Verifica o tamanho do buffer
@@ -74,7 +78,8 @@ class GroqServices {
             }
 
             if (!detectedFormat) {
-                throw new Error('Formato de imagem não reconhecido. Por favor, use JPEG, PNG, GIF ou WEBP');
+                console.error('❌ Cabeçalho da imagem:', fileHeader);
+                throw new Error('Formato de imagem não reconhecido ou corrompido');
             }
 
             console.log('🖼️ Processando imagem:', {
@@ -121,7 +126,8 @@ class GroqServices {
         } catch (error) {
             console.error('❌ Erro ao analisar imagem:', {
                 erro: error.message,
-                stack: error.stack
+                stack: error.stack,
+                tipo: typeof imageData
             });
             throw error;
         }
