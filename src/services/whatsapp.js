@@ -1,4 +1,4 @@
-const { WHATSAPP_CONFIG } = require('../config/settings');
+const settings = require('../config/settings');
 const httpClient = require('../utils/http-client');
 const { URL } = require('url');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
@@ -7,15 +7,14 @@ const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
 const FormData = require('form-data');
-const { WHATSAPP_CONFIG, BUSINESS_HOURS } = require('../config/settings');
-const groqServices = require('./groq-services'); // Import the Groq services
+const { GroqServices } = require('./groq-services');
 
 class WhatsAppService {
     constructor() {
-        this.config = WHATSAPP_CONFIG;
+        this.config = settings.WHATSAPP_CONFIG;
         this.financialDeptNumber = process.env.FINANCIAL_DEPT_NUMBER;
         this.httpClient = httpClient;
-        this.groqServices = groqServices; // Initialize the Groq services
+        this.groqServices = new GroqServices(); // Instanciar corretamente
         
         // Garantir que a URL base tenha o protocolo https://
         if (!this.config.apiUrl.startsWith('http://') && !this.config.apiUrl.startsWith('https://')) {
@@ -25,7 +24,7 @@ class WhatsAppService {
 
     async sendMessage(to, message) {
         try {
-            console.log('📤 Preparando envio:', {
+            console.log(' Preparando envio:', {
                 para: to,
                 tipo: typeof to,
                 tamanho: to?.length,
@@ -36,7 +35,7 @@ class WhatsAppService {
             const cleanedNumber = to.replace(/\D/g, '');
             const formattedNumber = cleanedNumber.startsWith('55') ? cleanedNumber : `55${cleanedNumber}`;
 
-            console.log('📱 Número processado:', {
+            console.log(' Número processado:', {
                 original: to,
                 limpo: cleanedNumber,
                 formatado: formattedNumber,
@@ -58,13 +57,13 @@ class WhatsAppService {
                 delayMessage: 3 // Delay padrão de 3 segundos
             };
 
-            console.log('📤 Corpo da requisição:', body);
+            console.log(' Corpo da requisição:', body);
 
             const url = new URL('message/send-text', this.config.apiUrl);
             url.searchParams.append('connectionKey', this.config.connectionKey);
             
-            console.log('🌐 URL da requisição:', url.toString());
-            console.log('🔑 Token:', this.config.token);
+            console.log(' URL da requisição:', url.toString());
+            console.log(' Token:', this.config.token);
 
             const response = await this.httpClient.post(url.toString(), body, {
                 headers: {
@@ -73,11 +72,11 @@ class WhatsAppService {
                 }
             });
 
-            console.log('✅ Mensagem enviada com sucesso:', response.data);
+            console.log(' Mensagem enviada com sucesso:', response.data);
             
             return response.data;
         } catch (error) {
-            console.error('❌ Erro ao enviar mensagem:', {
+            console.error(' Erro ao enviar mensagem:', {
                 erro: error.message,
                 resposta: error.response?.data,
                 status: error.response?.status,
@@ -101,7 +100,7 @@ class WhatsAppService {
 
             const url = new URL('/message/send-image', this.config.apiUrl);
             url.searchParams.append('connectionKey', this.config.connectionKey);
-            console.log('🌐 URL da requisição:', url.toString());
+            console.log(' URL da requisição:', url.toString());
 
             const body = {
                 phoneNumber: formattedNumber,
@@ -135,7 +134,7 @@ class WhatsAppService {
 
             const url = new URL('/message/send-document', this.config.apiUrl);
             url.searchParams.append('connectionKey', this.config.connectionKey);
-            console.log('🌐 URL da requisição:', url.toString());
+            console.log(' URL da requisição:', url.toString());
 
             const body = {
                 phoneNumber: formattedNumber,
@@ -184,19 +183,19 @@ class WhatsAppService {
     formatFinancialMessage(paymentInfo) {
         const timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
         
-        return `🔔 *Novo Comprovante de Pagamento*\n\n` +
-               `📅 Data: ${timestamp}\n` +
-               `👤 Cliente: ${paymentInfo.customerName || 'Não identificado'}\n` +
-               `📱 Telefone: ${paymentInfo.customerPhone || 'Não informado'}\n` +
-               `💰 Valor: ${paymentInfo.amount || 'Não identificado'}\n` +
-               `🏦 Banco: ${paymentInfo.bank || 'Não identificado'}\n` +
-               `📝 Tipo: ${paymentInfo.paymentType || 'Não identificado'}\n\n` +
-               `✍️ Análise do Comprovante:\n${paymentInfo.analysis || 'Sem análise disponível'}`;
+        return ` Novo Comprovante de Pagamento\n\n` +
+               ` Data: ${timestamp}\n` +
+               ` Cliente: ${paymentInfo.customerName || 'Não identificado'}\n` +
+               ` Telefone: ${paymentInfo.customerPhone || 'Não informado'}\n` +
+               ` Valor: ${paymentInfo.amount || 'Não identificado'}\n` +
+               ` Banco: ${paymentInfo.bank || 'Não identificado'}\n` +
+               ` Tipo: ${paymentInfo.paymentType || 'Não identificado'}\n\n` +
+               ` Análise do Comprovante:\n${paymentInfo.analysis || 'Sem análise disponível'}`;
     }
 
     async downloadMedia(mediaUrl, mediaKey, fileEncSha256) {
         try {
-            console.log('📥 Baixando mídia do WhatsApp...');
+            console.log(' Baixando mídia do WhatsApp...');
             const response = await this.httpClient.get(mediaUrl, {
                 headers: {
                     'Authorization': `Bearer ${this.config.apiKey}`,
@@ -207,15 +206,15 @@ class WhatsAppService {
             });
             return response.data;
         } catch (error) {
-            console.error('❌ Erro ao baixar mídia:', error);
+            console.error(' Erro ao baixar mídia:', error);
             throw error;
         }
     }
 
     async extractMessageFromWebhook(body) {
         try {
-            console.log('📥 Webhook recebido (raw):', body);
-            console.log('📥 Estrutura do body:', {
+            console.log(' Webhook recebido (raw):', body);
+            console.log(' Estrutura do body:', {
                 hasBody: !!body,
                 hasBodyBody: !!body?.body,
                 hasMessage: !!body?.body?.message,
@@ -229,8 +228,8 @@ class WhatsAppService {
             }
 
             const { message, key } = body.body;
-            console.log('🔑 Key do webhook:', key);
-            console.log('💬 Message do webhook:', {
+            console.log(' Key do webhook:', key);
+            console.log(' Message do webhook:', {
                 hasText: !!message.extendedTextMessage || !!message.conversation,
                 hasImage: !!message.imageMessage,
                 hasAudio: !!message.audioMessage,
@@ -280,7 +279,7 @@ class WhatsAppService {
                 ...content
             };
         } catch (error) {
-            console.error('❌ Erro ao extrair mensagem do webhook:', error);
+            console.error(' Erro ao extrair mensagem do webhook:', error);
             throw error;
         }
     }
@@ -296,13 +295,13 @@ class WhatsAppService {
             // Processar a mensagem normalmente
             const extractedMessage = this.extractMessageFromWebhook(message);
             if (!extractedMessage) {
-                console.warn('⚠️ Mensagem não reconhecida:', message);
+                console.warn(' Mensagem não reconhecida:', message);
                 return;
             }
 
             // Resto do código de processamento da mensagem...
         } catch (error) {
-            console.error('❌ Erro ao processar mensagem:', error);
+            console.error(' Erro ao processar mensagem:', error);
             throw error;
         }
     }
@@ -327,7 +326,7 @@ class WhatsAppService {
             // Processa outros tipos de mídia normalmente...
             return await super.handleMediaMessage(message);
         } catch (error) {
-            console.error('❌ Erro ao processar mídia:', error);
+            console.error(' Erro ao processar mídia:', error);
             throw error;
         }
     }
@@ -355,7 +354,7 @@ class WhatsAppService {
             // Analisa a imagem com Vision
             const imageUrl = imageMessage.url;
             if (imageUrl) {
-                console.log('🔍 Analisando imagem com Vision:', { url: imageUrl });
+                console.log(' Analisando imagem com Vision:', { url: imageUrl });
                 const analysis = await this.groqServices.analyzeImage(imageUrl);
                 
                 // Se a análise contiver palavras-chave relacionadas a pagamento
@@ -364,7 +363,7 @@ class WhatsAppService {
                     analysisText.includes(keyword)
                 );
 
-                console.log('✅ Análise Vision concluída:', {
+                console.log(' Análise Vision concluída:', {
                     isPaymentProof,
                     analysisExcerpt: analysis.substring(0, 100) + '...'
                 });
@@ -374,7 +373,7 @@ class WhatsAppService {
 
             return false;
         } catch (error) {
-            console.error('❌ Erro ao analisar imagem:', error);
+            console.error(' Erro ao analisar imagem:', error);
             // Em caso de erro, assume que não é comprovante
             return false;
         }
@@ -382,7 +381,7 @@ class WhatsAppService {
 
     async forwardPaymentProof(mediaData, userContact) {
         try {
-            const config = BUSINESS_HOURS.departments.financial.paymentProofs;
+            const config = settings.BUSINESS_HOURS.departments.financial.paymentProofs;
             
             // Validar tipo de arquivo
             if (!config.allowedTypes.includes(mediaData.mimetype)) {
@@ -420,7 +419,7 @@ class WhatsAppService {
             };
 
             // Log do encaminhamento
-            console.log('💰 Comprovante processado:', {
+            console.log(' Comprovante processado:', {
                 ...proofData,
                 analysisExcerpt: analysis.substring(0, 100) + '...',
                 buffer: '<<binary data>>'
@@ -437,20 +436,20 @@ class WhatsAppService {
                 await axios.post(config.webhook, formData, {
                     headers: {
                         ...formData.getHeaders(),
-                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                        'Authorization': `Bearer ${this.config.token}`
                     }
                 });
 
-                console.log('📤 Comprovante enviado para webhook');
+                console.log(' Comprovante enviado para webhook');
             }
 
             // Enviar resposta com detalhes da análise
-            const responseMessage = `✅ Comprovante recebido e analisado:\n\n${analysis}\n\nO comprovante será verificado pelo setor financeiro. Posso ajudar com mais alguma coisa?`;
+            const responseMessage = ` Comprovante recebido e analisado:\n\n${analysis}\n\nO comprovante será verificado pelo setor financeiro. Posso ajudar com mais alguma coisa?`;
             await this.sendTextMessage(userContact, responseMessage);
 
             return true;
         } catch (error) {
-            console.error('❌ Erro ao encaminhar comprovante:', error);
+            console.error(' Erro ao encaminhar comprovante:', error);
             throw error;
         }
     }
