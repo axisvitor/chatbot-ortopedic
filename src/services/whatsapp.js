@@ -428,25 +428,63 @@ class WhatsAppService {
 
     async processWhatsAppAudio(messageInfo) {
         try {
+            console.log('[Audio] Iniciando processamento:', {
+                hasMediaData: !!messageInfo?.mediaData,
+                messageType: messageInfo?.mediaData?.messageType,
+                hasMessage: !!messageInfo?.mediaData?.message
+            });
+
             if (!messageInfo?.mediaData?.message) {
-                console.error('[Audio] Dados do áudio ausentes:', {
-                    hasMediaData: !!messageInfo?.mediaData,
-                    hasMessage: !!messageInfo?.mediaData?.message,
-                    messageInfo: JSON.stringify(messageInfo, null, 2)
-                });
                 throw new Error('Dados do áudio ausentes ou inválidos');
             }
 
-            // Preparar a mensagem no formato esperado pelo AudioService
-            const formattedMessage = {
+            // Download do áudio usando Baileys
+            console.log('[Audio] Iniciando download com Baileys');
+            const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'audio');
+            
+            if (!stream) {
+                console.error('[Audio] Stream não gerado pelo Baileys');
+                throw new Error('Não foi possível iniciar o download do áudio');
+            }
+
+            // Converter stream em buffer
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            if (!buffer.length) {
+                console.error('[Audio] Buffer vazio após download');
+                throw new Error('Download do áudio falhou');
+            }
+
+            console.log('[Audio] Download concluído:', {
+                tamanhoBuffer: buffer.length,
+                primeirosBytes: buffer.slice(0, 16).toString('hex')
+            });
+
+            // Criar instância do AudioService
+            const audioService = new AudioService(this.groqServices);
+            
+            // Preparar a mensagem no formato correto
+            const audioData = {
                 message: {
-                    audioMessage: messageInfo.mediaData.message
+                    audioMessage: {
+                        ...messageInfo.mediaData.message,
+                        buffer: buffer, // Incluir o buffer baixado
+                        mimetype: messageInfo.mediaData.mimetype,
+                        fileLength: messageInfo.mediaData.fileLength,
+                        seconds: messageInfo.mediaData.seconds,
+                        ptt: messageInfo.mediaData.ptt,
+                        mediaKey: messageInfo.mediaData.mediaKey,
+                        fileEncSha256: messageInfo.mediaData.fileEncSha256,
+                        fileSha256: messageInfo.mediaData.fileSha256
+                    }
                 }
             };
 
-            // Processar o áudio usando o AudioService
-            const audioService = new AudioService(this.groqServices);
-            const result = await audioService.processWhatsAppAudio(formattedMessage);
+            // Processar o áudio
+            const result = await audioService.processWhatsAppAudio(audioData);
 
             return {
                 success: true,
@@ -457,13 +495,12 @@ class WhatsAppService {
         } catch (error) {
             console.error('[Audio] Erro ao processar áudio:', {
                 message: error.message,
-                type: error.type,
-                code: error.code
+                stack: error.stack
             });
 
             return {
                 success: false,
-                message: 'Desculpe, não foi possível processar seu áudio. Por favor, tente novamente.'
+                message: 'Não foi possível processar o áudio. Por favor, tente novamente.'
             };
         }
     }

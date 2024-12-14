@@ -18,15 +18,19 @@ class AudioService {
                 temMensagem: !!messageData?.message,
                 temAudio: !!messageData?.message?.audioMessage,
                 campos: messageData?.message?.audioMessage ? Object.keys(messageData.message.audioMessage) : [],
-                estruturaCompleta: JSON.stringify(messageData, null, 2)
+                temBuffer: !!messageData?.message?.audioMessage?.buffer,
+                tamanhoBuffer: messageData?.message?.audioMessage?.buffer?.length
             });
 
             const audioMessage = messageData?.message?.audioMessage;
             if (!audioMessage) {
-                console.error('❌ Dados do áudio ausentes:', {
-                    messageData: JSON.stringify(messageData, null, 2)
-                });
+                console.error('❌ Dados do áudio ausentes');
                 throw new Error('Dados do áudio ausentes ou inválidos');
+            }
+
+            if (!audioMessage.buffer || !audioMessage.buffer.length) {
+                console.error('❌ Buffer do áudio ausente ou vazio');
+                throw new Error('Dados binários do áudio não encontrados');
             }
 
             // Log detalhado dos campos críticos
@@ -35,22 +39,18 @@ class AudioService {
                 fileLength: audioMessage.fileLength,
                 seconds: audioMessage.seconds,
                 ptt: audioMessage.ptt,
+                tamanhoBuffer: audioMessage.buffer.length,
                 mediaKey: audioMessage.mediaKey ? 'presente' : 'ausente',
                 fileEncSha256: audioMessage.fileEncSha256 ? 'presente' : 'ausente',
-                fileSha256: audioMessage.fileSha256 ? 'presente' : 'ausente',
-                url: audioMessage.url ? 'presente' : 'ausente',
-                directPath: audioMessage.directPath ? 'presente' : 'ausente'
+                fileSha256: audioMessage.fileSha256 ? 'presente' : 'ausente'
             });
 
             // Verifica campos obrigatórios
-            const camposObrigatorios = ['mediaKey', 'fileEncSha256', 'fileSha256', 'mimetype'];
+            const camposObrigatorios = ['buffer', 'mimetype'];
             const camposFaltantes = camposObrigatorios.filter(campo => !audioMessage[campo]);
             
             if (camposFaltantes.length > 0) {
-                console.error('❌ Campos obrigatórios ausentes:', {
-                    faltando: camposFaltantes,
-                    audioMessage: JSON.stringify(audioMessage, null, 2)
-                });
+                console.error('❌ Campos obrigatórios ausentes:', camposFaltantes);
                 throw new Error(`Campos obrigatórios ausentes: ${camposFaltantes.join(', ')}`);
             }
 
@@ -61,26 +61,13 @@ class AudioService {
 
             let audioPath = null;
             try {
-                // Download e processamento do áudio
-                console.log('🔐 Iniciando descriptografia do áudio...');
-                const stream = await downloadContentFromMessage(audioMessage, 'audio');
-                
-                if (!stream) {
-                    throw new Error('Stream de áudio não gerado');
-                }
-
-                let buffer = Buffer.from([]);
-                for await (const chunk of stream) {
-                    buffer = Buffer.concat([buffer, chunk]);
-                }
-
                 // Salva o áudio temporariamente
                 if (!fs.existsSync(this.tempDir)) {
                     await fs.mkdir(this.tempDir, { recursive: true });
                 }
 
                 audioPath = path.join(this.tempDir, `audio_${Date.now()}.ogg`);
-                await fs.writeFile(audioPath, buffer);
+                await fs.writeFile(audioPath, audioMessage.buffer);
 
                 console.log('✅ Áudio salvo temporariamente:', {
                     path: audioPath,
@@ -115,45 +102,42 @@ class AudioService {
 
     async _convertToMp3(inputPath) {
         return new Promise((resolve, reject) => {
-            console.log('🎵 Iniciando conversão para MP3...');
             const outputPath = inputPath.replace('.ogg', '.mp3');
+            
+            console.log('🔄 Iniciando conversão para MP3:', {
+                entrada: inputPath,
+                saida: outputPath
+            });
 
-            // Usando ffmpeg-static em vez do comando do sistema
-            const process = spawn(ffmpeg, [
+            const ffmpegProcess = spawn(ffmpeg, [
                 '-i', inputPath,
                 '-acodec', 'libmp3lame',
-                '-ar', '44100',
-                '-ac', '2',
-                '-b:a', '192k',
+                '-q:a', '2',
                 outputPath
             ]);
 
-            let errorOutput = '';
+            let stderr = '';
 
-            process.stderr.on('data', (data) => {
-                errorOutput += data.toString();
-                console.log('🔄 FFmpeg progresso:', data.toString());
+            ffmpegProcess.stderr.on('data', (data) => {
+                stderr += data.toString();
             });
 
-            process.on('close', (code) => {
+            ffmpegProcess.on('close', (code) => {
                 if (code === 0) {
-                    console.log('✅ Conversão para MP3 concluída:', {
-                        entrada: inputPath,
-                        saida: outputPath
-                    });
+                    console.log('✅ Conversão concluída com sucesso');
                     resolve(outputPath);
                 } else {
-                    console.error('❌ Erro ao converter áudio:', {
+                    console.error('❌ Erro na conversão:', {
                         codigo: code,
-                        erro: errorOutput
+                        erro: stderr
                     });
-                    reject(new Error(`FFmpeg falhou com código ${code}: ${errorOutput}`));
+                    reject(new Error(`Falha na conversão do áudio: ${stderr}`));
                 }
             });
 
-            process.on('error', (err) => {
-                console.error('❌ Erro ao executar FFmpeg:', err);
-                reject(err);
+            ffmpegProcess.on('error', (error) => {
+                console.error('❌ Erro ao iniciar ffmpeg:', error);
+                reject(error);
             });
         });
     }
@@ -200,45 +184,31 @@ class AudioService {
 
     async _cleanupTempFile(filePath) {
         try {
-            if (await fs.access(filePath).then(() => true).catch(() => false)) {
+            if (filePath && await fs.access(filePath).then(() => true).catch(() => false)) {
                 await fs.unlink(filePath);
-                console.log('🗑️ Arquivo temporário removido:', { path: filePath });
+                console.log('🧹 Arquivo temporário removido:', filePath);
             }
         } catch (error) {
-            console.error('⚠️ Erro ao remover arquivo temporário:', error);
+            console.error('❌ Erro ao remover arquivo temporário:', {
+                path: filePath,
+                error: error.message
+            });
         }
     }
 
     _isValidAudioMimeType(mimetype) {
-        if (!mimetype) return false;
-
-        // Limpa o mimetype removendo parâmetros adicionais
-        const cleanMimeType = mimetype.split(';')[0].trim().toLowerCase();
-        
-        const validTypes = [
-            'audio/opus',
+        const validMimeTypes = [
             'audio/ogg',
+            'audio/ogg; codecs=opus',
             'audio/mpeg',
             'audio/mp3',
             'audio/wav',
-            'audio/x-m4a',
-            'audio/aac',
-            'audio/mp4',
             'audio/webm',
-            'audio/amr',
-            'audio/x-wav'
+            'audio/aac'
         ];
-
-        // Verifica se o formato base é suportado
-        const isSupported = validTypes.includes(cleanMimeType);
-        
-        // Se for audio/ogg com codec opus, também é suportado
-        const isOggOpus = cleanMimeType === 'audio/ogg' && mimetype.toLowerCase().includes('codecs=opus');
-        
-        // Se for audio/webm com codec opus, também é suportado
-        const isWebmOpus = cleanMimeType === 'audio/webm' && mimetype.toLowerCase().includes('codecs=opus');
-        
-        return isSupported || isOggOpus || isWebmOpus;
+        return validMimeTypes.some(validType => 
+            mimetype.toLowerCase().startsWith(validType.toLowerCase())
+        );
     }
 }
 
