@@ -81,14 +81,20 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
         
         // Extrair a mensagem do webhook
         const message = await whatsappService.extractMessageFromWebhook(req.body);
+        
+        if (!message) {
+            console.log('⚠️ Mensagem não pôde ser extraída do webhook');
+            return res.sendStatus(200);
+        }
+
         console.log('📨 Mensagem extraída:', {
-            type: message.type,
-            from: message.from,
-            messageId: message.messageId,
-            hasFrom: !!message.from,
-            fromType: typeof message.from,
-            fromLength: message.from?.length,
-            tipoMensagem: message.type
+            type: message?.type || 'unknown',
+            from: message?.from,
+            messageId: message?.messageId,
+            hasFrom: !!message?.from,
+            fromType: typeof message?.from,
+            fromLength: message?.from?.length,
+            tipoMensagem: message?.type || 'unknown'
         });
 
         if (!message.from) {

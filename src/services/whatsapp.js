@@ -213,13 +213,14 @@ class WhatsAppService {
 
     async extractMessageFromWebhook(webhookData) {
         try {
-            const messageData = webhookData?.data?.[0];
-            if (!messageData) {
-                console.log('[Webhook] Dados da mensagem ausentes');
+            if (!webhookData?.data?.[0]) {
+                console.log('[Webhook] Dados ausentes ou inválidos');
                 return null;
             }
 
+            const messageData = webhookData.data[0];
             const { messages, contacts } = messageData;
+
             if (!messages?.[0]) {
                 console.log('[Webhook] Mensagem ausente no webhook');
                 return null;
@@ -234,8 +235,13 @@ class WhatsAppService {
                 from: message.from,
                 messageId: message.id,
                 timestamp: message.timestamp,
-                contactName: contact.profile?.name || '',
+                contactName: contact.profile?.name || ''
             };
+
+            if (!messageInfo.from) {
+                console.log('[Webhook] Remetente ausente');
+                return null;
+            }
 
             console.log('[Webhook] Mensagem recebida:', {
                 type: messageInfo.type,
@@ -243,7 +249,7 @@ class WhatsAppService {
                 messageId: messageInfo.messageId
             });
 
-            // Processar baseado no tipo
+            // Processar dados específicos do tipo
             if (messageInfo.type === 'image') {
                 const imageMessage = message.image || message.message?.imageMessage;
                 if (!imageMessage) {
@@ -264,6 +270,7 @@ class WhatsAppService {
             }
 
             return messageInfo;
+
         } catch (error) {
             console.error('[Webhook] Erro ao extrair mensagem:', {
                 message: error.message,
@@ -271,6 +278,19 @@ class WhatsAppService {
             });
             return null;
         }
+    }
+
+    getMessageType(message) {
+        if (!message) return 'unknown';
+        
+        // Verificar a estrutura da mensagem
+        const messageContent = message.message || message;
+
+        if (messageContent.imageMessage || messageContent.image) return 'image';
+        if (messageContent.audioMessage || messageContent.audio) return 'audio';
+        if (messageContent.conversation || messageContent.extendedTextMessage?.text) return 'text';
+        
+        return 'unknown';
     }
 
     async processWhatsAppImage(messageInfo) {
