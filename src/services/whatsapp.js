@@ -385,72 +385,82 @@ class WhatsAppService {
             
             // Validar tipo de arquivo
             if (!config.allowedTypes.includes(mediaData.mimetype)) {
-                throw new Error(`Tipo de arquivo não permitido: ${mediaData.mimetype}`);
+                console.log(`[PaymentProof] Tipo de arquivo inválido: ${mediaData.mimetype}`);
+                return {
+                    success: false,
+                    message: 'Por favor, envie apenas imagens (jpg, jpeg, png).'
+                };
             }
 
-            // Validar tamanho
-            if (mediaData.size > config.maxSize) {
-                throw new Error(`Arquivo muito grande: ${mediaData.size} bytes`);
+            // Baixar e salvar a imagem
+            const stream = await downloadContentFromMessage(mediaData, 'image');
+            const buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+                buffer.concat(chunk);
             }
 
             // Criar diretório se não existir
             await fs.mkdir(config.saveDir, { recursive: true });
-
-            // Salvar arquivo localmente
-            const extension = mediaData.mimetype.split('/')[1];
-            const fileName = `payment_proof_${Date.now()}_${userContact.replace(/[^0-9]/g, '')}.${extension}`;
-            const filePath = path.join(config.saveDir, fileName);
             
-            await fs.writeFile(filePath, mediaData.buffer);
+            const filename = `payment_${userContact}_${Date.now()}.${mediaData.mimetype.split('/')[1]}`;
+            const filepath = path.join(config.saveDir, filename);
+            
+            await fs.writeFile(filepath, buffer);
+            console.log(`[PaymentProof] Imagem salva em: ${filepath}`);
 
-            // Analisar o comprovante com Vision
-            const imageUrl = mediaData.url || `file://${filePath}`;
-            const analysis = await this.groqServices.analyzeImage(imageUrl);
-
-            // Estruturar dados do comprovante
-            const proofData = {
-                timestamp: new Date().toISOString(),
-                userContact,
-                mediaType: mediaData.mimetype,
-                mediaSize: mediaData.size,
-                filePath,
-                fileName,
-                analysis // Inclui a análise do Vision
-            };
-
-            // Log do encaminhamento
-            console.log(' Comprovante processado:', {
-                ...proofData,
-                analysisExcerpt: analysis.substring(0, 100) + '...',
-                buffer: '<<binary data>>'
+            // Analisar a imagem com Groq Vision
+            const analysis = await this.groqServices.analyzeImage(filepath);
+            console.log('[PaymentProof] Análise Groq:', { 
+                success: analysis.success,
+                hasPaymentInfo: analysis.hasPaymentInfo 
             });
 
-            // Enviar para webhook se configurado
-            if (config.webhook) {
-                const formData = new FormData();
-                Object.entries(proofData).forEach(([key, value]) => {
-                    formData.append(key, value);
-                });
-                formData.append('file', mediaData.buffer, fileName);
+            // Preparar FormData para webhook
+            const formData = new FormData();
+            formData.append('file', buffer, {
+                filename,
+                contentType: mediaData.mimetype
+            });
+            formData.append('contact', userContact);
+            formData.append('analysis', JSON.stringify(analysis));
 
+            // Enviar para webhook
+            try {
                 await axios.post(config.webhook, formData, {
                     headers: {
                         ...formData.getHeaders(),
                         'Authorization': `Bearer ${this.config.token}`
-                    }
+                    },
+                    maxContentLength: Infinity,
+                    maxBodyLength: Infinity
                 });
-
-                console.log(' Comprovante enviado para webhook');
+                console.log('[PaymentProof] Webhook enviado com sucesso');
+            } catch (webhookError) {
+                console.error('[PaymentProof] Erro ao enviar webhook:', {
+                    status: webhookError.response?.status,
+                    message: webhookError.message
+                });
+                throw webhookError;
             }
 
-            // Enviar resposta com detalhes da análise
-            const responseMessage = ` Comprovante recebido e analisado:\n\n${analysis}\n\nO comprovante será verificado pelo setor financeiro. Posso ajudar com mais alguma coisa?`;
-            await this.sendTextMessage(userContact, responseMessage);
+            return {
+                success: true,
+                message: 'Comprovante recebido e analisado com sucesso. Nossa equipe financeira irá verificar e confirmar o pagamento.',
+                analysis
+            };
 
-            return true;
         } catch (error) {
-            console.error(' Erro ao encaminhar comprovante:', error);
-            throw error;
+            console.error('[PaymentProof] Erro ao processar comprovante:', {
+                message: error.message,
+                code: error.code,
+                type: error.type
+            });
+            
+            return {
+                success: false,
+                message: 'Desculpe, ocorreu um erro ao processar seu comprovante. Por favor, tente novamente ou entre em contato com nosso suporte.',
+                error: error.message
+            };
         }
     }
 
