@@ -72,8 +72,10 @@ class GroqServices {
 
     async transcribeAudio(formData) {
         try {
+            console.log('🎤 Iniciando transcrição com Groq');
+            
             const response = await this.axiosInstance.post(
-                `${this.baseUrl}/audio/transcriptions`,
+                `${this.baseUrl}/v1/audio/transcriptions`,
                 formData,
                 {
                     headers: {
@@ -85,7 +87,9 @@ class GroqServices {
                 }
             );
 
-            if (response.data && response.data.text) {
+            console.log('✅ Resposta da transcrição:', response.data);
+
+            if (response.data?.text) {
                 return response.data.text.trim();
             } else {
                 throw new Error('Formato de resposta inválido');
