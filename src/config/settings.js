@@ -83,10 +83,8 @@ const BUSINESS_HOURS = {
             email: 'financeiro@empresa.com',
             phone: '11999999999',
             paymentProofs: {
-                saveDir: './uploads/payments',
-                allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
-                maxSize: 5 * 1024 * 1024, // 5MB
-                webhook: 'https://api.empresa.com/financial/payment-proofs'
+                allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
+                maxSize: 5 * 1024 * 1024 // 5MB
             }
         }
     }
