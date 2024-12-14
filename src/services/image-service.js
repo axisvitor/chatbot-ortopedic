@@ -26,53 +26,35 @@ class ImageService {
 
             const imageMessage = messageInfo.mediaData.message.imageMessage;
 
-            console.log('[Image] Iniciando processamento da imagem:', {
+            // Log dos metadados da imagem
+            console.log('[Image] Metadados da imagem recebida:', {
                 type: imageMessage.mimetype,
                 size: imageMessage.fileLength,
                 mediaKey: imageMessage.mediaKey ? '✓' : '✗',
                 fileEncSha256: imageMessage.fileEncSha256 ? '✓' : '✗',
-                url: imageMessage.url || 'N/A',
-                directPath: imageMessage.directPath || 'N/A',
-                jpegThumbnail: imageMessage.jpegThumbnail ? '✓' : '✗'
+                fileSha256: imageMessage.fileSha256 ? '✓' : '✗',
+                mediaKeyTimestamp: imageMessage.mediaKeyTimestamp,
+                url: imageMessage.url ? '✓' : '✗',
+                directPath: imageMessage.directPath ? '✓' : '✗'
             });
 
-            // Verifica se temos os dados necessários
-            const requiredFields = ['mediaKey', 'url', 'directPath', 'mimetype'];
+            // Verifica se temos todos os dados necessários para descriptografia
+            const requiredFields = ['mediaKey', 'url', 'directPath', 'mimetype', 'fileEncSha256'];
             const missingFields = requiredFields.filter(field => !imageMessage[field]);
             
             if (missingFields.length > 0) {
-                throw new Error(`Dados de mídia incompletos. Campos faltando: ${missingFields.join(', ')}`);
+                throw new Error(`Dados de mídia incompletos para descriptografia. Campos faltando: ${missingFields.join(', ')}`);
             }
 
-            // Primeiro tenta usar o jpegThumbnail se disponível (mais rápido)
-            if (imageMessage.jpegThumbnail) {
-                console.log('[Image] Tentando usar thumbnail JPEG...');
-                try {
-                    const analysis = await this.groqServices.analyzeImage(imageMessage.jpegThumbnail);
-                    return {
-                        success: true,
-                        message: 'Imagem analisada com sucesso (via thumbnail)',
-                        analysis,
-                        metadata: {
-                            source: 'thumbnail',
-                            type: 'image/jpeg',
-                            size: imageMessage.jpegThumbnail.length
-                        }
-                    };
-                } catch (thumbError) {
-                    console.log('[Image] Falha ao usar thumbnail, tentando download completo:', thumbError.message);
-                }
-            }
-
-            // Se não tem thumbnail ou falhou, faz o download completo
-            console.log('[Image] Baixando imagem completa...');
+            // Download e descriptografia da imagem usando Baileys
+            console.log('[Image] Iniciando download e descriptografia...');
             const stream = await downloadContentFromMessage(imageMessage, 'image');
             
             if (!stream) {
-                throw new Error('Não foi possível iniciar o download da imagem');
+                throw new Error('Falha ao iniciar download e descriptografia da imagem');
             }
 
-            // Converter stream em buffer com timeout de segurança
+            // Converter stream em buffer
             const chunks = [];
             let totalSize = 0;
             
@@ -88,29 +70,32 @@ class ImageService {
             const buffer = Buffer.concat(chunks);
 
             if (!buffer.length) {
-                throw new Error('Download da imagem falhou - buffer vazio');
+                throw new Error('Download e descriptografia falharam - buffer vazio');
             }
 
-            console.log('[Image] Download concluído:', {
+            // Verifica os primeiros bytes do buffer descriptografado
+            const fileHeader = buffer.slice(0, 8).toString('hex').toUpperCase();
+            console.log('[Image] Imagem descriptografada:', {
                 bufferSize: buffer.length,
                 sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2) + 'MB',
                 chunks: chunks.length,
-                mimeType: imageMessage.mimetype
+                mimeType: imageMessage.mimetype,
+                fileHeader: fileHeader
             });
 
-            // Analisar a imagem com Groq
+            // Analisar a imagem descriptografada com Groq
             const analysis = await this.groqServices.analyzeImage(buffer);
             
             return {
                 success: true,
-                message: 'Imagem analisada com sucesso',
+                message: 'Imagem descriptografada e analisada com sucesso',
                 analysis,
                 metadata: {
-                    source: 'download',
                     type: imageMessage.mimetype,
                     size: buffer.length,
                     width: imageMessage.width,
-                    height: imageMessage.height
+                    height: imageMessage.height,
+                    fileHeader: fileHeader
                 }
             };
 
