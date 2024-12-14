@@ -275,6 +275,31 @@ class WhatsAppService {
                     length: messageInfo.text.length,
                     preview: messageInfo.text.substring(0, 50)
                 });
+            } else if (messageInfo.type === 'audio') {
+                const audioMessage = body.message?.audioMessage;
+                if (!audioMessage) {
+                    console.log('[Webhook] Dados do áudio ausentes');
+                    return null;
+                }
+
+                messageInfo.mediaData = {
+                    mimetype: audioMessage.mimetype,
+                    messageType: 'audio',
+                    message: audioMessage,
+                    fileLength: audioMessage.fileLength,
+                    seconds: audioMessage.seconds,
+                    ptt: audioMessage.ptt,
+                    mediaKey: audioMessage.mediaKey,
+                    fileEncSha256: audioMessage.fileEncSha256
+                };
+
+                console.log('[Webhook] Áudio processado:', {
+                    mimetype: messageInfo.mediaData.mimetype,
+                    hasMediaKey: !!messageInfo.mediaData.mediaKey,
+                    fileLength: messageInfo.mediaData.fileLength,
+                    seconds: messageInfo.mediaData.seconds,
+                    isPtt: messageInfo.mediaData.ptt
+                });
             }
 
             console.log('[Webhook] Mensagem extraída com sucesso:', {
@@ -404,10 +429,31 @@ class WhatsAppService {
     async processWhatsAppAudio(messageInfo) {
         try {
             if (!messageInfo?.mediaData?.message) {
+                console.error('[Audio] Dados do áudio ausentes:', {
+                    hasMediaData: !!messageInfo?.mediaData,
+                    hasMessage: !!messageInfo?.mediaData?.message,
+                    messageInfo: JSON.stringify(messageInfo, null, 2)
+                });
                 throw new Error('Dados do áudio ausentes ou inválidos');
             }
 
-            console.log('[Audio] Iniciando processamento do áudio');
+            const audioMessage = messageInfo.mediaData.message;
+            
+            // Validar campos obrigatórios
+            const requiredFields = ['mediaKey', 'fileEncSha256', 'fileSha256', 'mimetype'];
+            const missingFields = requiredFields.filter(field => !audioMessage[field]);
+            
+            if (missingFields.length > 0) {
+                console.error('[Audio] Campos obrigatórios ausentes:', missingFields);
+                throw new Error(`Campos obrigatórios ausentes: ${missingFields.join(', ')}`);
+            }
+
+            console.log('[Audio] Iniciando processamento do áudio:', {
+                mimetype: audioMessage.mimetype,
+                fileLength: audioMessage.fileLength,
+                seconds: audioMessage.seconds,
+                ptt: audioMessage.ptt
+            });
             
             // Download do áudio
             const stream = await downloadContentFromMessage(messageInfo.mediaData.message, 'audio');

@@ -41,25 +41,32 @@ app.use(rateLimit({
 }));
 
 // Inicialização dos serviços
-let redisStore, whatsappService, aiServices, trackingService, groqServices;
+let redisStore, whatsappService, aiServices, trackingService, groqServices, audioService, imageService;
 
 async function initializeServices() {
     try {
-        // Inicializa OpenAI
-        const openai = new OpenAI({
-            apiKey: settings.OPENAI_CONFIG.apiKey
-        });
-
-        // Inicializa serviços
         redisStore = new services.RedisStore();
         await redisStore.connect();
+        console.log('✅ Redis conectado');
+
+        groqServices = new services.GroqServices();
+        console.log('✅ Groq Services inicializado');
+
+        audioService = new services.AudioService(groqServices);
+        console.log('✅ Audio Service inicializado');
+
+        imageService = new services.ImageService(groqServices);
+        console.log('✅ Image Service inicializado');
 
         whatsappService = new services.WhatsAppService();
-        groqServices = new services.GroqServices();
-        trackingService = new services.TrackingService(redisStore, whatsappService);
-        aiServices = new services.AIServices(trackingService, whatsappService, groqServices, redisStore);
+        console.log('✅ WhatsApp Service inicializado');
 
-        console.log('✅ Todos os serviços inicializados com sucesso');
+        trackingService = new services.TrackingService(redisStore, whatsappService);
+        console.log('✅ Tracking Service inicializado');
+
+        aiServices = new services.AIServices(trackingService, whatsappService, groqServices, redisStore);
+        console.log('✅ AI Services inicializado');
+
     } catch (error) {
         console.error('❌ Erro ao inicializar serviços:', error);
         process.exit(1);
