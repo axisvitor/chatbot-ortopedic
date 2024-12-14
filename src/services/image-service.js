@@ -14,8 +14,10 @@ class ImageService {
                 throw new Error('Dados da imagem ausentes ou inválidos');
             }
 
+            const mimeType = messageInfo.mediaData.message.mimetype || 'image/jpeg';
+
             console.log('[Image] Iniciando processamento da imagem:', {
-                type: messageInfo.mediaData.message.mimetype,
+                type: mimeType,
                 size: messageInfo.mediaData.message.fileLength
             });
             
@@ -35,7 +37,7 @@ class ImageService {
             console.log('[Image] Download concluído, tamanho:', buffer.length);
 
             // Analisar a imagem com Groq
-            const analysis = await this.groqServices.analyzeImage(buffer);
+            const analysis = await this.groqServices.analyzeImage(buffer, mimeType);
             console.log('[Image] Análise concluída:', analysis);
 
             return {

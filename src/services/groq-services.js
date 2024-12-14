@@ -14,45 +14,43 @@ class GroqServices {
         })
     }
 
-    async analyzeImage(imageBuffer) {
+    async analyzeImage(imageBuffer, mimeType = 'image/jpeg') {
         try {
             console.log('🖼️ Analisando imagem:', { 
                 bufferSize: imageBuffer.length,
+                mimeType,
                 primeirosBytes: imageBuffer.slice(0, 16).toString('hex')
             });
 
-            // Converte o buffer para base64
-            const base64Image = imageBuffer.toString('base64');
+            // Prepara o FormData com a imagem
+            const formData = new FormData();
+            formData.append('file', imageBuffer, {
+                filename: 'image.jpg',
+                contentType: mimeType
+            });
+            formData.append('model', this.models.vision);
 
-            const payload = {
-                model: this.models.vision,
-                messages: [
-                    {
-                        role: "user",
-                        content: [
-                            {
-                                type: "text",
-                                text: "Analise esta imagem e me diga se é um comprovante de pagamento. Se for, extraia as informações relevantes como valor, data, tipo de pagamento (PIX, TED, etc), banco origem e destino. Se não for um comprovante, apenas diga que não é um comprovante de pagamento."
-                            },
-                            {
-                                type: "image_url",
-                                image_url: {
-                                    url: `data:image/jpeg;base64,${base64Image}`
-                                }
-                            }
-                        ]
-                    }
-                ]
-            };
+            // Remove o Content-Type padrão para permitir que o FormData defina o boundary
+            const headers = { ...this.axiosInstance.defaults.headers };
+            delete headers['Content-Type'];
 
             console.log('📤 Enviando request para Groq:', {
                 model: this.models.vision,
-                imageSize: base64Image.length
+                imageSize: imageBuffer.length
             });
 
             const response = await this.axiosInstance.post(
                 'https://api.groq.com/openai/v1/chat/completions',
-                payload
+                formData,
+                {
+                    headers: {
+                        ...headers,
+                        ...formData.getHeaders(),
+                        'Accept': 'application/json'
+                    },
+                    maxBodyLength: Infinity,
+                    maxContentLength: Infinity
+                }
             );
 
             if (response.data?.choices?.[0]?.message?.content) {
@@ -65,7 +63,8 @@ class GroqServices {
             console.error('❌ Erro ao analisar imagem com Groq:', {
                 message: error.message,
                 status: error.response?.status,
-                data: error.response?.data
+                data: error.response?.data,
+                stack: error.stack
             });
             throw error;
         }
