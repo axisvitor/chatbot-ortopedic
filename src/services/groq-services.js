@@ -23,36 +23,11 @@ class GroqServices {
                 base64Image = imageData.toString('base64');
                 console.log('🖼️ Processando buffer de imagem:', { 
                     bufferSize: imageData.length,
-                    mimeType
+                    mimeType,
+                    primeirosBytes: imageData.slice(0, 4).toString('hex')
                 });
-            } else if (typeof imageData === 'string') {
-                if (imageData.startsWith('http://') || imageData.startsWith('https://')) {
-                    // Se for uma URL, faz o download primeiro
-                    console.log('🖼️ Baixando imagem da URL:', imageData);
-                    const response = await axios.get(imageData, {
-                        responseType: 'arraybuffer',
-                        headers: {
-                            'Accept': 'image/*'
-                        }
-                    });
-                    const buffer = Buffer.from(response.data);
-                    base64Image = buffer.toString('base64');
-                    console.log('🖼️ Download concluído:', {
-                        bufferSize: buffer.length,
-                        mimeType: response.headers['content-type'] || mimeType
-                    });
-                } else {
-                    // Se for um caminho local, lê o arquivo
-                    const buffer = await fs.readFile(imageData);
-                    base64Image = buffer.toString('base64');
-                    console.log('🖼️ Lendo arquivo local:', {
-                        path: imageData,
-                        bufferSize: buffer.length,
-                        mimeType
-                    });
-                }
             } else {
-                throw new Error('Formato de imagem inválido. Esperado: Buffer, URL ou caminho do arquivo');
+                throw new Error('Formato de imagem inválido. Esperado: Buffer de imagem decodificada');
             }
 
             const payload = {
@@ -79,7 +54,8 @@ class GroqServices {
 
             console.log('📤 Enviando request para Groq:', {
                 model: this.models.vision,
-                messageTypes: payload.messages[0].content.map(c => c.type)
+                messageTypes: payload.messages[0].content.map(c => c.type),
+                imageSize: base64Image.length
             });
 
             const response = await this.axiosInstance.post(

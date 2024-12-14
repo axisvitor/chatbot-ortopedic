@@ -348,83 +348,43 @@ class WhatsAppService {
         return types;
     }
 
-    async processWhatsAppImage(messageInfo) {
+    async processWhatsAppImage(msg) {
         try {
-            if (!messageInfo?.mediaData?.message?.imageMessage) {
-                throw new Error('Dados da imagem ausentes ou inválidos');
-            }
-
-            console.log('[Image] Iniciando processamento da imagem:', {
-                mimetype: messageInfo.mediaData.message.imageMessage.mimetype,
-                filesize: messageInfo.mediaData.message.imageMessage.fileLength,
-                hasMediaKey: !!messageInfo.mediaData.message.imageMessage.mediaKey
+            console.log('📸 Processando mensagem de imagem do WhatsApp:', {
+                messageType: msg.message?.imageMessage ? 'imageMessage' : 'documentMessage',
+                mimetype: msg.message?.imageMessage?.mimetype || msg.message?.documentMessage?.mimetype
             });
-            
-            // Download e decodificação da imagem usando Baileys
+
             const stream = await downloadContentFromMessage(
-                messageInfo.mediaData.message.imageMessage,
-                'image'
+                msg.message.imageMessage || msg.message.documentMessage,
+                msg.message.imageMessage ? 'image' : 'document'
             );
-            
+
             let buffer = Buffer.from([]);
             for await (const chunk of stream) {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            console.log('[Image] Download e decodificação concluídos:', {
+            console.log('📥 Download da imagem concluído:', {
                 bufferSize: buffer.length,
                 primeirosBytes: buffer.slice(0, 4).toString('hex')
             });
 
-            // Se for um comprovante de pagamento
-            if (this.isPaymentProof(messageInfo)) {
-                console.log('[Image] Detectado como comprovante de pagamento');
-                try {
-                    // Analisar a imagem com Groq usando o buffer diretamente
-                    const analysis = await this.groqServices.analyzeImage(
-                        buffer, 
-                        messageInfo.mediaData.message.imageMessage.mimetype || 'image/jpeg'
-                    );
-                    console.log('[Image] Análise do comprovante:', analysis);
+            const mimeType = msg.message?.imageMessage?.mimetype || msg.message?.documentMessage?.mimetype || 'image/jpeg';
+            const resultado = await this.groqServices.analyzeImage(buffer, mimeType);
 
-                    // Encaminhar para o setor financeiro
-                    await this.forwardPaymentProof({
-                        ...messageInfo.mediaData,
-                        buffer,
-                        analysis
-                    }, messageInfo.from);
-
-                    return {
-                        success: true,
-                        message: 'Comprovante recebido e analisado com sucesso',
-                        analysis
-                    };
-                } catch (analysisError) {
-                    console.error('[Image] Erro ao analisar comprovante:', analysisError);
-                    return {
-                        success: false,
-                        message: 'Desculpe, não foi possível analisar o comprovante no momento. Por favor, tente novamente em alguns instantes.'
-                    };
-                }
-            }
-
-            return {
-                success: true,
-                message: 'Imagem recebida com sucesso'
-            };
-
-        } catch (error) {
-            console.error('[Image] Erro ao processar imagem:', {
-                message: error.message,
-                type: error.type,
-                code: error.code,
-                stack: error.stack
+            console.log('✅ Análise da imagem concluída:', {
+                resultadoLength: resultado?.length || 0
             });
 
-            return {
-                success: false,
-                message: 'Desculpe, não foi possível processar sua imagem. Por favor, tente novamente.'
-            };
+            return resultado;
+
+        } catch (error) {
+            console.error('❌ Erro ao processar imagem do WhatsApp:', {
+                message: error.message,
+                stack: error.stack
+            });
+            throw error;
         }
     }
 
