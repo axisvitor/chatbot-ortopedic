@@ -40,37 +40,51 @@ class GroqServices {
 
     async processWhatsAppAudio(messageData) {
         try {
+            // Log completo da mensagem para debug
+            console.log('📩 Mensagem recebida:', JSON.stringify(messageData, null, 2));
+
             if (!messageData?.message?.audioMessage) {
                 throw new Error('Mensagem não contém áudio');
             }
 
             const audioMessage = messageData.message.audioMessage;
-            console.log('🎤 Processando áudio do WhatsApp:', {
+            
+            // Log detalhado dos campos relevantes
+            console.log('🎤 Dados do áudio:', {
                 seconds: audioMessage.seconds,
                 fileLength: audioMessage.fileLength,
                 mimetype: audioMessage.mimetype,
                 mediaKey: audioMessage.mediaKey ? 'presente' : 'ausente',
                 url: audioMessage.url ? 'presente' : 'ausente',
-                directPath: audioMessage.directPath ? 'presente' : 'ausente'
+                directPath: audioMessage.directPath ? 'presente' : 'ausente',
+                ptt: audioMessage.ptt
             });
 
-            // Verifica se temos os dados necessários para processar o áudio
-            if (!audioMessage.mediaKey && !audioMessage.url) {
-                throw new Error('Dados insuficientes para processar o áudio');
+            // Verifica se temos os dados necessários para descriptografia
+            if (!audioMessage.mediaKey || !audioMessage.url) {
+                throw new Error('Dados insuficientes para descriptografia do áudio');
             }
 
             let audioPath = null;
             try {
-                // Tenta baixar usando diferentes métodos
-                let stream;
-                if (audioMessage.mediaKey) {
-                    stream = await downloadContentFromMessage(audioMessage, 'audio');
-                } else if (audioMessage.url) {
-                    // Implementar método alternativo usando URL direta
-                    const response = await axios.get(audioMessage.url, { responseType: 'stream' });
-                    stream = response.data;
-                }
+                // Prepara os dados necessários para descriptografia
+                const mediaData = {
+                    mediaKey: audioMessage.mediaKey,
+                    directPath: audioMessage.directPath,
+                    url: audioMessage.url,
+                    mimetype: audioMessage.mimetype
+                };
 
+                console.log('🔐 Tentando descriptografar áudio com dados:', {
+                    temMediaKey: !!mediaData.mediaKey,
+                    temDirectPath: !!mediaData.directPath,
+                    temUrl: !!mediaData.url,
+                    mimetype: mediaData.mimetype
+                });
+
+                // Tenta descriptografar e baixar o áudio
+                const stream = await downloadContentFromMessage(mediaData, 'audio');
+                
                 if (!stream) {
                     throw new Error('Não foi possível obter o stream do áudio');
                 }
@@ -90,11 +104,15 @@ class GroqServices {
                     writeStream.on('error', reject);
                 });
 
+                console.log('✅ Áudio salvo com sucesso em:', audioPath);
+
                 // Converte para MP3
                 const mp3Path = await this._convertToMp3(audioPath);
+                console.log('✅ Áudio convertido para MP3:', mp3Path);
                 
                 // Transcreve o áudio
                 const transcription = await this._transcribeWithGroq(mp3Path);
+                console.log('✅ Transcrição concluída:', transcription);
                 
                 return transcription;
                 
