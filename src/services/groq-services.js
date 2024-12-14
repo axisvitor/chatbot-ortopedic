@@ -16,24 +16,45 @@ class GroqServices {
 
     async analyzeImage(imageData) {
         try {
-            if (!Buffer.isBuffer(imageData)) {
-                throw new Error('Formato de imagem inválido. Esperado: Buffer de imagem decodificada');
+            let buffer;
+            let mimeType;
+            let base64Image;
+
+            // Handle base64 data URL input
+            if (typeof imageData === 'string' && imageData.startsWith('data:')) {
+                const matches = imageData.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+                if (!matches || matches.length !== 3) {
+                    throw new Error('Invalid base64 data URL format');
+                }
+                mimeType = matches[1];
+                base64Image = matches[2];
+                buffer = Buffer.from(base64Image, 'base64');
+            } 
+            // Handle buffer input
+            else if (Buffer.isBuffer(imageData)) {
+                buffer = imageData;
+                mimeType = this.detectMimeType(buffer);
+                base64Image = buffer.toString('base64');
+            } 
+            else {
+                throw new Error('Formato de imagem inválido. Esperado: Buffer de imagem decodificada ou data URL base64');
             }
 
-            // Detecta o tipo MIME baseado nos primeiros bytes
-            const mimeType = this.detectMimeType(imageData);
+            // Check size limits
+            const sizeInMB = buffer.length / (1024 * 1024);
+            if (sizeInMB > 4) {
+                throw new Error('Imagem muito grande. O limite máximo é 4MB para imagens base64');
+            }
             
             console.log('🖼️ Processando buffer de imagem:', { 
-                bufferSize: imageData.length,
+                bufferSize: buffer.length,
+                sizeInMB: sizeInMB.toFixed(2) + 'MB',
                 mimeType,
-                primeirosBytes: imageData.slice(0, 8).toString('hex')
+                primeirosBytes: buffer.slice(0, 8).toString('hex')
             });
 
-            // Converte para base64
-            const base64Image = imageData.toString('base64');
-
             if (!base64Image || base64Image.length === 0) {
-                throw new Error('Falha ao converter imagem para base64');
+                throw new Error('Falha ao processar imagem base64');
             }
 
             const payload = {
@@ -55,7 +76,8 @@ class GroqServices {
                         ]
                     }
                 ],
-                max_tokens: 1000
+                max_tokens: 1000,
+                temperature: 0.7
             };
 
             console.log('📤 Enviando request para Groq:', {

@@ -350,127 +350,70 @@ class WhatsAppService {
 
     async processWhatsAppImage(webhookData) {
         try {
-            // Extrair dados da mensagem
-            const { message, key, messageTimestamp, device } = webhookData;
-            const imageMessage = message?.imageMessage;
-            
+            const { key, messageTimestamp } = webhookData;
+            const imageMessage = webhookData.message?.imageMessage;
+
             if (!imageMessage) {
-                throw new Error('Mensagem não contém dados de imagem');
+                throw new Error('Mensagem de imagem inválida ou ausente');
             }
 
-            // Log detalhado dos metadados
-            console.log('📸 Recebido webhook de imagem:', {
+            console.log('[WhatsApp] Processando imagem:', {
                 messageId: key?.id,
                 from: key?.remoteJid,
                 timestamp: messageTimestamp,
-                device,
                 mimetype: imageMessage.mimetype,
-                fileSize: imageMessage.fileLength,
-                hasUrl: !!imageMessage.url,
-                hasMediaKey: !!imageMessage.mediaKey,
-                hasJpegThumbnail: !!imageMessage.jpegThumbnail
+                size: imageMessage.fileLength,
+                caption: imageMessage.caption || 'Sem legenda'
             });
 
-            let buffer;
-
-            // Se tiver thumbnail JPEG, tenta usar primeiro (mais rápido)
-            if (imageMessage.jpegThumbnail) {
-                try {
-                    buffer = Buffer.from(imageMessage.jpegThumbnail);
-                    console.log('📸 Usando thumbnail JPEG:', {
-                        bufferSize: buffer.length,
-                        primeirosBytes: buffer.slice(0, 8).toString('hex')
-                    });
-                } catch (error) {
-                    console.warn('⚠️ Erro ao processar thumbnail:', error.message);
-                    buffer = null;
+            // Criar objeto de mensagem para processamento
+            const messageInfo = {
+                mediaData: {
+                    message: imageMessage,
+                    messageType: 'image',
+                    caption: imageMessage.caption
                 }
-            }
+            };
 
-            // Se não conseguiu usar thumbnail, faz download da imagem completa
-            if (!buffer) {
-                try {
-                    console.log('🔄 Iniciando download da imagem completa...');
-                    
-                    const stream = await downloadContentFromMessage(imageMessage, 'image');
-                    const chunks = [];
-                    let totalSize = 0;
-                    
-                    for await (const chunk of stream) {
-                        chunks.push(chunk);
-                        totalSize += chunk.length;
-                        
-                        // Log do progresso a cada 500KB
-                        if (totalSize % 512000 < chunk.length) {
-                            console.log('📥 Download em progresso:', {
-                                totalSize: Math.round(totalSize / 1024) + 'KB'
-                            });
-                        }
-                    }
+            // Processar imagem usando ImageService
+            const imageService = new ImageService(this.groqServices);
+            const result = await imageService.processWhatsAppImage(messageInfo);
 
-                    buffer = Buffer.concat(chunks);
-                    
-                    console.log('✅ Download concluído:', {
-                        bufferSize: buffer.length,
-                        primeirosBytes: buffer.slice(0, 8).toString('hex')
-                    });
-                } catch (error) {
-                    console.error('❌ Erro no download da imagem:', {
-                        error: error.message,
-                        messageId: key?.id
-                    });
-                    throw new Error(`Falha ao baixar imagem: ${error.message}`);
+            if (!result.success) {
+                console.warn('[WhatsApp] Falha ao processar imagem:', {
+                    error: result.error,
+                    messageId: key?.id
+                });
+
+                // Enviar mensagem de erro para o usuário
+                if (key?.remoteJid) {
+                    await this.sendMessage(key.remoteJid, result.message);
                 }
+
+                return result;
             }
-
-            if (!buffer || buffer.length === 0) {
-                throw new Error('Não foi possível obter dados válidos da imagem');
-            }
-
-            // Validação do buffer de imagem
-            const magicNumber = buffer.slice(0, 4).toString('hex').toLowerCase();
-            if (!['ffd8ff', '89504e47'].some(header => magicNumber.startsWith(header))) {
-                throw new Error('Formato de imagem inválido: Não é JPEG nem PNG');
-            }
-
-            // Análise da imagem
-            console.log('🔍 Iniciando análise da imagem...');
-            const result = await this.groqServices.analyzeImage(buffer);
-
-            if (!result) {
-                throw new Error('Análise da imagem retornou resultado vazio');
-            }
-
-            console.log('✅ Análise concluída:', {
-                success: true,
-                messageId: key?.id,
-                resultLength: result.length,
-                isPaymentProof: result.toLowerCase().includes('comprovante')
-            });
 
             return {
                 success: true,
-                analysis: result,
+                analysis: result.analysis,
                 metadata: {
                     messageId: key?.id,
                     from: key?.remoteJid,
                     timestamp: messageTimestamp,
                     type: 'image',
-                    mimetype: imageMessage.mimetype,
-                    fileSize: buffer.length,
-                    source: buffer.length === imageMessage.jpegThumbnail?.length ? 'thumbnail' : 'download'
+                    ...result.metadata
                 }
             };
 
         } catch (error) {
-            console.error('❌ Erro ao processar imagem:', {
+            console.error('[WhatsApp] Erro ao processar imagem:', {
                 error: error.message,
                 stack: error.stack,
                 messageId: webhookData.key?.id,
                 from: webhookData.key?.remoteJid
             });
 
-            // Envia mensagem de erro para o usuário
+            // Enviar mensagem de erro para o usuário
             if (webhookData.key?.remoteJid) {
                 await this.sendMessage(
                     webhookData.key.remoteJid,
@@ -478,7 +421,11 @@ class WhatsAppService {
                 );
             }
 
-            throw error;
+            return {
+                success: false,
+                message: 'Erro interno ao processar imagem',
+                error: error.message
+            };
         }
     }
 
@@ -499,7 +446,7 @@ class WhatsAppService {
             const audioService = new AudioService(this.groqServices);
             
             // Processar o áudio com a estrutura correta
-            const result = await audioService.processWhatsAppAudio(messageInfo.mediaData);
+            const result = await audioService.processWhatsAppAudio(messageInfo);
 
             return {
                 success: true,

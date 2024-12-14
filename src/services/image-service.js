@@ -6,6 +6,15 @@ class ImageService {
     constructor(groqServices) {
         this.groqServices = groqServices;
         this.tempDir = path.join(__dirname, '../../temp');
+        this.maxImageSize = 4 * 1024 * 1024; // 4MB em bytes
+        this.validMimeTypes = new Set([
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/webp',
+            'image/heic',
+            'image/heif'
+        ]);
     }
 
     async processWhatsAppImage(messageInfo) {
@@ -15,7 +24,11 @@ class ImageService {
             }
 
             const imageMessage = messageInfo.mediaData.message;
-            const mimeType = imageMessage.mimetype || 'image/jpeg';
+            const mimeType = this._normalizeImageMimeType(imageMessage.mimetype);
+
+            if (!this._isValidImageMimeType(mimeType)) {
+                throw new Error(`Formato de imagem não suportado: ${mimeType}`);
+            }
 
             console.log('[Image] Iniciando processamento da imagem:', {
                 type: mimeType,
@@ -23,6 +36,11 @@ class ImageService {
                 mediaKey: imageMessage.mediaKey ? '✓' : '✗',
                 fileEncSha256: imageMessage.fileEncSha256 ? '✓' : '✗'
             });
+
+            // Verificar tamanho antes do download
+            if (imageMessage.fileLength > this.maxImageSize) {
+                throw new Error(`Imagem muito grande. Tamanho máximo permitido: ${this.maxImageSize / (1024 * 1024)}MB`);
+            }
             
             // Download e descriptografia da imagem usando Baileys
             console.log('[Image] Baixando e descriptografando imagem...');
@@ -32,30 +50,45 @@ class ImageService {
                 throw new Error('Não foi possível iniciar o download da imagem');
             }
 
-            // Converter stream em buffer
+            // Converter stream em buffer com verificação de tamanho
             let buffer = Buffer.from([]);
+            let totalSize = 0;
+            
             for await (const chunk of stream) {
+                totalSize += chunk.length;
+                if (totalSize > this.maxImageSize) {
+                    throw new Error(`Imagem excede o tamanho máximo permitido de ${this.maxImageSize / (1024 * 1024)}MB`);
+                }
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
             if (!buffer.length) {
-                console.error('❌ Buffer vazio após download');
-                throw new Error('Download da imagem falhou');
+                throw new Error('Download da imagem falhou - buffer vazio');
             }
 
             console.log('[Image] Download e descriptografia concluídos:', {
                 bufferSize: buffer.length,
+                sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2) + 'MB',
+                mimeType,
                 primeirosBytes: buffer.slice(0, 16).toString('hex')
             });
 
             // Analisar a imagem com Groq
-            const analysis = await this.groqServices.analyzeImage(buffer, mimeType);
-            console.log('[Image] Análise concluída:', analysis);
+            const analysis = await this.groqServices.analyzeImage(buffer);
+            console.log('[Image] Análise concluída:', {
+                success: true,
+                analysisLength: analysis?.length || 0
+            });
 
             return {
                 success: true,
                 message: 'Imagem analisada com sucesso',
-                analysis
+                analysis,
+                metadata: {
+                    mimeType,
+                    size: buffer.length,
+                    sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2)
+                }
             };
 
         } catch (error) {
@@ -63,27 +96,30 @@ class ImageService {
                 message: error.message,
                 type: error.type,
                 code: error.code,
-                stack: error.stack,
-                mediaData: messageInfo?.mediaData
+                stack: error.stack
             });
 
             return {
                 success: false,
-                message: 'Desculpe, não foi possível processar sua imagem. Por favor, tente novamente.'
+                message: this._getErrorMessage(error),
+                error: error.message
             };
         }
     }
 
     async isPaymentProof(messageInfo) {
         try {
-            // Palavras-chave no texto da imagem ou na mensagem
             const paymentKeywords = [
                 'comprovante',
                 'pagamento',
                 'transferência',
                 'pix',
                 'recibo',
-                'boleto'
+                'boleto',
+                'ted',
+                'doc',
+                'depósito',
+                'bancário'
             ];
 
             // Verifica se há palavras-chave na legenda da imagem
@@ -110,31 +146,29 @@ class ImageService {
         }
     }
 
-    async _cleanupTempFile(filePath) {
-        try {
-            if (await fs.access(filePath).then(() => true).catch(() => false)) {
-                await fs.unlink(filePath);
-                console.log('🗑️ Arquivo temporário removido:', { path: filePath });
-            }
-        } catch (error) {
-            console.error('⚠️ Erro ao remover arquivo temporário:', error);
-        }
+    _normalizeImageMimeType(mimetype) {
+        if (!mimetype) return 'image/jpeg'; // default
+        return mimetype.split(';')[0].trim().toLowerCase();
     }
 
     _isValidImageMimeType(mimetype) {
-        if (!mimetype) return false;
+        const normalizedType = this._normalizeImageMimeType(mimetype);
+        return this.validMimeTypes.has(normalizedType);
+    }
 
-        // Limpa o mimetype removendo parâmetros adicionais
-        const cleanMimeType = mimetype.split(';')[0].trim().toLowerCase();
-        
-        const validTypes = [
-            'image/jpeg',
-            'image/jpg',
-            'image/png',
-            'image/webp'
-        ];
+    _getErrorMessage(error) {
+        const errorMessages = {
+            'Imagem muito grande': 'A imagem é muito grande. Por favor, envie uma imagem menor que 4MB.',
+            'Formato de imagem não suportado': 'Formato de imagem não suportado. Por favor, envie em JPEG, PNG ou WebP.',
+            'Dados da imagem ausentes': 'Não foi possível processar a imagem. Por favor, tente enviar novamente.',
+            'Download da imagem falhou': 'Falha ao baixar a imagem. Por favor, tente novamente.'
+        };
 
-        return validTypes.includes(cleanMimeType);
+        for (const [key, message] of Object.entries(errorMessages)) {
+            if (error.message.includes(key)) return message;
+        }
+
+        return 'Desculpe, ocorreu um erro ao processar sua imagem. Por favor, tente novamente.';
     }
 }
 
