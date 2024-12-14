@@ -124,10 +124,13 @@ class AIServices {
     }
 
     async _requiresHumanSupport(message) {
-        // Implementar lógica para detectar se precisa de humano
-        // Por exemplo, verificar palavras-chave ou intenção do usuário
+        // Se não houver texto na mensagem, não requer suporte humano
+        if (!message?.text) {
+            return false;
+        }
+
         const humanSupportKeywords = [
-            'falar com humano',
+            'humano',
             'atendente',
             'pessoa real',
             'funcionário',
@@ -140,7 +143,11 @@ class AIServices {
     }
 
     async _isFinancialIssue(message) {
-        // Implementar lógica para detectar questões financeiras
+        // Se não houver texto na mensagem, não é uma questão financeira
+        if (!message?.text) {
+            return false;
+        }
+
         const financialKeywords = [
             'pagamento',
             'boleto',
