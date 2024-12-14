@@ -350,41 +350,111 @@ class WhatsAppService {
 
     async processWhatsAppImage(msg) {
         try {
+            // Extrair metadados da mensagem
+            const imageMessage = msg.message?.imageMessage;
+            const documentMessage = msg.message?.documentMessage;
+            const messageData = imageMessage || documentMessage;
+
+            if (!messageData) {
+                throw new Error('Mensagem não contém dados de imagem válidos');
+            }
+
+            // Log detalhado dos metadados
             console.log('📸 Processando mensagem de imagem do WhatsApp:', {
-                messageType: msg.message?.imageMessage ? 'imageMessage' : 'documentMessage',
-                mimetype: msg.message?.imageMessage?.mimetype || msg.message?.documentMessage?.mimetype
+                messageType: imageMessage ? 'imageMessage' : 'documentMessage',
+                mimetype: messageData.mimetype,
+                fileSize: messageData.fileLength,
+                dimensions: imageMessage ? {
+                    width: imageMessage.width,
+                    height: imageMessage.height
+                } : undefined,
+                hasMediaKey: !!messageData.mediaKey,
+                isForwarded: messageData.contextInfo?.isForwarded,
+                forwardingScore: messageData.contextInfo?.forwardingScore,
+                from: msg.key?.remoteJid,
+                messageId: msg.key?.id,
+                timestamp: msg.messageTimestamp,
+                device: msg.device
             });
 
+            // Download do conteúdo
             const stream = await downloadContentFromMessage(
-                msg.message.imageMessage || msg.message.documentMessage,
-                msg.message.imageMessage ? 'image' : 'document'
-            );
+                messageData,
+                imageMessage ? 'image' : 'document'
+            ).catch(error => {
+                console.error('❌ Erro ao iniciar download:', {
+                    error: error.message,
+                    type: error.type,
+                    code: error.code
+                });
+                throw new Error('Falha ao iniciar download da mídia');
+            });
 
+            // Processamento do stream
             let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-                buffer = Buffer.concat([buffer, chunk]);
+            try {
+                for await (const chunk of stream) {
+                    buffer = Buffer.concat([buffer, chunk]);
+                }
+            } catch (streamError) {
+                console.error('❌ Erro ao processar stream:', {
+                    error: streamError.message,
+                    bufferSize: buffer.length
+                });
+                throw new Error('Falha ao processar stream de dados');
+            }
+
+            // Validação do buffer
+            if (buffer.length === 0) {
+                throw new Error('Buffer vazio após download');
             }
 
             console.log('📥 Download da imagem concluído:', {
                 bufferSize: buffer.length,
-                primeirosBytes: buffer.slice(0, 4).toString('hex')
+                primeirosBytes: buffer.slice(0, 4).toString('hex'),
+                sha256: messageData.fileSha256?.toString('hex')
             });
 
-            const mimeType = msg.message?.imageMessage?.mimetype || msg.message?.documentMessage?.mimetype || 'image/jpeg';
+            // Análise da imagem
+            const mimeType = messageData.mimetype || 'image/jpeg';
             const resultado = await this.groqServices.analyzeImage(buffer, mimeType);
 
             console.log('✅ Análise da imagem concluída:', {
-                resultadoLength: resultado?.length || 0
+                resultadoLength: resultado?.length || 0,
+                messageId: msg.key?.id
             });
 
-            return resultado;
+            return {
+                success: true,
+                analysis: resultado,
+                metadata: {
+                    messageId: msg.key?.id,
+                    from: msg.key?.remoteJid,
+                    timestamp: msg.messageTimestamp,
+                    type: imageMessage ? 'image' : 'document',
+                    mimetype: mimeType,
+                    fileSize: messageData.fileLength,
+                    isForwarded: messageData.contextInfo?.isForwarded
+                }
+            };
 
         } catch (error) {
             console.error('❌ Erro ao processar imagem do WhatsApp:', {
                 message: error.message,
-                stack: error.stack
+                stack: error.stack,
+                messageId: msg.key?.id,
+                from: msg.key?.remoteJid
             });
-            throw error;
+
+            return {
+                success: false,
+                error: error.message,
+                metadata: {
+                    messageId: msg.key?.id,
+                    from: msg.key?.remoteJid,
+                    timestamp: msg.messageTimestamp
+                }
+            };
         }
     }
 
