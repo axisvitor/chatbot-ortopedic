@@ -49,14 +49,11 @@ class GroqServices {
                 seconds: audioMessage.seconds,
                 fileLength: audioMessage.fileLength,
                 mimetype: audioMessage.mimetype,
-                ptt: audioMessage.ptt,
-                mediaKey: audioMessage.mediaKey ? 'presente' : 'ausente',
-                url: audioMessage.url ? 'presente' : 'ausente'
+                mediaKey: !!audioMessage.mediaKey
             });
 
-            // Validações iniciais
-            if (audioMessage.fileLength > 25 * 1024 * 1024) {
-                throw new Error('Arquivo de áudio muito grande (máximo 25MB)');
+            if (!audioMessage.mediaKey) {
+                throw new Error('Chave de mídia não encontrada no áudio');
             }
 
             if (!this._isValidAudioMimeType(audioMessage.mimetype)) {
@@ -67,7 +64,10 @@ class GroqServices {
             try {
                 // Descriptografa e baixa o áudio usando Baileys
                 const stream = await downloadContentFromMessage(audioMessage, 'audio');
-                
+                if (!stream) {
+                    throw new Error('Não foi possível obter o stream do áudio');
+                }
+
                 // Salva o stream em um arquivo temporário
                 audioPath = path.join(this.tempDir, `audio_${Date.now()}.ogg`);
                 const writeStream = fs.createWriteStream(audioPath);
@@ -76,67 +76,31 @@ class GroqServices {
                     writeStream.write(chunk);
                 }
                 
+                writeStream.end();
+                
                 await new Promise((resolve, reject) => {
                     writeStream.on('finish', resolve);
                     writeStream.on('error', reject);
-                    writeStream.end();
                 });
 
-                console.log('✅ Áudio descriptografado e salvo:', {
-                    path: audioPath,
-                    size: fs.statSync(audioPath).size
-                });
-
-                // Tenta transcrever com retry
-                let lastError = null;
-                for (let attempt = 1; attempt <= 3; attempt++) {
-                    try {
-                        // Converte para MP3 antes de enviar
-                        const mp3Path = await this._convertToMp3(audioPath);
-                        const transcription = await this._transcribeWithGroq(mp3Path);
-                        
-                        if (!transcription || typeof transcription !== 'string' || transcription.trim().length === 0) {
-                            throw new Error('Transcrição vazia ou inválida');
-                        }
-                        
-                        console.log('✅ Transcrição bem sucedida:', transcription);
-
-                        // Limpa o arquivo MP3 temporário
-                        if (fs.existsSync(mp3Path)) {
-                            fs.unlinkSync(mp3Path);
-                            console.log('🗑️ Arquivo MP3 temporário removido:', { path: mp3Path });
-                        }
-
-                        return transcription.trim();
-                    } catch (error) {
-                        lastError = error;
-                        console.log(`⚠️ Tentativa ${attempt} falhou:`, error.message);
-                        
-                        if (attempt === 3) break;
-                        
-                        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
-                    }
-                }
-
-                throw lastError || new Error('Falha ao transcrever áudio');
-
+                // Converte para MP3
+                const mp3Path = await this._convertToMp3(audioPath);
+                
+                // Transcreve o áudio
+                const transcription = await this._transcribeWithGroq(mp3Path);
+                
+                return transcription;
+                
             } finally {
-                if (audioPath && fs.existsSync(audioPath)) {
+                // Limpa os arquivos temporários
+                if (audioPath) {
                     this._cleanupTempFile(audioPath);
+                    this._cleanupTempFile(audioPath.replace('.ogg', '.mp3'));
                 }
             }
         } catch (error) {
             console.error('❌ Erro ao processar áudio do WhatsApp:', error);
-            if (error.message.includes('muito grande')) {
-                return "O áudio é muito grande. Por favor, envie um áudio menor (máximo 25MB).";
-            }
-            if (error.message.includes('formato')) {
-                return "Formato de áudio não suportado. Por favor, envie apenas áudios em formato comum (MP3, OGG, etc).";
-            }
-            if (error.message.includes('vazia ou inválida')) {
-                return "Não foi possível entender o áudio. Por favor, tente gravar novamente com mais clareza.";
-            }
-            return "Desculpe, não foi possível processar o áudio no momento. Por favor, tente novamente em alguns instantes.";
+            throw error;
         }
     }
 
