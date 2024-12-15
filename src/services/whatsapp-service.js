@@ -6,11 +6,24 @@ class WhatsAppService {
         this.axiosInstance = axios.create({
             baseURL: WHATSAPP_CONFIG.apiUrl,
             headers: {
-                'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
+                'Authorization': `Bearer cnQfI8UaFha8fVY7dR80srpxKALKkUmgG`,
                 'Content-Type': 'application/json'
             },
             timeout: 10000
         });
+
+        // Adiciona interceptor para log de erros
+        this.axiosInstance.interceptors.response.use(
+            response => response,
+            error => {
+                console.error('[WhatsApp] Erro na requisição:', {
+                    status: error.response?.status,
+                    data: error.response?.data,
+                    message: error.message
+                });
+                return Promise.reject(error);
+            }
+        );
     }
 
     /**
@@ -29,10 +42,21 @@ class WhatsAppService {
      */
     async sendText(to, message) {
         try {
+            console.log('[WhatsApp] Enviando mensagem:', {
+                to,
+                messagePreview: message.substring(0, 100),
+                connectionKey: WHATSAPP_CONFIG.connectionKey
+            });
+
             const response = await this.axiosInstance.post(WHATSAPP_CONFIG.endpoints.text, {
                 connectionKey: WHATSAPP_CONFIG.connectionKey,
                 phone: to,
                 message
+            });
+
+            console.log('[WhatsApp] Mensagem enviada com sucesso:', {
+                to,
+                messageId: response.data?.id
             });
 
             await this.delay();

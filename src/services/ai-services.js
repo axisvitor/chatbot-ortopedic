@@ -2,7 +2,8 @@ const { GroqServices } = require('./groq-services');
 const { WhatsAppService } = require('./whatsapp-service');
 const { WhatsAppImageService } = require('./whatsapp-image-service');
 const { RedisStore } = require('../store/redis-store');
-const { BUSINESS_HOURS, OPENAI_CONFIG } = require('../config/settings');
+const { OPENAI_CONFIG } = require('../config/settings');
+const businessHours = require('./business-hours');
 const { OpenAIService } = require('./openai-service');
 
 class AIServices {
@@ -169,10 +170,8 @@ class AIServices {
      */
     async processMessage(text, { from, messageId } = {}) {
         try {
-            // Validação básica
-            if (!text) {
-                console.warn('[AI] Texto da mensagem vazio');
-                return "Desculpe, não consegui entender sua mensagem. Pode reformular?";
+            if (!text?.trim()) {
+                return "Por favor, reformule sua mensagem para que eu possa entender melhor como ajudar.";
             }
 
             console.log('[AI] Processando mensagem:', {
@@ -183,24 +182,23 @@ class AIServices {
             });
 
             // Verifica se é horário comercial
-            const isBusinessHours = BUSINESS_HOURS.isBusinessHours();
-            if (!isBusinessHours) {
+            if (!businessHours.isWithinBusinessHours()) {
                 console.log('[AI] Fora do horário comercial');
-                return BUSINESS_HOURS.getOutOfHoursMessage();
+                return businessHours.getOutOfHoursMessage();
             }
 
             // Verifica se precisa de atendimento humano
             const needsHuman = await this.needsHumanSupport(text);
             if (needsHuman) {
                 console.log('[AI] Encaminhando para atendimento humano');
-                return "Entendi que você precisa de um atendimento mais específico. Vou encaminhar para um de nossos atendentes humanos.";
+                return businessHours.getHumanSupportMessage();
             }
 
             // Verifica se é questão financeira
             const isFinancial = await this.isFinancialIssue(text);
             if (isFinancial) {
-                console.log('[AI] Encaminhando para setor financeiro');
-                return "Para assuntos financeiros, por favor entre em contato com nosso setor financeiro no horário comercial.";
+                console.log('[AI] Encaminhando para financeiro');
+                return businessHours.forwardToFinancial(text, from);
             }
 
             // Cria um thread
