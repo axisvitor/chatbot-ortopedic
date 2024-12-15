@@ -254,7 +254,7 @@ class GroqServices {
                 });
 
                 const response = await axios.post(
-                    'https://api.groq.com/v1/audio/transcriptions',
+                    'https://api.groq.com/openai/v1/audio/transcriptions',
                     formData,
                     {
                         headers: {

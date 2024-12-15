@@ -18,12 +18,12 @@ const GROQ_CONFIG = {
     apiKey: validateEnvVar('GROQ_API_KEY'),
     models: {
         vision: 'llama-3.2-90b-vision-preview',
-        audio: 'whisper-large-v3-turbo',
+        audio: 'whisper-large-v3',
         chat: 'llama-3.2-90b-chat'
     },
     audioConfig: {
         language: 'pt',
-        response_format: 'json',
+        response_format: 'text',
         temperature: 0.0
     }
 };

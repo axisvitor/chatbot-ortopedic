@@ -1,6 +1,5 @@
 const axios = require('axios');
 const FormData = require('form-data');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { GROQ_CONFIG } = require('../config/settings');
 
 class AudioService {
@@ -32,37 +31,35 @@ class AudioService {
                 throw new Error(`Tipo de áudio não suportado: ${mimeType}`);
             }
 
-            // Download e descriptografia do áudio usando Baileys
-            console.log('📥 Baixando e descriptografando áudio...', {
+            // Download do áudio da URL
+            console.log('📥 Baixando áudio...', {
+                url: messageData.audioMessage.url,
                 mimetype: mimeType,
                 seconds: messageData.audioMessage.seconds,
                 fileLength: messageData.audioMessage.fileLength
             });
             
-            const stream = await downloadContentFromMessage(messageData.audioMessage, 'audio');
-            
-            if (!stream) {
-                console.error('❌ Stream não gerado pelo Baileys');
-                throw new Error('Não foi possível iniciar o download do áudio');
-            }
+            const response = await axios({
+                method: 'GET',
+                url: messageData.audioMessage.url,
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                maxContentLength: 10 * 1024 * 1024 // 10MB
+            });
 
-            // Converter stream em buffer
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-                buffer = Buffer.concat([buffer, chunk]);
-            }
+            const buffer = Buffer.from(response.data);
 
             if (!buffer.length) {
                 console.error('❌ Buffer vazio após download');
                 throw new Error('Download do áudio falhou');
             }
 
-            console.log('✅ Áudio baixado e descriptografado:', {
+            console.log('✅ Áudio baixado:', {
                 tamanhoBuffer: buffer.length,
                 primeirosBytes: buffer.slice(0, 16).toString('hex')
             });
 
-            // Prepara o FormData com o áudio descriptografado
+            // Prepara o FormData com o áudio
             const formData = new FormData();
             formData.append('file', buffer, {
                 filename: 'audio.ogg',

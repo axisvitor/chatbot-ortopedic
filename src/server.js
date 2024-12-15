@@ -69,17 +69,17 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             }
         }
         // Processa mensagens de áudio
-        else if (message.type?.type === 'audio' && message.type.audioMessage) {
+        else if (message.type === 'audio' && message.audioMessage) {
             try {
                 console.log('🎵 Processando áudio...', {
                     from: message.from,
-                    duration: message.type.audioMessage.seconds,
-                    mime: message.type.audioMessage.mimetype
+                    duration: message.audioMessage.seconds,
+                    mime: message.audioMessage.mimetype
                 });
 
                 // Transcreve o áudio
                 const transcription = await audioService.processWhatsAppAudio({
-                    audioMessage: message.type.audioMessage
+                    audioMessage: message.audioMessage
                 });
 
                 if (!transcription) {
@@ -99,19 +99,8 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                 });
 
             } catch (error) {
-                console.error('❌ Erro no processamento de áudio:', error);
-                
-                let errorMessage = "Desculpe, não consegui processar seu áudio. ";
-                
-                if (error.message.includes('5 minutos')) {
-                    errorMessage += "Por favor, envie um áudio mais curto (máximo 5 minutos).";
-                } else if (error.message.includes('formato')) {
-                    errorMessage += "O formato do áudio não é suportado.";
-                } else {
-                    errorMessage += "Por favor, tente novamente ou envie sua mensagem em texto.";
-                }
-                
-                response = errorMessage;
+                console.error('❌ Erro ao processar áudio:', error);
+                response = "Desculpe, não consegui processar seu áudio. Por favor, tente enviar uma mensagem de texto.";
             }
         }
         // Processa mensagens de imagem
