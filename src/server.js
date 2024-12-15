@@ -126,6 +126,26 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     }
 });
 
+// Rota de teste para envio de mensagem
+app.post('/test/send-message', async (req, res) => {
+    try {
+        const { to, message } = req.body;
+        console.log(' Teste de envio:', { to, message });
+        
+        const whatsapp = new WhatsAppService();
+        const response = await whatsapp.sendText(to, message);
+        
+        console.log(' Resposta do envio:', response);
+        res.json({ success: true, response });
+    } catch (error) {
+        console.error(' Erro no teste:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
 // Inicia o servidor
 const PORT = process.env.PORT || 1988;
 
