@@ -250,11 +250,7 @@ class GroqServices {
 
         while (attempt < 3) {
             try {
-                console.log('[Groq] Enviando áudio para transcrição:', {
-                    model: formData.get('model'),
-                    language: formData.get('language'),
-                    attempt: attempt + 1
-                });
+                console.log('[Groq] Enviando áudio para transcrição (tentativa ' + (attempt + 1) + ')');
 
                 const response = await axios.post(
                     'https://api.groq.com/openai/v1/audio/transcriptions',

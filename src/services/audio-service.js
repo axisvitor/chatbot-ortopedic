@@ -125,14 +125,14 @@ class AudioService {
 
             // Prepara o FormData com o áudio convertido
             const formData = new FormData();
-            formData.append('file', convertedBuffer, {
+            formData.append('file', Buffer.from(convertedBuffer), {
                 filename: 'audio.mp3',
                 contentType: 'audio/mpeg'
             });
             formData.append('model', GROQ_CONFIG.models.audio);
             formData.append('language', GROQ_CONFIG.audioConfig.language);
             formData.append('response_format', GROQ_CONFIG.audioConfig.response_format);
-            formData.append('temperature', GROQ_CONFIG.audioConfig.temperature);
+            formData.append('temperature', String(GROQ_CONFIG.audioConfig.temperature));
 
             // Transcreve o áudio usando GroqServices
             const transcription = await this.groqServices.transcribeAudio(formData);
