@@ -34,25 +34,28 @@ class GroqServices {
                 });
 
                 const requestData = {
-                    model: GROQ_CONFIG.models.vision,
+                    model: "llama-3.2-90b-vision-preview",
                     messages: [
                         {
-                            role: 'user',
+                            role: "user",
                             content: [
                                 {
-                                    type: 'image_url',
+                                    type: "text",
+                                    text: "Analise esta imagem com foco em problemas ortopédicos. Se identificar algum problema, forneça uma análise detalhada e orientações iniciais. Se não identificar problemas, descreva o que vê na imagem."
+                                },
+                                {
+                                    type: "image_url",
                                     image_url: {
                                         url: `data:${format};base64,${base64}`
                                     }
-                                },
-                                {
-                                    type: 'text',
-                                    text: 'Analise esta imagem e me diga se é um comprovante de pagamento válido. Se for, extraia as informações relevantes como valor, data, beneficiário e tipo de transação.'
                                 }
                             ]
                         }
                     ],
-                    temperature: 0.1
+                    temperature: 0.7,
+                    max_tokens: 1024,
+                    top_p: 1,
+                    stream: false
                 };
 
                 const response = await this.axiosInstance.post(
