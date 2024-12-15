@@ -164,69 +164,32 @@ class AIServices {
     /**
      * Processa uma mensagem de texto usando o OpenAI Assistant
      * @param {string} text - Texto da mensagem
+     * @param {Object} options - Opções adicionais
      * @returns {Promise<string>} Resposta do processamento
      */
-    async processMessage(text) {
+    async processMessage(text, { from, messageId } = {}) {
         try {
             console.log('[AI] Processando mensagem:', {
+                from,
+                messageId,
                 length: text.length,
                 preview: text.substring(0, 100)
             });
 
-            // Verifica se é horário comercial
-            const now = new Date();
-            const hour = now.getHours();
-            const isBusinessHours = hour >= BUSINESS_HOURS.start && hour < BUSINESS_HOURS.end;
-
-            // Se fora do horário comercial
-            if (!isBusinessHours) {
-                return `Olá! Nosso horário de atendimento é das ${BUSINESS_HOURS.start}h às ${BUSINESS_HOURS.end}h. Por favor, retorne durante o horário comercial para que possamos te atender melhor.`;
-            }
-
             // Cria um thread
-            const threadResponse = await this.openai.beta.threads.create();
-            const threadId = threadResponse.id;
+            const thread = await this.openai.createThread();
 
             // Adiciona a mensagem ao thread
-            await this.openai.beta.threads.messages.create(threadId, {
+            await this.openai.addMessage(thread.id, {
                 role: 'user',
                 content: text
             });
 
             // Executa o assistant
-            const run = await this.openai.beta.threads.runs.create(threadId, {
-                assistant_id: OPENAI_CONFIG.assistantId
-            });
+            const run = await this.openai.runAssistant(thread.id, OPENAI_CONFIG.assistantId);
 
-            // Aguarda a resposta (com timeout de 30s)
-            const startTime = Date.now();
-            while (true) {
-                const runStatus = await this.openai.beta.threads.runs.retrieve(threadId, run.id);
-                
-                if (runStatus.status === 'completed') {
-                    break;
-                }
-                
-                if (runStatus.status === 'failed' || runStatus.status === 'cancelled') {
-                    throw new Error(`Assistant run failed: ${runStatus.last_error?.message || 'Unknown error'}`);
-                }
-                
-                if (Date.now() - startTime > 30000) {
-                    throw new Error('Assistant timeout after 30 seconds');
-                }
-                
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-
-            // Obtém a resposta
-            const messages = await this.openai.beta.threads.messages.list(threadId);
-            const assistantMessage = messages.data.find(msg => msg.role === 'assistant');
-            
-            if (!assistantMessage?.content?.[0]?.text?.value) {
-                throw new Error('Resposta inválida do Assistant');
-            }
-
-            const response = assistantMessage.content[0].text.value;
+            // Aguarda resposta
+            const response = await this.waitForAssistantResponse(thread.id, run.id);
 
             console.log('[AI] Resposta gerada:', {
                 length: response.length,
@@ -238,6 +201,35 @@ class AIServices {
         } catch (error) {
             console.error('[AI] Erro ao processar mensagem:', error);
             throw error;
+        }
+    }
+
+    async waitForAssistantResponse(threadId, runId, timeout = 30000) {
+        const startTime = Date.now();
+        
+        while (true) {
+            const runStatus = await this.openai.retrieveRun(threadId, runId);
+            
+            if (runStatus.status === 'completed') {
+                const messages = await this.openai.listMessages(threadId);
+                const assistantMessage = messages.data.find(msg => msg.role === 'assistant');
+                
+                if (!assistantMessage?.content?.[0]?.text?.value) {
+                    throw new Error('Resposta inválida do Assistant');
+                }
+                
+                return assistantMessage.content[0].text.value;
+            }
+            
+            if (runStatus.status === 'failed' || runStatus.status === 'cancelled') {
+                throw new Error(`Assistant run failed: ${runStatus.last_error?.message || 'Unknown error'}`);
+            }
+            
+            if (Date.now() - startTime > timeout) {
+                throw new Error('Assistant timeout after 30 seconds');
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }
 
