@@ -12,7 +12,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0",
+    "@whiskeysockets/baileys": "^6.5.0",
     "axios": "^1.7.3",
     "body-parser": "^1.20.2",
     "compression": "^1.7.4",
