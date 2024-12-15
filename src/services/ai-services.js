@@ -1,5 +1,6 @@
 const { GroqServices } = require('./groq-services');
 const { WhatsAppService } = require('./whatsapp-service');
+const { WhatsAppImageService } = require('./whatsapp-image-service');
 const { RedisStore } = require('../store/redis-store');
 const { BUSINESS_HOURS } = require('../config/settings');
 
@@ -7,39 +8,39 @@ class AIServices {
     constructor() {
         this.groqServices = new GroqServices();
         this.whatsappService = new WhatsAppService();
+        this.whatsappImageService = new WhatsAppImageService();
         this.redisStore = new RedisStore();
     }
 
     /**
      * Processa um comprovante de pagamento
-     * @param {string} imageUrl - URL ou dados base64 da imagem
-     * @param {Object} customerInfo - Informações do cliente
-     * @returns {Promise<Object>} Informações extraídas do comprovante
+     * @param {string} imageUrl - URL da imagem
+     * @param {Object} options - Opções adicionais
+     * @returns {Promise<Object>} Informações do pagamento
      */
-    async processPaymentProof(imageUrl, customerInfo = {}) {
+    async processPaymentProof(imageUrl, { messageInfo, from } = {}) {
         try {
-            console.log('[AI] Processando comprovante de pagamento:', {
-                imageUrl: imageUrl?.substring(0, 50) + '...',
-                hasCustomerInfo: !!customerInfo
+            console.log('[AI] Processando comprovante:', {
+                hasUrl: !!imageUrl,
+                hasMessageInfo: !!messageInfo,
+                from
             });
 
-            // Verifica se a URL é válida
-            if (!imageUrl || typeof imageUrl !== 'string') {
-                throw new Error('URL da imagem inválida');
-            }
+            // Baixa e processa a imagem
+            const imageBuffer = await this.whatsappImageService.downloadImage(imageUrl, messageInfo);
+            
+            // Análise com Groq
+            const imageAnalysis = await this.groqServices.analyzeImage(imageBuffer);
 
-            // Análise da imagem usando Groq
-            const imageAnalysis = await this.groqServices.analyzeImage(imageUrl);
-
-            // Extrai informações relevantes da análise
+            // Processa o resultado
             const paymentInfo = {
-                imageUrl: imageUrl,
-                customerName: customerInfo.name || null,
-                customerPhone: customerInfo.phone || null,
+                imageUrl,
+                from,
                 amount: this.extractAmount(imageAnalysis),
                 bank: this.extractBank(imageAnalysis),
                 paymentType: this.extractPaymentType(imageAnalysis),
                 analysis: imageAnalysis,
+                isPaymentProof: this.isPaymentProof(imageAnalysis),
                 timestamp: new Date().toISOString()
             };
 
@@ -47,21 +48,42 @@ class AIServices {
             console.log('[AI] Informações extraídas:', {
                 amount: paymentInfo.amount,
                 bank: paymentInfo.bank,
-                paymentType: paymentInfo.paymentType
+                paymentType: paymentInfo.paymentType,
+                isPaymentProof: paymentInfo.isPaymentProof
             });
 
-            // Armazena no Redis para histórico
-            const redisKey = `payment:${paymentInfo.timestamp}:${paymentInfo.customerPhone}`;
-            await this.redisStore.set(redisKey, JSON.stringify(paymentInfo), 86400 * 30);
-
-            // Notifica o departamento financeiro
-            await this.whatsappService.notifyFinancialDepartment(paymentInfo);
+            // Armazena no Redis se for comprovante
+            if (paymentInfo.isPaymentProof) {
+                const redisKey = `payment:${paymentInfo.timestamp}:${from}`;
+                await this.redisStore.set(redisKey, JSON.stringify(paymentInfo), 86400 * 30);
+            }
 
             return paymentInfo;
         } catch (error) {
             console.error('[AI] Erro ao processar comprovante:', error);
             throw error;
         }
+    }
+
+    /**
+     * Verifica se o texto indica um comprovante de pagamento
+     * @param {string} analysis - Texto da análise
+     * @returns {boolean} true se for comprovante
+     */
+    isPaymentProof(analysis) {
+        const keywords = [
+            'comprovante',
+            'pagamento',
+            'transferência',
+            'pix',
+            'ted',
+            'doc',
+            'boleto',
+            'recibo'
+        ];
+        
+        const lowerAnalysis = analysis.toLowerCase();
+        return keywords.some(keyword => lowerAnalysis.includes(keyword.toLowerCase()));
     }
 
     /**
@@ -138,24 +160,34 @@ class AIServices {
     }
 
     /**
-     * Verifica se é horário comercial
-     * @returns {boolean} true se estiver em horário comercial
+     * Processa uma mensagem de texto
+     * @param {string} text - Texto da mensagem
+     * @returns {Promise<string>} Resposta do processamento
      */
-    isBusinessHours() {
-        const now = new Date();
-        const dayOfWeek = now.getDay(); // 0 = Domingo, 1 = Segunda, ...
-        
-        // Verifica se é fim de semana
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
-            return false;
+    async processMessage(text) {
+        try {
+            // TODO: Implementar integração com OpenAI
+            return "Desculpe, ainda não posso processar mensagens de texto.";
+        } catch (error) {
+            console.error('[AI] Erro ao processar mensagem:', error);
+            throw error;
         }
+    }
 
-        // Converte para timezone do Brasil
-        const brasilTime = now.toLocaleString('en-US', { timeZone: BUSINESS_HOURS.timezone });
-        const currentHour = new Date(brasilTime).getHours();
-
-        // Verifica se está dentro do horário comercial
-        return currentHour >= 8 && currentHour < 18;
+    /**
+     * Processa um áudio
+     * @param {string} audioUrl - URL do áudio
+     * @param {Object} options - Opções adicionais
+     * @returns {Promise<string>} Texto transcrito
+     */
+    async processAudio(audioUrl, { messageInfo, from } = {}) {
+        try {
+            // TODO: Implementar processamento de áudio
+            return "Desculpe, ainda não posso processar mensagens de áudio.";
+        } catch (error) {
+            console.error('[AI] Erro ao processar áudio:', error);
+            throw error;
+        }
     }
 
     /**
@@ -165,8 +197,7 @@ class AIServices {
      */
     async needsHumanSupport(message) {
         try {
-            // Palavras-chave que indicam necessidade de atendimento humano
-            const humanKeywords = [
+            const keywords = [
                 'falar com atendente',
                 'falar com humano',
                 'atendimento humano',
@@ -178,7 +209,7 @@ class AIServices {
             ];
 
             const lowerMessage = message.toLowerCase();
-            return humanKeywords.some(keyword => lowerMessage.includes(keyword.toLowerCase()));
+            return keywords.some(keyword => lowerMessage.includes(keyword.toLowerCase()));
         } catch (error) {
             console.error('[AI] Erro ao verificar necessidade de suporte:', error);
             return true; // Em caso de erro, melhor encaminhar para humano
@@ -192,7 +223,7 @@ class AIServices {
      */
     async isFinancialIssue(message) {
         try {
-            const financialKeywords = [
+            const keywords = [
                 'pagamento',
                 'reembolso',
                 'estorno',
@@ -210,7 +241,7 @@ class AIServices {
             ];
 
             const lowerMessage = message.toLowerCase();
-            return financialKeywords.some(keyword => lowerMessage.includes(keyword.toLowerCase()));
+            return keywords.some(keyword => lowerMessage.includes(keyword.toLowerCase()));
         } catch (error) {
             console.error('[AI] Erro ao verificar questão financeira:', error);
             return false;
