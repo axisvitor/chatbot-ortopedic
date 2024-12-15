@@ -216,9 +216,7 @@ class AIServices {
             });
 
             // Executa o assistant
-            const run = await this.openai.createRun(thread.id, {
-                assistant_id: this.assistantId
-            });
+            const run = await this.openai.runAssistant(thread.id);
 
             // Aguarda a conclusão
             response = await this.openai.waitForRun(thread.id, run.id);
