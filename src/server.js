@@ -1,6 +1,3 @@
-const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
-
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
@@ -8,29 +5,28 @@ const morgan = require('morgan');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 
-const { WebhookService } = require('./services/webhook-service');
-const { AIServices } = require('./services/ai-services');
-const { WhatsAppService } = require('./services/whatsapp-service');
+// Serviços
 const { GroqServices } = require('./services/groq-services');
+const { WebhookService } = require('./services/webhook-service');
+const { WhatsAppService } = require('./services/whatsapp-service');
+const { AIServices } = require('./services/ai-services');
 const AudioService = require('./services/audio-service');
 const { ImageService } = require('./services/image-service');
-const { BusinessHours } = require('./services/business-hours');
+const businessHours = require('./services/business-hours');
 
+// Configurações
 const { RATE_LIMIT_CONFIG } = require('./config/settings');
 
-// Inicialização do Express
+// Inicializa o app
 const app = express();
-const port = process.env.PORT || 8080;
-
-// Middlewares
-app.use(bodyParser.json({ limit: '50mb' }));
-app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+const port = process.env.PORT || 3000;
 
 // Serviços
 const groqServices = new GroqServices();
 const webhookService = new WebhookService();
 const whatsappService = new WhatsAppService();
 const aiServices = new AIServices(groqServices);
+const imageService = new ImageService(groqServices);
 
 // Aguarda o cliente do WhatsApp estar pronto
 let audioService;
@@ -41,18 +37,23 @@ whatsappService.getClient().then(client => {
     console.error('❌ Erro ao inicializar AudioService:', error);
 });
 
-const imageService = new ImageService(groqServices);
-const businessHours = new BusinessHours();
+// Middlewares
+app.use(helmet());
+app.use(morgan('dev'));
+app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// Rota de healthcheck
+// Rate limiting
+const limiter = rateLimit(RATE_LIMIT_CONFIG);
+app.use(limiter);
+
+// Rotas
 app.get('/', (req, res) => {
-    res.status(200).json({
-        status: 'ok',
-        message: 'Chatbot Ortopedic API is running'
-    });
+    res.json({ status: 'ok' });
 });
 
-// Webhook principal
+// Webhook para mensagens
 app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
         console.log('📩 Webhook recebido:', JSON.stringify(req.body, null, 2));
@@ -61,127 +62,71 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
         const message = webhookService.extractMessageFromWebhook(req.body);
         
         if (!message) {
-            console.log('⚠️ Mensagem não pôde ser extraída do webhook');
+            console.log('⚠️ Mensagem inválida ou não suportada');
             return res.sendStatus(200);
         }
 
-        console.log('📨 Mensagem processada:', {
-            type: message.type,
-            from: message.from,
-            messageId: message.messageId,
-            hasText: !!message.text
-        });
+        // Verifica se está no horário de atendimento
+        if (!businessHours.isBusinessHour()) {
+            console.log('⏰ Fora do horário de atendimento');
+            const response = businessHours.getOutOfHoursMessage();
+            await whatsappService.sendMessage(message.from, response);
+            return res.sendStatus(200);
+        }
 
-        let response = null;
+        let response;
 
         // Processa mensagens de texto
         if (message.type === 'text' && message.text) {
-            try {
-                response = await aiServices.processMessage(message.text, {
-                    from: message.from,
-                    messageId: message.messageId
-                });
-            } catch (error) {
-                console.error('❌ Erro ao processar mensagem:', error);
-                response = "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
-            }
+            response = await aiServices.processMessage(message.text, {
+                from: message.from,
+                messageId: message.messageId
+            });
         }
         // Processa mensagens de áudio
         else if (message.type === 'audio' && message.audioMessage) {
-            try {
-                console.log('🎵 Processando áudio...', {
-                    from: message.from,
-                    duration: message.audioMessage.seconds,
-                    mime: message.audioMessage.mimetype
-                });
+            if (!audioService) {
+                console.error('❌ AudioService não está pronto');
+                return res.sendStatus(200);
+            }
 
-                // Transcreve o áudio
+            try {
                 const transcription = await audioService.processWhatsAppAudio({
                     audioMessage: message.audioMessage
                 });
 
-                if (!transcription) {
-                    throw new Error('Falha na transcrição do áudio');
-                }
-
-                console.log('🎯 Áudio transcrito:', {
-                    length: transcription.length,
-                    preview: transcription.substring(0, 100)
-                });
-
-                // Processa a transcrição com o OpenAI Assistant
                 response = await aiServices.processMessage(transcription, {
                     from: message.from,
                     messageId: message.messageId,
                     isAudioTranscription: true
                 });
-
             } catch (error) {
                 console.error('❌ Erro ao processar áudio:', error);
-                response = "Desculpe, não consegui processar seu áudio. Por favor, tente enviar uma mensagem de texto.";
+                response = 'Desculpe, não consegui processar seu áudio. Por favor, tente enviar uma mensagem de texto.';
             }
         }
         // Processa mensagens de imagem
         else if (message.type === 'image' && message.imageMessage) {
             try {
-                console.log('🖼️ Processando imagem...', {
+                response = await imageService.processWhatsAppImage({
+                    imageMessage: message.imageMessage,
+                    caption: message.caption,
                     from: message.from,
-                    mimetype: message.imageMessage.mimetype,
-                    size: message.imageMessage.fileLength
+                    messageId: message.messageId
                 });
-
-                const result = await imageService.processWhatsAppImage({
-                    mediaData: message.imageMessage,
-                    type: 'image',
-                    mimetype: message.imageMessage.mimetype,
-                    size: message.imageMessage.fileLength,
-                    filename: message.imageMessage.fileName
-                });
-
-                if (!result.success) {
-                    throw new Error(result.message);
-                }
-
-                console.log('🎯 Imagem analisada:', {
-                    success: result.success,
-                    analysisLength: result.analysis?.length || 0
-                });
-
-                // Processa a análise com o OpenAI Assistant
-                response = await aiServices.processMessage(
-                    `[Análise da imagem: ${result.analysis}] Por favor, me ajude a entender esta imagem.`,
-                    {
-                        from: message.from,
-                        messageId: message.messageId,
-                        isImageAnalysis: true
-                    }
-                );
-
             } catch (error) {
-                console.error('❌ Erro no processamento de imagem:', error);
-                
-                let errorMessage = "Desculpe, não consegui processar sua imagem. ";
-                
-                if (error.message.includes('tipo não suportado')) {
-                    errorMessage += "Por favor, envie a imagem em formato JPG, PNG ou WebP.";
-                } else if (error.message.includes('muito grande')) {
-                    errorMessage += "A imagem é muito grande. Por favor, envie uma imagem menor.";
-                } else {
-                    errorMessage += "Por favor, tente novamente.";
-                }
-                
-                response = errorMessage;
+                console.error('❌ Erro ao processar imagem:', error);
+                response = 'Desculpe, não consegui processar sua imagem. Por favor, tente enviar uma mensagem de texto.';
             }
         }
 
-        // Envia a resposta
         if (response) {
             console.log('📤 Enviando resposta:', {
                 para: message.from,
                 resposta: response
             });
-            
-            await whatsappService.sendText(message.from, response);
+
+            await whatsappService.sendMessage(message.from, response);
         }
 
     } catch (error) {

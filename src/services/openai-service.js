@@ -1,14 +1,12 @@
 const OpenAI = require('openai');
+const { OPENAI_CONFIG } = require('../config/settings');
 
 class OpenAIService {
-    constructor(config) {
-        if (!config?.apiKey) {
-            throw new Error('OpenAI API Key is required');
-        }
-        this.openai = new OpenAI({
-            apiKey: config.apiKey
+    constructor() {
+        this.client = new OpenAI({
+            apiKey: OPENAI_CONFIG.apiKey
         });
-        this.beta = this.openai.beta;
+        this.assistantId = OPENAI_CONFIG.assistantId;
     }
 
     /**
@@ -17,7 +15,7 @@ class OpenAIService {
      */
     async createThread() {
         try {
-            return await this.beta.threads.create();
+            return await this.client.beta.threads.create();
         } catch (error) {
             console.error('[OpenAI] Erro ao criar thread:', error);
             throw error;
@@ -32,7 +30,7 @@ class OpenAIService {
      */
     async addMessage(threadId, message) {
         try {
-            return await this.beta.threads.messages.create(threadId, message);
+            return await this.client.beta.threads.messages.create(threadId, message);
         } catch (error) {
             console.error('[OpenAI] Erro ao adicionar mensagem:', error);
             throw error;
@@ -40,20 +38,15 @@ class OpenAIService {
     }
 
     /**
-     * Executa o assistant em um thread
-     * @param {string} threadId - ID do thread
-     * @param {string} assistantId - ID do assistant
+     * Executa o assistant em uma thread
+     * @param {string} threadId - ID da thread
      * @returns {Promise<Object>} Run criado
      */
-    async runAssistant(threadId, assistantId) {
-        try {
-            return await this.beta.threads.runs.create(threadId, {
-                assistant_id: assistantId
-            });
-        } catch (error) {
-            console.error('[OpenAI] Erro ao executar assistant:', error);
-            throw error;
-        }
+    async runAssistant(threadId) {
+        return await this.client.beta.threads.runs.create(
+            threadId,
+            { assistant_id: this.assistantId }
+        );
     }
 
     /**
@@ -64,7 +57,7 @@ class OpenAIService {
      */
     async checkRunStatus(threadId, runId) {
         try {
-            return await this.beta.threads.runs.retrieve(threadId, runId);
+            return await this.client.beta.threads.runs.retrieve(threadId, runId);
         } catch (error) {
             console.error('[OpenAI] Erro ao verificar status:', error);
             throw error;
@@ -78,7 +71,7 @@ class OpenAIService {
      */
     async listMessages(threadId) {
         try {
-            return await this.beta.threads.messages.list(threadId);
+            return await this.client.beta.threads.messages.list(threadId);
         } catch (error) {
             console.error('[OpenAI] Erro ao listar mensagens:', error);
             throw error;

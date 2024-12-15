@@ -1,18 +1,19 @@
-const { GroqServices } = require('./groq-services');
 const { WhatsAppService } = require('./whatsapp-service');
 const { WhatsAppImageService } = require('./whatsapp-image-service');
 const { RedisStore } = require('../store/redis-store');
-const { OPENAI_CONFIG } = require('../config/settings');
 const { OpenAIService } = require('./openai-service');
 const businessHours = require('./business-hours');
 
 class AIServices {
-    constructor() {
-        this.groqServices = new GroqServices();
+    constructor(groqServices) {
+        if (!groqServices) {
+            throw new Error('GroqServices é obrigatório');
+        }
+        this.groqServices = groqServices;
         this.whatsappService = new WhatsAppService();
         this.whatsappImageService = new WhatsAppImageService();
         this.redisStore = new RedisStore();
-        this.openai = new OpenAIService(OPENAI_CONFIG);
+        this.openai = new OpenAIService();
     }
 
     /**
@@ -205,7 +206,7 @@ class AIServices {
             });
 
             // Executa o assistant
-            const run = await this.openai.runAssistant(thread.id, OPENAI_CONFIG.assistantId);
+            const run = await this.openai.runAssistant(thread.id);
 
             // Aguarda resposta
             const response = await this.waitForAssistantResponse(thread.id, run.id);
