@@ -26,15 +26,16 @@ const groqServices = new GroqServices();
 const webhookService = new WebhookService();
 const whatsappService = new WhatsAppService();
 const aiServices = new AIServices(groqServices);
-const imageService = new ImageService(groqServices);
 
 // Aguarda o cliente do WhatsApp estar pronto
 let audioService;
+let imageService;
 whatsappService.getClient().then(client => {
     audioService = new AudioService(groqServices, client);
-    console.log('✅ AudioService inicializado com sucesso');
+    imageService = new ImageService(groqServices, client);
+    console.log('✅ AudioService e ImageService inicializados com sucesso');
 }).catch(error => {
-    console.error('❌ Erro ao inicializar AudioService:', error);
+    console.error('❌ Erro ao inicializar serviços:', error);
 });
 
 // Middlewares
