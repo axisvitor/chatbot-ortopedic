@@ -48,15 +48,15 @@ class WhatsAppService {
                 connectionKey: WHATSAPP_CONFIG.connectionKey
             });
 
-            const response = await this.axiosInstance.post(WHATSAPP_CONFIG.endpoints.text, {
-                connectionKey: WHATSAPP_CONFIG.connectionKey,
-                phone: to,
-                message
+            const response = await this.axiosInstance.post(`${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${WHATSAPP_CONFIG.connectionKey}`, {
+                phoneNumber: to,
+                text: message,
+                delayMessage: WHATSAPP_CONFIG.messageDelay / 1000 // Convertendo ms para segundos
             });
 
             console.log('[WhatsApp] Mensagem enviada com sucesso:', {
-                to,
-                messageId: response.data?.id
+                messageId: response.data?.messageId,
+                error: response.data?.error
             });
 
             await this.delay();

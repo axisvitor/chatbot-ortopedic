@@ -52,6 +52,30 @@ class BusinessHoursService {
         return isWithin;
     }
 
+    getNextWorkDay() {
+        const now = this.getCurrentTime();
+        const weekDays = Object.entries(this.config.schedule);
+        const currentDayIndex = weekDays.findIndex(([day]) => day === this.getDayOfWeek());
+        
+        // Procura o próximo dia útil
+        for (let i = 1; i <= 7; i++) {
+            const nextIndex = (currentDayIndex + i) % 7;
+            const [day, schedule] = weekDays[nextIndex];
+            if (schedule.start) {
+                return {
+                    name: day.charAt(0).toUpperCase() + day.slice(1),
+                    schedule
+                };
+            }
+        }
+        
+        // Se não encontrar (não deveria acontecer), retorna segunda-feira
+        return {
+            name: 'Segunda-feira',
+            schedule: this.config.schedule.monday
+        };
+    }
+
     getOutOfHoursMessage() {
         const now = this.getCurrentTime();
         const day = this.getDayOfWeek();
@@ -62,13 +86,11 @@ class BusinessHoursService {
         }
 
         if (!schedule?.start) {
-            // Encontra o próximo dia útil
-            const weekDays = Object.entries(this.config.schedule);
-            const nextWorkDay = weekDays.find(([_, hours]) => hours.start);
-            if (nextWorkDay) {
-                return this.config.messages.weekend.replace('{NEXT_DAY}', nextWorkDay[0]);
-            }
-            return this.config.messages.weekend;
+            const nextDay = this.getNextWorkDay();
+            return this.config.messages.weekend.replace(
+                '{NEXT_DAY}', 
+                nextDay.name
+            );
         }
 
         return this.config.messages.outsideHours
@@ -82,7 +104,7 @@ class BusinessHoursService {
             contact: userContact,
             message: message,
             withinBusinessHours: this.isWithinBusinessHours(),
-            department: this.config.departments.financial
+            department: 'financial'
         };
 
         console.log('[BusinessHours] Encaminhando para financeiro:', forwardData);
@@ -92,9 +114,7 @@ class BusinessHoursService {
         // ou
         // await saveToDatabase(forwardData);
 
-        return this.isWithinBusinessHours() 
-            ? this.config.messages.financialDepartment
-            : this.getOutOfHoursMessage();
+        return this.config.messages.financialDepartment;
     }
 
     getHumanSupportMessage() {

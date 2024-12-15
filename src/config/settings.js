@@ -87,9 +87,12 @@ const BUSINESS_HOURS = {
         sunday: { start: null, end: null }
     },
     holidays: [],
-    autoReply: {
-        humanSupportNeeded: "Entendo que você precisa de atendimento humano. No momento estamos fora do horário comercial (seg-sex 8h-18h, sáb 8h-12h). Sua solicitação será encaminhada para nossa equipe e retornaremos no próximo horário de atendimento. Enquanto isso, posso tentar ajudar com outras questões?",
-        financialDepartment: "Sua solicitação será encaminhada para nosso setor financeiro. Durante o horário comercial (seg-sex 8h-18h, sáb 8h-12h), nossa equipe entrará em contato. Há mais alguma coisa em que eu possa ajudar?"
+    messages: {
+        outsideHours: "🕒 Nosso horário de atendimento é das {START_TIME} às {END_TIME}. Por favor, retorne durante nosso horário comercial para falar com nossa equipe.",
+        weekend: "Hoje não há expediente. Nosso próximo atendimento será {NEXT_DAY} a partir das 8h. Você pode deixar sua mensagem e retornaremos assim que possível.",
+        holiday: "Hoje é feriado e não há expediente. Retornaremos seu contato no próximo dia útil. Você pode deixar sua mensagem e retornaremos assim que possível.",
+        humanSupport: "Entendi que você precisa de atendimento humano. Vou encaminhar para nossa equipe de atendimento.",
+        financialDepartment: "Sua solicitação será encaminhada para nosso setor financeiro. Durante o horário comercial (seg-sex 8h-18h, sáb 8h-12h), nossa equipe entrará em contato."
     }
 };
 

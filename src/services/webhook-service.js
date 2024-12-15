@@ -20,7 +20,8 @@ class WebhookService {
                 messageId: webhookData.body.key.id,
                 timestamp: webhookData.body.messageTimestamp,
                 pushName: webhookData.body.pushName,
-                device: webhookData.body.device
+                device: webhookData.body.device,
+                isGroup: webhookData.body.isGroup || false
             };
 
             // Extrai texto da mensagem
@@ -50,7 +51,8 @@ class WebhookService {
                 textPreview: messageData.text?.substring(0, 100),
                 hasImage: !!messageData.imageMessage,
                 hasAudio: !!messageData.audioMessage,
-                hasDocument: !!messageData.documentMessage
+                hasDocument: !!messageData.documentMessage,
+                isGroup: messageData.isGroup
             });
 
             return messageData;
@@ -60,25 +62,16 @@ class WebhookService {
         }
     }
 
-    getMessageType(messageBody) {
-        const message = messageBody.message;
-        if (!message) return null;
+    getMessageType(webhookBody) {
+        const message = webhookBody.message;
+        if (!message) return 'unknown';
 
-        // Verifica tipos de mensagem em ordem de prioridade
-        if (message.conversation || message.extendedTextMessage?.text) {
-            return 'text';
-        }
-        if (message.imageMessage) {
-            return 'image';
-        }
-        if (message.audioMessage) {
-            return 'audio';
-        }
-        if (message.documentMessage) {
-            return 'document';
-        }
+        if (message.conversation || message.extendedTextMessage) return 'text';
+        if (message.imageMessage) return 'image';
+        if (message.audioMessage) return 'audio';
+        if (message.documentMessage) return 'document';
         
-        return null;
+        return 'unknown';
     }
 }
 

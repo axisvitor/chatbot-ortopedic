@@ -3,8 +3,8 @@ const { WhatsAppService } = require('./whatsapp-service');
 const { WhatsAppImageService } = require('./whatsapp-image-service');
 const { RedisStore } = require('../store/redis-store');
 const { OPENAI_CONFIG } = require('../config/settings');
-const businessHours = require('./business-hours');
 const { OpenAIService } = require('./openai-service');
+const businessHours = require('./business-hours');
 
 class AIServices {
     constructor() {
@@ -180,12 +180,6 @@ class AIServices {
                 length: text?.length,
                 preview: text?.substring(0, 100)
             });
-
-            // Verifica se é horário comercial
-            if (!businessHours.isWithinBusinessHours()) {
-                console.log('[AI] Fora do horário comercial');
-                return businessHours.getOutOfHoursMessage();
-            }
 
             // Verifica se precisa de atendimento humano
             const needsHuman = await this.needsHumanSupport(text);
