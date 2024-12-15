@@ -98,7 +98,7 @@ class WhatsAppService {
             const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
             const response = await this.client.post(endpoint, {
                 phoneNumber: to,
-                message
+                text: message
             });
 
             console.log('[WhatsApp] Mensagem enviada com sucesso:', {
