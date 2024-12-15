@@ -1,6 +1,15 @@
 const axios = require('axios');
 const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const { promisify } = require('util');
 const { GROQ_CONFIG } = require('../config/settings');
+
+// Configura o caminho do ffmpeg
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 class AudioService {
     constructor(groqServices) {
@@ -8,6 +17,47 @@ class AudioService {
             throw new Error('GroqServices é obrigatório');
         }
         this.groqServices = groqServices;
+    }
+
+    /**
+     * Converte áudio para formato compatível usando ffmpeg
+     * @param {Buffer} inputBuffer - Buffer do áudio original
+     * @returns {Promise<Buffer>} Buffer do áudio convertido
+     */
+    async convertAudio(inputBuffer) {
+        const tempDir = os.tmpdir();
+        const inputPath = path.join(tempDir, `input-${Date.now()}.ogg`);
+        const outputPath = path.join(tempDir, `output-${Date.now()}.mp3`);
+
+        try {
+            // Salva o buffer em um arquivo temporário
+            await fs.promises.writeFile(inputPath, inputBuffer);
+
+            // Converte para MP3 usando ffmpeg
+            await new Promise((resolve, reject) => {
+                ffmpeg(inputPath)
+                    .toFormat('mp3')
+                    .audioChannels(1)
+                    .audioFrequency(16000)
+                    .on('error', reject)
+                    .on('end', resolve)
+                    .save(outputPath);
+            });
+
+            // Lê o arquivo convertido
+            const convertedBuffer = await fs.promises.readFile(outputPath);
+
+            // Limpa arquivos temporários
+            await Promise.all([
+                fs.promises.unlink(inputPath),
+                fs.promises.unlink(outputPath)
+            ]);
+
+            return convertedBuffer;
+        } catch (error) {
+            console.error('❌ Erro ao converter áudio:', error);
+            throw new Error(`Falha ao converter áudio: ${error.message}`);
+        }
     }
 
     /**
@@ -26,15 +76,17 @@ class AudioService {
 
             // Validação do tipo MIME
             const mimeType = messageData.audioMessage.mimetype;
-            const allowedMimes = ['audio/ogg', 'audio/mpeg', 'audio/mp4'];
-            if (!allowedMimes.includes(mimeType)) {
+            const allowedMimes = ['audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/opus'];
+            const baseMimeType = mimeType.split(';')[0].trim();
+            
+            if (!allowedMimes.includes(baseMimeType) && !mimeType.startsWith('audio/')) {
                 throw new Error(`Tipo de áudio não suportado: ${mimeType}`);
             }
 
             // Download do áudio da URL
             console.log('📥 Baixando áudio...', {
                 url: messageData.audioMessage.url,
-                mimetype: mimeType,
+                mimetype: messageData.audioMessage.mimetype,
                 seconds: messageData.audioMessage.seconds,
                 fileLength: messageData.audioMessage.fileLength
             });
@@ -59,11 +111,15 @@ class AudioService {
                 primeirosBytes: buffer.slice(0, 16).toString('hex')
             });
 
-            // Prepara o FormData com o áudio
+            // Converte o áudio para MP3
+            console.log('🔄 Convertendo áudio para MP3...');
+            const convertedBuffer = await this.convertAudio(buffer);
+
+            // Prepara o FormData com o áudio convertido
             const formData = new FormData();
-            formData.append('file', buffer, {
-                filename: 'audio.ogg',
-                contentType: mimeType
+            formData.append('file', convertedBuffer, {
+                filename: 'audio.mp3',
+                contentType: 'audio/mpeg'
             });
             formData.append('model', GROQ_CONFIG.models.audio);
             formData.append('language', GROQ_CONFIG.audioConfig.language);
