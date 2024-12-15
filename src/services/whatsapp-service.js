@@ -17,7 +17,7 @@ class WhatsAppService {
             }
 
             this.client = await this.createClient();
-            this.connectionKey = WHATSAPP_CONFIG.connectionKey || ('w-api_' + Math.random().toString(36).substring(7));
+            this.connectionKey = WHATSAPP_CONFIG.connectionKey;
             this.addInterceptor();
             
             console.log('[WhatsApp] Cliente inicializado com sucesso:', { connectionKey: this.connectionKey });
@@ -95,8 +95,8 @@ class WhatsAppService {
                 connectionKey: this.connectionKey
             });
 
-            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.text, {
-                connectionKey: this.connectionKey,
+            const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
+            const response = await this.client.post(endpoint, {
                 phoneNumber: to,
                 message
             });
@@ -123,7 +123,6 @@ class WhatsAppService {
             const endpoint = isBase64 ? 'message/sendImageBase64' : 'message/sendImageUrl';
             
             const payload = {
-                connectionKey: this.connectionKey,
                 phoneNumber: to,
                 caption: caption || (typeof image === 'object' ? image.caption : ''),
             };
@@ -134,7 +133,7 @@ class WhatsAppService {
                 payload.url = typeof image === 'object' ? image.url : image;
             }
 
-            const response = await this.client.post(endpoint, payload);
+            const response = await this.client.post(`${endpoint}?connectionKey=${this.connectionKey}`, payload);
             await this.delay();
             return response.data;
         } catch (error) {
@@ -148,8 +147,7 @@ class WhatsAppService {
      */
     async sendAudio(to, audioUrl) {
         try {
-            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.audio, {
-                connectionKey: this.connectionKey,
+            const response = await this.client.post(`${WHATSAPP_CONFIG.endpoints.audio}?connectionKey=${this.connectionKey}`, {
                 phoneNumber: to,
                 audio: audioUrl
             });
