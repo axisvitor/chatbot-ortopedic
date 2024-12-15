@@ -1,44 +1,46 @@
-/**
- * Utilitários para detecção e validação de formatos de imagem
- */
-
 const magicNumbers = {
-    'FFD8FF': 'image/jpeg',    // JPEG
-    '89504E47': 'image/png',   // PNG
-    '47494638': 'image/gif',   // GIF
-    '52494646': 'image/webp',  // WEBP
-    '49492A00': 'image/tiff',  // TIFF
-    '4D4D002A': 'image/tiff'   // TIFF (big endian)
+    'FFD8FF': 'image/jpeg',
+    '89504E47': 'image/png',
+    '47494638': 'image/gif',
+    '52494646': 'image/webp',
+    '424D': 'image/bmp',
+    'FFD8FFE0': 'image/jpeg', // JFIF
+    'FFD8FFE1': 'image/jpeg', // EXIF
+    'FFD8FFE8': 'image/jpeg'  // SPIFF
 };
 
 /**
- * Detecta o formato da imagem a partir do buffer
+ * Detecta o formato de uma imagem a partir do seu buffer
  * @param {Buffer} buffer - Buffer contendo os dados da imagem
- * @returns {string|null} - MIME type da imagem ou null se não reconhecido
+ * @returns {string|null} - Tipo MIME da imagem ou null se não reconhecido
  */
 function detectImageFormatFromBuffer(buffer) {
     if (!Buffer.isBuffer(buffer) || buffer.length < 4) {
+        console.error('Buffer inválido:', {
+            isBuffer: Buffer.isBuffer(buffer),
+            length: buffer?.length
+        });
         return null;
     }
 
-    const fileHeader = buffer.slice(0, 4).toString('hex').toUpperCase();
+    // Aumenta para 8 bytes para melhor detecção
+    const fileHeader = buffer.slice(0, 8).toString('hex').toUpperCase();
     
-    // Log para debug
-    console.debug('Analisando cabeçalho da imagem:', {
+    console.log('Analisando cabeçalho da imagem:', {
         header: fileHeader,
         bufferLength: buffer.length,
         firstBytes: buffer.slice(0, 16).toString('hex').toUpperCase()
     });
 
-    // Verifica magic numbers conhecidos
+    // Tenta encontrar padrões conhecidos em todo o cabeçalho
     for (const [magic, format] of Object.entries(magicNumbers)) {
-        if (fileHeader.startsWith(magic)) {
+        if (fileHeader.includes(magic)) {
             return format;
         }
     }
 
-    // Caso especial para JPEG que pode ter variações no header
-    if (fileHeader.startsWith('FFD8')) {
+    // Caso especial para JPEG com variações
+    if (fileHeader.includes('FFD8') || fileHeader.includes('JFIF') || fileHeader.includes('EXIF')) {
         return 'image/jpeg';
     }
 
@@ -48,28 +50,29 @@ function detectImageFormatFromBuffer(buffer) {
 /**
  * Valida a resposta da API Groq
  * @param {Object} response - Resposta da API
- * @returns {Object} - Objeto com status da validação e mensagem/conteúdo
+ * @returns {Object} Objeto com status da validação
  */
 function validateGroqResponse(response) {
     if (!response?.data) {
         return {
             isValid: false,
-            error: 'Resposta da API não contém dados'
+            error: 'Resposta vazia da API'
         };
     }
 
-    if (!Array.isArray(response.data.choices) || response.data.choices.length === 0) {
+    const { choices } = response.data;
+    if (!Array.isArray(choices) || choices.length === 0) {
         return {
             isValid: false,
-            error: 'Resposta da API não contém choices válidos'
+            error: 'Resposta não contém escolhas válidas'
         };
     }
 
-    const content = response.data.choices[0]?.message?.content;
+    const content = choices[0]?.message?.content;
     if (!content) {
         return {
             isValid: false,
-            error: 'Resposta da API não contém conteúdo válido'
+            error: 'Conteúdo da resposta não encontrado'
         };
     }
 

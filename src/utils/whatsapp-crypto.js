@@ -1,59 +1,70 @@
 const crypto = require('crypto');
+const { magicNumbers } = require('./image-format');
 
 /**
- * Descriptografa dados de mídia do WhatsApp
- * @param {Buffer} buffer - Buffer criptografado
- * @param {Object} mediaInfo - Informações da mídia do WhatsApp
+ * Descriptografa mídia do WhatsApp
+ * @param {Buffer} encryptedBuffer - Buffer criptografado
+ * @param {Object} mediaInfo - Informações da mídia
  * @returns {Buffer} Buffer descriptografado
  */
-async function decryptMedia(buffer, mediaInfo) {
+async function decryptMedia(encryptedBuffer, mediaInfo) {
     try {
-        if (!buffer || !mediaInfo) {
-            throw new Error('Buffer ou informações de mídia ausentes');
+        if (!encryptedBuffer || !Buffer.isBuffer(encryptedBuffer)) {
+            throw new Error('Buffer criptografado inválido');
         }
 
-        // Se não houver informações de criptografia, retorna o buffer original
-        if (!mediaInfo.mediaKey) {
-            console.log('[WhatsApp] Mídia não está criptografada');
-            return buffer;
+        if (!mediaInfo?.mediaKey) {
+            throw new Error('Chave de mídia não fornecida');
         }
 
-        console.log('[WhatsApp] Descriptografando mídia:', {
-            size: buffer.length,
-            hasMediaKey: !!mediaInfo.mediaKey,
-            mimetype: mediaInfo.mimetype
+        console.log('[WhatsApp] Iniciando descriptografia:', {
+            bufferSize: encryptedBuffer.length,
+            mediaKeyLength: mediaInfo.mediaKey?.length,
+            firstBytesEncrypted: encryptedBuffer.slice(0, 16).toString('hex').toUpperCase()
         });
 
         // Decodifica a chave de mídia
-        const mediaKey = Buffer.from(mediaInfo.mediaKey, 'base64');
+        const mediaKeyBuffer = Buffer.from(mediaInfo.mediaKey, 'base64');
+        
+        // Gera chaves para descriptografia
+        const iv = crypto.randomBytes(16);
+        const key = crypto.createHash('sha256').update(mediaKeyBuffer).digest();
 
-        // Gera as chaves de criptografia
-        const expandedMediaKey = crypto.createHash('sha256')
-            .update(mediaKey)
-            .digest();
-
-        const iv = expandedMediaKey.slice(0, 16);
-        const key = expandedMediaKey.slice(16, 48);
-
-        // Cria o decipher
+        // Cria decipher
         const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
         
         // Descriptografa
         const decrypted = Buffer.concat([
-            decipher.update(buffer),
+            decipher.update(encryptedBuffer),
             decipher.final()
         ]);
 
-        console.log('[WhatsApp] Mídia descriptografada com sucesso:', {
-            originalSize: buffer.length,
-            decryptedSize: decrypted.length
+        // Verifica se o buffer descriptografado tem um formato válido
+        const header = decrypted.slice(0, 4).toString('hex').toUpperCase();
+        console.log('[WhatsApp] Header após descriptografia:', {
+            header,
+            knownFormats: Object.keys(magicNumbers)
+        });
+
+        // Log detalhado do buffer descriptografado
+        console.log('[WhatsApp] Buffer descriptografado:', {
+            size: decrypted.length,
+            header: decrypted.slice(0, 16).toString('hex').toUpperCase(),
+            isValidBuffer: Buffer.isBuffer(decrypted)
         });
 
         return decrypted;
 
     } catch (error) {
-        console.error('[WhatsApp] Erro ao descriptografar mídia:', error);
-        throw new Error(`Falha ao descriptografar mídia: ${error.message}`);
+        console.error('[WhatsApp] Erro na descriptografia:', {
+            message: error.message,
+            stack: error.stack,
+            bufferInfo: {
+                size: encryptedBuffer?.length,
+                isBuffer: Buffer.isBuffer(encryptedBuffer)
+            }
+        });
+        throw error;
     }
 }
 

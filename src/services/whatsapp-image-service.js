@@ -1,8 +1,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const axios = require('axios');
-const Tesseract = require('tesseract.js');
-const { validateImageBuffer, detectImageFormat, isValidBase64Image } = require('../utils/image-validator');
+const { validateImageBuffer, detectImageFormat } = require('../utils/image-validator');
 const { decryptMedia } = require('../utils/whatsapp-crypto');
 
 class WhatsAppImageService {
@@ -33,6 +32,14 @@ class WhatsAppImageService {
 
     async downloadImage(url, mediaInfo, timeout = 30000) {
         try {
+            // Log detalhado das informações da mensagem
+            console.log('[WhatsAppImage] Informações da mensagem:', {
+                mediaKey: !!mediaInfo?.mediaKey,
+                mimetype: mediaInfo?.mimetype,
+                size: mediaInfo?.fileLength,
+                url: url?.substring(0, 50) + '...'
+            });
+
             console.log('[WhatsAppImage] Iniciando download da URL:', url);
             
             const response = await axios({
@@ -46,6 +53,12 @@ class WhatsAppImageService {
 
             // Primeiro cria o buffer dos dados brutos
             let buffer = Buffer.from(response.data);
+
+            // Log do buffer baixado
+            console.log('[WhatsAppImage] Buffer baixado:', {
+                size: buffer.length,
+                header: buffer.slice(0, 16).toString('hex').toUpperCase()
+            });
             
             // Tenta descriptografar se houver informações de mídia
             if (mediaInfo) {
@@ -70,59 +83,12 @@ class WhatsAppImageService {
         }
     }
 
-    async extractTextFromImage(buffer) {
-        const maxRetries = 3;
-        let attempt = 0;
-        let lastError;
-
-        while (attempt < maxRetries) {
-            try {
-                console.log(`[WhatsAppImage] Tentativa ${attempt + 1} de extração de texto`);
-                
-                const result = await Tesseract.recognize(
-                    buffer,
-                    'por', // Português
-                    {
-                        logger: m => {
-                            if (m.status === 'recognizing text') {
-                                console.log(`[OCR] Progresso: ${Math.round(m.progress * 100)}%`);
-                            }
-                        }
-                    }
-                );
-
-                console.log('[WhatsAppImage] Texto extraído com sucesso');
-                
-                return {
-                    text: result.data.text.trim(),
-                    confidence: result.data.confidence,
-                    words: result.data.words.map(w => ({
-                        text: w.text,
-                        confidence: w.confidence
-                    }))
-                };
-
-            } catch (error) {
-                console.error(`[WhatsAppImage] Erro na tentativa ${attempt + 1}:`, error);
-                lastError = error;
-                attempt++;
-                
-                if (attempt < maxRetries) {
-                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                }
-            }
-        }
-
-        console.error('[WhatsAppImage] Todas as tentativas de OCR falharam');
-        return {
-            text: '',
-            confidence: 0,
-            error: lastError?.message || 'Falha na extração de texto'
-        };
-    }
-
     async processMessageImage(messageInfo) {
         try {
+            if (!messageInfo?.imageMessage) {
+                throw new Error('Dados da imagem ausentes ou inválidos');
+            }
+
             console.log('[WhatsAppImage] Processando mensagem:', {
                 type: messageInfo.type,
                 hasUrl: !!messageInfo?.imageMessage?.url,
@@ -158,39 +124,24 @@ class WhatsAppImageService {
                 throw new Error(`Imagem muito grande (max: ${this.maxImageSize / (1024 * 1024)}MB)`);
             }
 
-            // Detecta o formato real da imagem
-            const detectedFormat = detectImageFormat(buffer);
-            if (!detectedFormat) {
-                throw new Error('Formato de imagem não reconhecido');
-            }
-
-            // Log detalhado do buffer
-            console.log('[WhatsAppImage] Buffer validado:', {
+            // Log detalhado do buffer final
+            console.log('[WhatsAppImage] Buffer final:', {
                 size: buffer.length,
                 header: buffer.slice(0, 16).toString('hex').toUpperCase(),
-                detectedFormat,
-                declaredMime: mimetype
+                isValidBuffer: Buffer.isBuffer(buffer)
             });
 
-            // Processamento paralelo de OCR e análise
-            const [ocrResult, analysis] = await Promise.allSettled([
-                this.extractTextFromImage(buffer),
-                this.groqServices.analyzeImage(buffer)
-            ]);
-
+            // Análise da imagem com Groq
+            const analysis = await this.groqServices.analyzeImage(buffer);
+            
             return {
                 success: true,
                 message: 'Imagem processada com sucesso',
-                analysis: analysis.status === 'fulfilled' ? analysis.value : null,
-                ocr: ocrResult.status === 'fulfilled' ? ocrResult.value : null,
+                analysis: analysis,
                 metadata: {
-                    type: detectedFormat,
+                    type: mimetype,
                     size: buffer.length,
                     url: cleanUrl
-                },
-                errors: {
-                    analysis: analysis.status === 'rejected' ? analysis.reason?.message : null,
-                    ocr: ocrResult.status === 'rejected' ? ocrResult.reason?.message : null
                 }
             };
 
