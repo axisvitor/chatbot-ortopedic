@@ -35,14 +35,14 @@ class GroqServices {
                 });
 
                 const requestData = {
-                    model: "llama-3.2-11b-vision-preview",
+                    model: "llama-3.2-90b-vision-preview",
                     messages: [
                         {
                             role: "user",
                             content: [
                                 {
                                     type: "text",
-                                    text: "Analise esta imagem com foco em problemas ortopédicos. Se identificar algum problema, forneça uma análise detalhada e orientações iniciais. Se não identificar problemas, descreva o que vê na imagem."
+                                    text: "Analise esta imagem como um comprovante de pagamento ou documento financeiro. Se for um comprovante, identifique: tipo de transação (PIX, TED, DOC, etc), valor, data, banco de origem e destino. Se não for um comprovante de pagamento, descreva brevemente o que vê na imagem."
                                 },
                                 {
                                     type: "image_url",
