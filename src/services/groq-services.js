@@ -34,7 +34,7 @@ class GroqServices {
                 });
 
                 const requestData = {
-                    model: "llama-3.2-90b-vision-preview",
+                    model: GROQ_CONFIG.models.vision,
                     messages: [
                         {
                             role: "user",
@@ -44,9 +44,10 @@ class GroqServices {
                                     text: "Analise esta imagem com foco em problemas ortopédicos. Se identificar algum problema, forneça uma análise detalhada e orientações iniciais. Se não identificar problemas, descreva o que vê na imagem."
                                 },
                                 {
-                                    type: "image_url",
-                                    image_url: {
-                                        url: `data:${format};base64,${base64}`
+                                    type: "image",
+                                    image: {
+                                        data: base64,
+                                        mime_type: format
                                     }
                                 }
                             ]
