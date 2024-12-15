@@ -215,7 +215,9 @@ class WhatsAppService {
         try {
             console.log('[Webhook] Dados recebidos:', JSON.stringify(webhookData, null, 2));
 
-            if (!webhookData?.body) {
+            // Validação básica
+            if (!webhookData?.body || !webhookData.type) {
+                console.warn('[Webhook] Dados inválidos:', { hasBody: !!webhookData?.body, type: webhookData?.type });
                 return null;
             }
 
@@ -223,105 +225,41 @@ class WhatsAppService {
             console.log('[MessageType] Tipos encontrados:', messageTypes);
 
             if (!messageTypes.length) {
+                console.warn('[Webhook] Nenhum tipo de mensagem identificado');
                 return null;
             }
 
             const messageType = messageTypes[0];
             const messageContent = webhookData.body;
+            const messageData = messageContent?.message || {};
 
-            // Extrai o texto da mensagem primeiro
-            let messageText = null;
-            let hasText = false;
+            // Extrai o texto e metadados
+            const extractedText = this._extractMessageText(messageData);
+            const metadata = this._extractMessageMetadata(messageContent);
 
-            // Verifica todas as possíveis fontes de texto
-            if (messageContent?.message) {
-                messageText = messageContent.message.conversation ||
-                            messageContent.message.extendedTextMessage?.text ||
-                            messageContent.message.imageMessage?.caption ||
-                            messageContent.message.videoMessage?.caption;
-                
-                hasText = !!messageText;
-            }
-
+            // Monta a mensagem base
             let extractedMessage = {
-                type: messageType,
-                from: messageContent?.key?.remoteJid?.replace('@s.whatsapp.net', ''),
-                messageId: messageContent?.key?.id,
-                pushName: messageContent?.pushName,
-                hasText: hasText,
-                text: messageText
+                event: webhookData.type,
+                type: this._getBaseMessageType(messageType),
+                ...metadata,
+                ...extractedText
             };
 
-            switch (messageType) {
-                case 'audioMessage':
-                    const audioMessage = messageContent?.message?.audioMessage;
-                    if (!audioMessage) {
-                        throw new Error('Dados do áudio ausentes');
-                    }
+            // Adiciona dados específicos do tipo de mensagem
+            extractedMessage = this._addTypeSpecificData(extractedMessage, messageData, messageType);
 
-                    extractedMessage = {
-                        ...extractedMessage,
-                        type: 'audio',
-                        audioMessage: {
-                            url: audioMessage.url,
-                            mimetype: audioMessage.mimetype,
-                            seconds: audioMessage.seconds,
-                            ptt: audioMessage.ptt,
-                            mediaKey: audioMessage.mediaKey,
-                            fileEncSha256: audioMessage.fileEncSha256,
-                            fileSha256: audioMessage.fileSha256,
-                            fileLength: audioMessage.fileLength
-                        }
-                    };
-                    break;
-
-                case 'imageMessage':
-                    const imageMessage = messageContent?.message?.imageMessage;
-                    extractedMessage = {
-                        ...extractedMessage,
-                        type: 'image',
-                        imageUrl: imageMessage?.url,
-                        hasImage: true,
-                        imageMessage: {
-                            url: imageMessage?.url,
-                            mimetype: imageMessage?.mimetype,
-                            caption: imageMessage?.caption,
-                            mediaKey: imageMessage?.mediaKey,
-                            fileEncSha256: imageMessage?.fileEncSha256,
-                            fileSha256: imageMessage?.fileSha256,
-                            fileLength: imageMessage?.fileLength
-                        }
-                    };
-                    break;
-
-                case 'conversation':
-                case 'extendedTextMessage':
-                    // O texto já foi extraído acima
-                    extractedMessage = {
-                        ...extractedMessage,
-                        type: 'text'
-                    };
-                    break;
-
-                case 'documentMessage':
-                    const documentMessage = messageContent?.message?.documentMessage;
-                    extractedMessage = {
-                        ...extractedMessage,
-                        type: 'document',
-                        documentMessage: {
-                            url: documentMessage?.url,
-                            mimetype: documentMessage?.mimetype,
-                            title: documentMessage?.title,
-                            fileSha256: documentMessage?.fileSha256,
-                            fileLength: documentMessage?.fileLength,
-                            mediaKey: documentMessage?.mediaKey,
-                            fileName: documentMessage?.fileName
-                        }
-                    };
-                    break;
-            }
-
-            console.log('[Webhook] Mensagem extraída:', JSON.stringify(extractedMessage, null, 2));
+            console.log('[Webhook] Mensagem extraída:', {
+                event: extractedMessage.event,
+                type: extractedMessage.type,
+                hasText: extractedMessage.hasText,
+                textLength: extractedMessage.text?.length,
+                from: extractedMessage.from,
+                metadata: {
+                    hasLink: !!extractedMessage.matchedText,
+                    hasMedia: !!extractedMessage.mediaUrl,
+                    messageId: extractedMessage.messageId
+                }
+            });
 
             return extractedMessage;
         } catch (error) {
@@ -330,25 +268,97 @@ class WhatsAppService {
         }
     }
 
-    _getMessageTypes(messageData) {
-        const types = [];
-        const message = messageData?.message;
+    _extractMessageText(messageData) {
+        const text = messageData.conversation ||
+                    messageData.extendedTextMessage?.text ||
+                    messageData.imageMessage?.caption ||
+                    messageData.videoMessage?.caption;
 
-        if (!message) return types;
+        // Extrai informações de links se presentes
+        const linkInfo = messageData.extendedTextMessage || {};
+        
+        return {
+            text,
+            hasText: !!text,
+            matchedText: linkInfo.matchedText,
+            canonicalUrl: linkInfo.canonicalUrl,
+            description: linkInfo.description,
+            title: linkInfo.title,
+            previewType: linkInfo.previewType,
+            jpegThumbnail: linkInfo.jpegThumbnail
+        };
+    }
 
-        // Verifica cada tipo possível de mensagem
-        if (message.audioMessage) types.push('audioMessage');
-        if (message.imageMessage) types.push('imageMessage');
-        if (message.conversation) types.push('conversation');
-        if (message.extendedTextMessage) types.push('extendedTextMessage');
-        if (message.documentMessage) types.push('documentMessage');
+    _extractMessageMetadata(messageContent) {
+        return {
+            messageId: messageContent?.key?.id,
+            from: messageContent?.key?.remoteJid?.replace('@s.whatsapp.net', ''),
+            pushName: messageContent?.pushName,
+            isGroup: messageContent?.key?.remoteJid?.includes('@g.us') || false,
+            timestamp: messageContent?.messageTimestamp,
+            device: messageContent?.device
+        };
+    }
 
-        console.log('[MessageTypes] Tipos encontrados:', {
-            message: message,
-            types: types
-        });
+    _getBaseMessageType(originalType) {
+        if (originalType === 'conversation' || originalType === 'extendedTextMessage' || originalType === 'text') {
+            return 'text';
+        }
+        return originalType.replace('Message', '');
+    }
 
-        return types;
+    _addTypeSpecificData(message, messageData, messageType) {
+        switch (message.type) {
+            case 'audio':
+                const audioMessage = messageData.audioMessage;
+                if (audioMessage) {
+                    message.mediaData = {
+                        url: audioMessage.url,
+                        mimetype: audioMessage.mimetype,
+                        seconds: audioMessage.seconds,
+                        ptt: audioMessage.ptt,
+                        mediaKey: audioMessage.mediaKey,
+                        fileEncSha256: audioMessage.fileEncSha256,
+                        fileSha256: audioMessage.fileSha256,
+                        fileLength: audioMessage.fileLength
+                    };
+                }
+                break;
+
+            case 'image':
+                const imageMessage = messageData.imageMessage;
+                if (imageMessage) {
+                    message.mediaData = {
+                        url: imageMessage.url,
+                        mimetype: imageMessage.mimetype,
+                        caption: imageMessage.caption,
+                        mediaKey: imageMessage.mediaKey,
+                        fileEncSha256: imageMessage.fileEncSha256,
+                        fileSha256: imageMessage.fileSha256,
+                        fileLength: imageMessage.fileLength,
+                        jpegThumbnail: imageMessage.jpegThumbnail
+                    };
+                    message.hasImage = true;
+                }
+                break;
+
+            case 'document':
+                const documentMessage = messageData.documentMessage;
+                if (documentMessage) {
+                    message.mediaData = {
+                        url: documentMessage.url,
+                        mimetype: documentMessage.mimetype,
+                        title: documentMessage.title,
+                        fileSha256: documentMessage.fileSha256,
+                        fileLength: documentMessage.fileLength,
+                        mediaKey: documentMessage.mediaKey,
+                        fileName: documentMessage.fileName
+                    };
+                }
+                break;
+        }
+
+        return message;
     }
 
     async processWhatsAppImage(webhookData) {
