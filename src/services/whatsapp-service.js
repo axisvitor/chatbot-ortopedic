@@ -14,6 +14,14 @@ class WhatsAppService {
     }
 
     /**
+     * Delay entre mensagens para evitar bloqueio
+     * @returns {Promise<void>}
+     */
+    async delay() {
+        return new Promise(resolve => setTimeout(resolve, WHATSAPP_CONFIG.messageDelay));
+    }
+
+    /**
      * Envia uma mensagem de texto
      * @param {string} to - Número do destinatário
      * @param {string} message - Mensagem a ser enviada
@@ -30,7 +38,7 @@ class WhatsAppService {
             await this.delay();
             return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar mensagem:', error);
+            console.error('[WhatsApp] Erro ao enviar mensagem:', error.message);
             throw error;
         }
     }
@@ -54,7 +62,7 @@ class WhatsAppService {
             await this.delay();
             return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar imagem:', error);
+            console.error('[WhatsApp] Erro ao enviar imagem:', error.message);
             throw error;
         }
     }
@@ -78,7 +86,29 @@ class WhatsAppService {
             await this.delay();
             return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar documento:', error);
+            console.error('[WhatsApp] Erro ao enviar documento:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Envia um áudio
+     * @param {string} to - Número do destinatário
+     * @param {string} audioUrl - URL do áudio
+     * @returns {Promise<Object>} Resposta da API
+     */
+    async sendAudio(to, audioUrl) {
+        try {
+            const response = await this.axiosInstance.post(WHATSAPP_CONFIG.endpoints.audio, {
+                connectionKey: WHATSAPP_CONFIG.connectionKey,
+                phone: to,
+                audio: audioUrl
+            });
+
+            await this.delay();
+            return response.data;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao enviar áudio:', error.message);
             throw error;
         }
     }
@@ -91,17 +121,17 @@ class WhatsAppService {
     async notifyFinancialDepartment(paymentInfo) {
         try {
             const message = this.formatPaymentNotification(paymentInfo);
-            await this.sendText(WHATSAPP_CONFIG.financialNumber, message);
+            await this.sendText(WHATSAPP_CONFIG.departments.financial.number, message);
 
             if (paymentInfo.imageUrl) {
                 await this.sendImage(
-                    WHATSAPP_CONFIG.financialNumber,
+                    WHATSAPP_CONFIG.departments.financial.number,
                     paymentInfo.imageUrl,
                     'Comprovante de pagamento'
                 );
             }
         } catch (error) {
-            console.error('[WhatsApp] Erro ao notificar financeiro:', error);
+            console.error('[WhatsApp] Erro ao notificar departamento financeiro:', error.message);
             throw error;
         }
     }
@@ -113,24 +143,35 @@ class WhatsAppService {
      */
     formatPaymentNotification(paymentInfo) {
         const parts = [
-            '*Novo Comprovante de Pagamento*\n',
-            paymentInfo.customerName ? `👤 Cliente: ${paymentInfo.customerName}` : '',
-            paymentInfo.customerPhone ? `📱 Telefone: ${paymentInfo.customerPhone}` : '',
+            '🔔 *Novo Comprovante de Pagamento*\n',
             paymentInfo.amount ? `💰 Valor: R$ ${paymentInfo.amount.toFixed(2)}` : '',
             paymentInfo.bank ? `🏦 Banco: ${paymentInfo.bank}` : '',
             paymentInfo.paymentType ? `💳 Tipo: ${paymentInfo.paymentType}` : '',
-            `\n⏰ Data: ${new Date(paymentInfo.timestamp).toLocaleString('pt-BR')}`
+            paymentInfo.from ? `📱 De: ${paymentInfo.from}` : '',
+            paymentInfo.timestamp ? `⏰ Data: ${new Date(paymentInfo.timestamp).toLocaleString('pt-BR')}` : ''
         ];
 
         return parts.filter(Boolean).join('\n');
     }
 
     /**
-     * Aguarda o delay configurado entre mensagens
-     * @returns {Promise<void>}
+     * Verifica o status de uma mensagem
+     * @param {string} messageId - ID da mensagem
+     * @returns {Promise<Object>} Status da mensagem
      */
-    async delay() {
-        return new Promise(resolve => setTimeout(resolve, WHATSAPP_CONFIG.messageDelay));
+    async getMessageStatus(messageId) {
+        try {
+            const response = await this.axiosInstance.get(`${WHATSAPP_CONFIG.endpoints.status}/${messageId}`, {
+                params: {
+                    connectionKey: WHATSAPP_CONFIG.connectionKey
+                }
+            });
+
+            return response.data;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao verificar status da mensagem:', error.message);
+            throw error;
+        }
     }
 }
 

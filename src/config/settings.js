@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 function validateEnvVar(name) {
     if (!process.env[name]) {
         throw new Error(`Environment variable ${name} is required`);
@@ -8,7 +10,7 @@ function validateEnvVar(name) {
 // OpenAI Configuration
 const OPENAI_CONFIG = {
     apiKey: validateEnvVar('OPENAI_API_KEY'),
-    assistantId: validateEnvVar('ASSISTANT_ID')  // Usando o Assistant configurado no playground
+    assistantId: validateEnvVar('ASSISTANT_ID')
 };
 
 // Groq Configuration
@@ -16,12 +18,12 @@ const GROQ_CONFIG = {
     apiKey: validateEnvVar('GROQ_API_KEY'),
     models: {
         vision: 'llama-3.2-90b-vision-preview',
-        audio: 'whisper-large-v3-turbo'  // Modelo mais rápido e com melhor custo-benefício
+        audio: 'whisper-large-v3-turbo'
     },
     audioConfig: {
-        language: 'pt',  // Português
+        language: 'pt',
         response_format: 'json',
-        temperature: 0.0  // Mais preciso
+        temperature: 0.0
     }
 };
 
@@ -42,10 +44,20 @@ const WHATSAPP_CONFIG = {
     messageDelay: 1000, // delay entre mensagens em ms
     retryAttempts: 3,
     endpoints: {
-        text: '/message/send-text',
-        image: '/message/send-image',
-        document: '/message/send-document',
-        audio: '/message/send-audio'
+        text: '/v1/message/send-text',
+        image: '/v1/message/send-image',
+        document: '/v1/message/send-document',
+        audio: '/v1/message/send-audio',
+        status: '/v1/message/status'
+    },
+    departments: {
+        financial: {
+            number: validateEnvVar('FINANCIAL_DEPT_NUMBER'),
+            paymentProofs: {
+                allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
+                maxSize: 5 * 1024 * 1024 // 5MB
+            }
+        }
     }
 };
 
@@ -73,20 +85,10 @@ const BUSINESS_HOURS = {
         saturday: { start: '08:00', end: '12:00' },
         sunday: { start: null, end: null }
     },
-    holidays: [], // Lista de feriados no formato 'YYYY-MM-DD'
+    holidays: [],
     autoReply: {
         humanSupportNeeded: "Entendo que você precisa de atendimento humano. No momento estamos fora do horário comercial (seg-sex 8h-18h, sáb 8h-12h). Sua solicitação será encaminhada para nossa equipe e retornaremos no próximo horário de atendimento. Enquanto isso, posso tentar ajudar com outras questões?",
         financialDepartment: "Sua solicitação será encaminhada para nosso setor financeiro. Durante o horário comercial (seg-sex 8h-18h, sáb 8h-12h), nossa equipe entrará em contato. Há mais alguma coisa em que eu possa ajudar?"
-    },
-    departments: {
-        financial: {
-            email: 'financeiro@empresa.com',
-            phone: '11999999999',
-            paymentProofs: {
-                allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
-                maxSize: 5 * 1024 * 1024 // 5MB
-            }
-        }
     }
 };
 
