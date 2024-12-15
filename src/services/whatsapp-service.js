@@ -3,7 +3,31 @@ const { WHATSAPP_CONFIG } = require('../config/settings');
 
 class WhatsAppService {
     constructor() {
-        this.axiosInstance = axios.create({
+        this.client = null;
+        this.connectionKey = null;
+        this.init();
+    }
+
+    async init() {
+        try {
+            this.client = await this.createClient();
+            this.connectionKey = 'w-api_' + Math.random().toString(36).substring(7);
+            console.log('[WhatsApp] Cliente inicializado com sucesso:', { connectionKey: this.connectionKey });
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao inicializar cliente:', error);
+            throw error;
+        }
+    }
+
+    async getClient() {
+        if (!this.client) {
+            await this.init();
+        }
+        return this.client;
+    }
+
+    async createClient() {
+        return axios.create({
             baseURL: WHATSAPP_CONFIG.apiUrl,
             headers: {
                 'Authorization': `Bearer cnQfI8UaFha8fVY7dR80srpxKALKkUmgG`,
@@ -11,9 +35,11 @@ class WhatsAppService {
             },
             timeout: 10000
         });
+    }
 
-        // Adiciona interceptor para log de erros
-        this.axiosInstance.interceptors.response.use(
+    // Adiciona interceptor para log de erros
+    async addInterceptor() {
+        this.client.interceptors.response.use(
             response => response,
             error => {
                 console.error('[WhatsApp] Erro na requisição:', {
@@ -45,10 +71,10 @@ class WhatsAppService {
             console.log('[WhatsApp] Enviando mensagem:', {
                 to,
                 messagePreview: message.substring(0, 100),
-                connectionKey: WHATSAPP_CONFIG.connectionKey
+                connectionKey: this.connectionKey
             });
 
-            const response = await this.axiosInstance.post(`${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${WHATSAPP_CONFIG.connectionKey}`, {
+            const response = await this.client.post(`${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`, {
                 phoneNumber: to,
                 text: message,
                 delayMessage: WHATSAPP_CONFIG.messageDelay / 1000 // Convertendo ms para segundos
@@ -76,8 +102,8 @@ class WhatsAppService {
      */
     async sendImage(to, imageUrl, caption = '') {
         try {
-            const response = await this.axiosInstance.post(WHATSAPP_CONFIG.endpoints.image, {
-                connectionKey: WHATSAPP_CONFIG.connectionKey,
+            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.image, {
+                connectionKey: this.connectionKey,
                 phone: to,
                 image: imageUrl,
                 caption
@@ -100,8 +126,8 @@ class WhatsAppService {
      */
     async sendDocument(to, documentUrl, filename) {
         try {
-            const response = await this.axiosInstance.post(WHATSAPP_CONFIG.endpoints.document, {
-                connectionKey: WHATSAPP_CONFIG.connectionKey,
+            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.document, {
+                connectionKey: this.connectionKey,
                 phone: to,
                 document: documentUrl,
                 filename
@@ -123,8 +149,8 @@ class WhatsAppService {
      */
     async sendAudio(to, audioUrl) {
         try {
-            const response = await this.axiosInstance.post(WHATSAPP_CONFIG.endpoints.audio, {
-                connectionKey: WHATSAPP_CONFIG.connectionKey,
+            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.audio, {
+                connectionKey: this.connectionKey,
                 phone: to,
                 audio: audioUrl
             });
@@ -185,9 +211,9 @@ class WhatsAppService {
      */
     async getMessageStatus(messageId) {
         try {
-            const response = await this.axiosInstance.get(`${WHATSAPP_CONFIG.endpoints.status}/${messageId}`, {
+            const response = await this.client.get(`${WHATSAPP_CONFIG.endpoints.status}/${messageId}`, {
                 params: {
-                    connectionKey: WHATSAPP_CONFIG.connectionKey
+                    connectionKey: this.connectionKey
                 }
             });
 

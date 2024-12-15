@@ -1,14 +1,22 @@
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+
 const { WebhookService } = require('./services/webhook-service');
 const { AIServices } = require('./services/ai-services');
 const { WhatsAppService } = require('./services/whatsapp-service');
-const { AudioService } = require('./services/audio-service');
-const { ImageService } = require('./services/image-service');
 const { GroqServices } = require('./services/groq-services');
-const express = require('express');
-const bodyParser = require('body-parser');
+const AudioService = require('./services/audio-service');
+const { ImageService } = require('./services/image-service');
+const { BusinessHours } = require('./services/business-hours');
+
+const { RATE_LIMIT_CONFIG } = require('./config/settings');
 
 // Inicialização do Express
 const app = express();
@@ -23,8 +31,18 @@ const groqServices = new GroqServices();
 const webhookService = new WebhookService();
 const whatsappService = new WhatsAppService();
 const aiServices = new AIServices(groqServices);
-const audioService = new AudioService(groqServices, whatsappService.client);
+
+// Aguarda o cliente do WhatsApp estar pronto
+let audioService;
+whatsappService.getClient().then(client => {
+    audioService = new AudioService(groqServices, client);
+    console.log('✅ AudioService inicializado com sucesso');
+}).catch(error => {
+    console.error('❌ Erro ao inicializar AudioService:', error);
+});
+
 const imageService = new ImageService(groqServices);
+const businessHours = new BusinessHours();
 
 // Rota de healthcheck
 app.get('/', (req, res) => {
