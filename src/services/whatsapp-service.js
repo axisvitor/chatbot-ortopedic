@@ -5,6 +5,8 @@ class WhatsAppService {
     constructor() {
         this.client = null;
         this.connectionKey = null;
+        this.retryCount = 0;
+        this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
         this.init();
     }
 
@@ -14,14 +16,22 @@ class WhatsAppService {
                 throw new Error('Token não configurado');
             }
 
-            this.connectionKey = WHATSAPP_CONFIG.connectionKey;
             this.client = await this.createClient();
+            this.connectionKey = WHATSAPP_CONFIG.connectionKey || ('w-api_' + Math.random().toString(36).substring(7));
+            this.addInterceptor();
             
-            console.log('[WhatsApp] Cliente inicializado com sucesso');
+            console.log('[WhatsApp] Cliente inicializado com sucesso:', { connectionKey: this.connectionKey });
         } catch (error) {
             console.error('[WhatsApp] Erro ao inicializar cliente:', error);
             throw error;
         }
+    }
+
+    async getClient() {
+        if (!this.client) {
+            await this.init();
+        }
+        return this.client;
     }
 
     async createClient() {
@@ -29,87 +39,127 @@ class WhatsAppService {
             baseURL: WHATSAPP_CONFIG.apiUrl,
             headers: {
                 'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                'Content-Type': 'application/json'
             },
             timeout: 10000
         });
     }
 
-    async sendMessage(to, message, type = 'text') {
-        try {
-            const endpoint = this._getEndpoint(type);
-            const payload = this._createPayload(to, message, type);
+    addInterceptor() {
+        this.client.interceptors.response.use(
+            response => response,
+            async error => {
+                console.error('[WhatsApp] Erro na requisição:', {
+                    status: error.response?.status,
+                    data: error.response?.data,
+                    message: error.message
+                });
 
-            console.log(`[WhatsApp] Enviando mensagem ${type}:`, {
+                // Se for erro 403 (Forbidden), tenta reconectar
+                if (error.response?.status === 403 && this.retryCount < this.maxRetries) {
+                    this.retryCount++;
+                    console.log(`[WhatsApp] Tentativa ${this.retryCount} de reconexão...`);
+                    
+                    try {
+                        // Aguarda 1 segundo antes de tentar novamente
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        
+                        // Reinicializa o cliente
+                        await this.init();
+                        
+                        // Tenta a requisição novamente
+                        const config = error.config;
+                        config.headers['Authorization'] = `Bearer ${WHATSAPP_CONFIG.token}`;
+                        return this.client(config);
+                    } catch (retryError) {
+                        console.error('[WhatsApp] Erro na tentativa de reconexão:', retryError);
+                        return Promise.reject(retryError);
+                    }
+                }
+
+                // Se excedeu o número de tentativas ou não é erro 403
+                this.retryCount = 0;
+                return Promise.reject(error);
+            }
+        );
+    }
+
+    /**
+     * Envia uma mensagem de texto
+     */
+    async sendText(to, message) {
+        try {
+            console.log('[WhatsApp] Enviando mensagem:', {
                 to,
-                endpoint,
-                messagePreview: typeof message === 'string' ? message.substring(0, 100) : '[Conteúdo não textual]'
+                messagePreview: message.substring(0, 100),
+                connectionKey: this.connectionKey
             });
 
-            const response = await this.client.post(`${endpoint}?connectionKey=${this.connectionKey}`, payload);
+            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.text, {
+                connectionKey: this.connectionKey,
+                phoneNumber: to,
+                message
+            });
+
+            console.log('[WhatsApp] Mensagem enviada com sucesso:', {
+                messageId: response.data.messageId,
+                error: response.data.error
+            });
+
+            await this.delay();
             return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar mensagem:', error);
+            console.error('[WhatsApp] Erro ao enviar mensagem:', error.message);
             throw error;
         }
     }
 
-    _getEndpoint(type) {
-        const endpoints = {
-            text: 'message/send-text',
-            imageUrl: 'message/sendImageUrl',
-            imageBase64: 'message/sendImageBase64',
-        };
-
-        const endpoint = endpoints[type];
-        if (!endpoint) {
-            throw new Error(`Tipo de mensagem '${type}' não suportado`);
-        }
-
-        return endpoint;
-    }
-
-    _createPayload(to, message, type) {
-        const base = {
-            phoneNumber: to,
-            delayMessage: String(WHATSAPP_CONFIG.messageDelay || 1000)
-        };
-
-        switch (type) {
-            case 'text':
-                return {
-                    ...base,
-                    text: message
-                };
-            case 'imageUrl':
-                return {
-                    ...base,
-                    url: message.url || message,
-                    caption: message.caption || ''
-                };
-            case 'imageBase64':
-                return {
-                    ...base,
-                    base64Image: message.base64 || message,
-                    caption: message.caption || ''
-                };
-            default:
-                throw new Error(`Tipo de payload '${type}' não suportado`);
-        }
-    }
-
-    async sendText(to, message) {
-        return this.sendMessage(to, message, 'text');
-    }
-
+    /**
+     * Envia uma imagem
+     */
     async sendImage(to, image, caption = '') {
-        const type = this._isBase64(image) ? 'imageBase64' : 'imageUrl';
-        const payload = typeof image === 'string' ? 
-            { [type === 'imageBase64' ? 'base64' : 'url']: image, caption } : 
-            { ...image, caption: caption || image.caption };
+        try {
+            const isBase64 = this._isBase64(image);
+            const endpoint = isBase64 ? 'message/sendImageBase64' : 'message/sendImageUrl';
             
-        return this.sendMessage(to, payload, type);
+            const payload = {
+                connectionKey: this.connectionKey,
+                phoneNumber: to,
+                caption: caption || (typeof image === 'object' ? image.caption : ''),
+            };
+
+            if (isBase64) {
+                payload.base64Image = typeof image === 'object' ? image.base64 : image;
+            } else {
+                payload.url = typeof image === 'object' ? image.url : image;
+            }
+
+            const response = await this.client.post(endpoint, payload);
+            await this.delay();
+            return response.data;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao enviar imagem:', error.message);
+            throw error;
+        }
+    }
+
+    /**
+     * Envia um áudio
+     */
+    async sendAudio(to, audioUrl) {
+        try {
+            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.audio, {
+                connectionKey: this.connectionKey,
+                phoneNumber: to,
+                audio: audioUrl
+            });
+
+            await this.delay();
+            return response.data;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao enviar áudio:', error.message);
+            throw error;
+        }
     }
 
     _isBase64(str) {
@@ -124,6 +174,10 @@ class WhatsAppService {
         } catch (err) {
             return false;
         }
+    }
+
+    async delay() {
+        return new Promise(resolve => setTimeout(resolve, WHATSAPP_CONFIG.messageDelay));
     }
 }
 
