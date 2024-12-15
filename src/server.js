@@ -70,7 +70,7 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
         if (!businessHours.isWithinBusinessHours()) {
             console.log('⏰ Fora do horário de atendimento');
             const response = businessHours.getOutOfHoursMessage();
-            await whatsappService.sendMessage(message.from, response);
+            await whatsappService.sendText(message.from, response);
             return res.sendStatus(200);
         }
 
@@ -126,7 +126,7 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                 resposta: response
             });
 
-            await whatsappService.sendMessage(message.from, response);
+            await whatsappService.sendText(message.from, response);
         }
 
     } catch (error) {
