@@ -213,11 +213,7 @@ class WhatsAppService {
 
     async extractMessageFromWebhook(webhookData) {
         try {
-            console.log('[Webhook] Dados recebidos:', {
-                type: webhookData?.type,
-                hasBody: !!webhookData?.body,
-                hasMsgContent: !!webhookData?.msgContent
-            });
+            console.log('[Webhook] Dados recebidos:', JSON.stringify(webhookData, null, 2));
 
             if (!webhookData?.body) {
                 return null;
@@ -237,26 +233,17 @@ class WhatsAppService {
                 type: messageType,
                 from: messageContent?.key?.remoteJid?.replace('@s.whatsapp.net', ''),
                 messageId: messageContent?.key?.id,
-                pushName: messageContent?.pushName
+                pushName: messageContent?.pushName,
+                hasText: false
             };
 
             switch (messageType) {
                 case 'audioMessage':
                     const audioMessage = messageContent?.message?.audioMessage;
-                    console.log('[Webhook] Dados do áudio:', {
-                        mimetype: audioMessage?.mimetype,
-                        hasMediaKey: !!audioMessage?.mediaKey,
-                        isPtt: audioMessage?.ptt,
-                        hasUrl: !!audioMessage?.url,
-                        fileLength: audioMessage?.fileLength,
-                        seconds: audioMessage?.seconds
-                    });
-
                     if (!audioMessage) {
                         throw new Error('Dados do áudio ausentes');
                     }
 
-                    // Extrair dados do áudio
                     extractedMessage = {
                         ...extractedMessage,
                         type: 'audio',
@@ -271,22 +258,6 @@ class WhatsAppService {
                             fileLength: audioMessage.fileLength
                         }
                     };
-
-                    // Se tiver msgContent em base64, adiciona ao audioMessage
-                    if (webhookData?.msgContent) {
-                        try {
-                            const base64Match = webhookData.msgContent.match(/^data:audio\/[^;]+;base64,(.+)$/);
-                            if (base64Match) {
-                                const base64Data = base64Match[1];
-                                extractedMessage.audioMessage.buffer = Buffer.from(base64Data, 'base64');
-                                console.log('[Webhook] Buffer extraído do base64:', {
-                                    tamanhoBuffer: extractedMessage.audioMessage.buffer.length
-                                });
-                            }
-                        } catch (error) {
-                            console.error('[Webhook] Erro ao processar base64:', error);
-                        }
-                    }
                     break;
 
                 case 'imageMessage':
@@ -294,17 +265,20 @@ class WhatsAppService {
                     extractedMessage = {
                         ...extractedMessage,
                         type: 'image',
-                        imageUrl: imageMessage?.url
+                        imageUrl: imageMessage?.url,
+                        hasImage: true
                     };
                     break;
 
                 case 'conversation':
                 case 'extendedTextMessage':
+                    const text = messageContent?.message?.conversation || 
+                               messageContent?.message?.extendedTextMessage?.text;
                     extractedMessage = {
                         ...extractedMessage,
                         type: 'text',
-                        text: messageContent?.message?.conversation || 
-                              messageContent?.message?.extendedTextMessage?.text
+                        text: text,
+                        hasText: !!text
                     };
                     break;
 
@@ -317,13 +291,7 @@ class WhatsAppService {
                     break;
             }
 
-            console.log('[Webhook] Mensagem extraída:', {
-                type: extractedMessage.type,
-                from: extractedMessage.from,
-                hasAudioMessage: extractedMessage.type === 'audio' ? !!extractedMessage.audioMessage : undefined,
-                hasBuffer: extractedMessage.type === 'audio' ? !!extractedMessage.audioMessage?.buffer : undefined,
-                bufferSize: extractedMessage.type === 'audio' ? extractedMessage.audioMessage?.buffer?.length : undefined
-            });
+            console.log('[Webhook] Mensagem extraída:', JSON.stringify(extractedMessage, null, 2));
 
             return extractedMessage;
         } catch (error) {
@@ -344,6 +312,11 @@ class WhatsAppService {
         if (message.conversation) types.push('conversation');
         if (message.extendedTextMessage) types.push('extendedTextMessage');
         if (message.documentMessage) types.push('documentMessage');
+
+        console.log('[MessageTypes] Tipos encontrados:', {
+            message: message,
+            types: types
+        });
 
         return types;
     }
