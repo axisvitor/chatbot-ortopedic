@@ -11,7 +11,7 @@ const { WebhookService } = require('./services/webhook-service');
 const { WhatsAppService } = require('./services/whatsapp-service');
 const { AIServices } = require('./services/ai-services');
 const AudioService = require('./services/audio-service');
-const { ImageService } = require('./services/image-service');
+const ImageService = require('./services/image-service');
 const businessHours = require('./services/business-hours');
 
 // Configurações

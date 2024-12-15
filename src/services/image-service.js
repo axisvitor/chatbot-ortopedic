@@ -3,7 +3,7 @@ const groqServices = require('./groq-services');
 const settings = require('../config/settings');
 
 class ImageService {
-    constructor() {
+    constructor(groqServices) {
         this.groqServices = groqServices;
         this.MAX_RETRIES = 3;
         this.RETRY_DELAY = 1000; // 1 second
@@ -75,4 +75,4 @@ class ImageService {
     }
 }
 
-module.exports = new ImageService();
+module.exports = ImageService;
