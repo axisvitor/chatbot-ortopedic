@@ -29,17 +29,57 @@ class GroqServices {
 
     /**
      * Prepara os dados da imagem para envio
-     * @param {Buffer} buffer - Buffer da imagem
+     * @param {Buffer|string} imageData - Buffer da imagem ou string base64
      * @returns {Object} Objeto com formato e dados base64
      */
-    async prepareImageData(buffer) {
-        if (!Buffer.isBuffer(buffer)) {
-            throw new Error('Dados inválidos: buffer esperado');
+    async prepareImageData(imageData) {
+        let buffer;
+        
+        // Log inicial dos dados recebidos
+        console.log('[Groq] Preparando dados da imagem:', {
+            type: typeof imageData,
+            isBuffer: Buffer.isBuffer(imageData),
+            length: imageData?.length,
+            isString: typeof imageData === 'string'
+        });
+
+        // Converte para Buffer se necessário
+        if (typeof imageData === 'string') {
+            // Verifica se é uma data URL
+            if (imageData.startsWith('data:')) {
+                const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+                if (matches) {
+                    buffer = Buffer.from(matches[2], 'base64');
+                } else {
+                    throw new Error('Data URL inválida');
+                }
+            } else {
+                // Assume que é base64 puro
+                try {
+                    buffer = Buffer.from(imageData, 'base64');
+                } catch (error) {
+                    throw new Error('String base64 inválida');
+                }
+            }
+        } else if (Buffer.isBuffer(imageData)) {
+            buffer = imageData;
+        } else {
+            throw new Error('Dados inválidos: esperado Buffer ou string base64');
+        }
+
+        // Validação do buffer
+        if (!buffer || buffer.length < 8) {
+            throw new Error('Buffer inválido ou muito pequeno');
         }
 
         // Detecta o formato
         const detectedFormat = detectImageFormatFromBuffer(buffer);
         if (!detectedFormat) {
+            // Log detalhado para debug
+            console.error('[Groq] Formato não reconhecido:', {
+                bufferLength: buffer.length,
+                firstBytes: buffer.slice(0, 16).toString('hex').toUpperCase()
+            });
             throw new Error('Formato de imagem não reconhecido');
         }
 
@@ -48,13 +88,14 @@ class GroqServices {
 
         return {
             format: detectedFormat,
-            base64: base64Data
+            base64: base64Data,
+            buffer // Retorna o buffer também para uso posterior se necessário
         };
     }
 
     /**
      * Analisa uma imagem usando a API Groq
-     * @param {Buffer} imageData - Buffer da imagem
+     * @param {Buffer|string} imageData - Buffer da imagem ou string base64
      * @returns {Promise<string>} Resultado da análise
      */
     async analyzeImage(imageData) {
@@ -63,13 +104,16 @@ class GroqServices {
 
         while (attempt < this.imageAnalysisConfig.maxRetries) {
             try {
+                // Log inicial
+                console.log(`[Groq] Tentativa ${attempt + 1} de análise de imagem`);
+
                 // Prepara os dados da imagem
-                const { format, base64 } = await this.prepareImageData(imageData);
+                const { format, base64, buffer } = await this.prepareImageData(imageData);
 
                 // Log detalhado
-                console.log('[Groq] Enviando imagem para análise:', {
+                console.log('[Groq] Imagem preparada para análise:', {
                     format,
-                    bufferSize: imageData.length,
+                    bufferSize: buffer.length,
                     base64Length: base64.length,
                     attempt: attempt + 1,
                     model: this.models.vision
@@ -116,7 +160,8 @@ class GroqServices {
                 console.error(`[Groq] Erro na tentativa ${attempt + 1}:`, {
                     message: error.message,
                     status: error.response?.status,
-                    data: error.response?.data
+                    data: error.response?.data,
+                    stack: error.stack
                 });
 
                 lastError = error;
