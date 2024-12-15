@@ -6,7 +6,6 @@
   "scripts": {
     "start": "node --no-deprecation src/main.js",
     "dev": "nodemon --no-deprecation src/main.js",
-    "test": "node src/test-audio.js",
     "postinstall": "mkdir -p temp"
   },
   "engines": {
@@ -32,25 +31,11 @@
     "redis": "^4.6.11",
     "uuid": "^9.0.1",
     "venom-bot": "^5.0.21",
-    "winston": "^3.17.0",
-    "@npmcli/fs": "^3.1.0",
-    "@npmcli/package-json": "^5.0.0",
+    "winston": "^3.17.0"
+  },
+  "overrides": {
     "glob": "^10.3.10",
     "rimraf": "^5.0.5",
-    "lru-cache": "^10.2.0",
     "puppeteer": "^22.8.2"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "resolutions": {
-    "glob": "^10.3.10",
-    "rimraf": "^5.0.5",
-    "@humanwhocodes/config-array": "@eslint/config-array",
-    "@humanwhocodes/object-schema": "@eslint/object-schema",
-    "puppeteer": "^22.8.2",
-    "gauge": "^5.0.0",
-    "npmlog": "^7.0.0",
-    "are-we-there-yet": "^4.0.0"
   }
 }
