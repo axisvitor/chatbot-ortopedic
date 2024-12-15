@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { AIServices } = require('./services/ai-services');
 const { WhatsAppService } = require('./services/whatsapp-service');
 const { BUSINESS_HOURS } = require('./config/settings');
@@ -152,4 +153,10 @@ class ChatbotController {
     }
 }
 
+// Exporta a classe
 module.exports = { ChatbotController };
+
+// Se executado diretamente, inicia o servidor
+if (require.main === module) {
+    const server = require('./server');
+}
