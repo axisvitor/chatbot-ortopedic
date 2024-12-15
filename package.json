@@ -2,10 +2,11 @@
   "name": "chatbot-whatsapp-integration",
   "version": "1.0.0",
   "description": "Integration of ChatGPT with WhatsApp for e-commerce.",
-  "main": "src/main.js",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node --no-deprecation src/main.js",
-    "dev": "nodemon --no-deprecation src/main.js",
+    "start": "node src/server.js",
+    "build": "echo 'No build step required'",
+    "dev": "nodemon src/server.js",
     "test": "node src/test-audio.js"
   },
   "engines": {
