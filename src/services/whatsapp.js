@@ -213,58 +213,103 @@ class WhatsAppService {
 
     async extractMessageFromWebhook(webhookData) {
         try {
-            console.log('[Webhook] Dados recebidos:', JSON.stringify(webhookData, null, 2));
+            console.log('[Extractor] Iniciando extração da mensagem:', {
+                type: webhookData.type,
+                hasBody: !!webhookData.body,
+                hasMessage: !!webhookData.body?.message
+            });
 
-            // Validação básica
-            if (!webhookData?.body || !webhookData.type) {
-                console.warn('[Webhook] Dados inválidos:', { hasBody: !!webhookData?.body, type: webhookData?.type });
+            if (!webhookData?.body?.message) {
+                console.warn('[Extractor] Dados da mensagem ausentes');
                 return null;
             }
 
-            const messageTypes = this._getMessageTypes(webhookData.body);
-            console.log('[MessageType] Tipos encontrados:', messageTypes);
+            const messageData = webhookData.body;
+            const messageTypes = this._getMessageTypes(messageData);
+            const baseType = messageTypes[0] || null;
 
-            if (!messageTypes.length) {
-                console.warn('[Webhook] Nenhum tipo de mensagem identificado');
-                return null;
-            }
+            // Extrai texto e metadados básicos
+            const text = this._extractMessageText(messageData.message);
+            const metadata = this._extractMessageMetadata(messageData);
 
-            const messageType = messageTypes[0];
-            const messageContent = webhookData.body;
-            const messageData = messageContent?.message || {};
-
-            // Extrai o texto e metadados
-            const extractedText = this._extractMessageText(messageData);
-            const metadata = this._extractMessageMetadata(messageContent);
-
-            // Monta a mensagem base
-            let extractedMessage = {
-                event: webhookData.type,
-                type: this._getBaseMessageType(messageType),
-                ...metadata,
-                ...extractedText
+            // Monta o objeto da mensagem
+            const extractedMessage = {
+                type: baseType,
+                from: metadata.from,
+                messageId: metadata.messageId,
+                timestamp: metadata.timestamp,
+                hasText: !!text,
+                text: text,
+                hasImage: messageTypes.includes('image'),
+                hasAudio: messageTypes.includes('audio'),
+                hasDocument: messageTypes.includes('document'),
+                hasVideo: messageTypes.includes('video')
             };
 
-            // Adiciona dados específicos do tipo de mensagem
-            extractedMessage = this._addTypeSpecificData(extractedMessage, messageData, messageType);
-
-            console.log('[Webhook] Mensagem extraída:', {
-                event: extractedMessage.event,
+            console.log('[Extractor] Mensagem extraída:', {
                 type: extractedMessage.type,
                 hasText: extractedMessage.hasText,
-                textLength: extractedMessage.text?.length,
+                text: extractedMessage.text?.substring(0, 100),
                 from: extractedMessage.from,
-                metadata: {
-                    hasLink: !!extractedMessage.matchedText,
-                    hasMedia: !!extractedMessage.mediaUrl,
-                    messageId: extractedMessage.messageId
-                }
+                messageTypes
             });
 
             return extractedMessage;
+
         } catch (error) {
-            console.error('[Webhook] Erro ao extrair mensagem:', error);
-            throw error;
+            console.error('[Extractor] Erro ao extrair mensagem:', error);
+            return null;
+        }
+    }
+
+    _getMessageTypes(messageData) {
+        try {
+            const types = [];
+            const message = messageData?.message;
+
+            if (!message) {
+                console.log('[MessageTypes] Nenhuma mensagem encontrada');
+                return types;
+            }
+
+            // Log da estrutura da mensagem
+            console.log('[MessageTypes] Estrutura da mensagem:', {
+                hasConversation: !!message.conversation,
+                hasExtendedText: !!message.extendedTextMessage,
+                text: message.extendedTextMessage?.text || message.conversation,
+                messageKeys: Object.keys(message)
+            });
+
+            // Verifica cada tipo possível de mensagem
+            if (message.conversation) {
+                types.push('text');
+            }
+            if (message.extendedTextMessage) {
+                types.push('text');
+            }
+            if (message.imageMessage) {
+                types.push('image');
+            }
+            if (message.audioMessage) {
+                types.push('audio');
+            }
+            if (message.documentMessage) {
+                types.push('document');
+            }
+            if (message.videoMessage) {
+                types.push('video');
+            }
+
+            // Se nenhum tipo foi identificado mas temos texto
+            if (types.length === 0 && (message.conversation || message.extendedTextMessage?.text)) {
+                types.push('text');
+            }
+
+            console.log('[MessageTypes] Tipos identificados:', types);
+            return types;
+        } catch (error) {
+            console.error('[MessageTypes] Erro ao identificar tipos:', error);
+            return ['text']; // Fallback para texto em caso de erro
         }
     }
 
@@ -490,6 +535,12 @@ class WhatsAppService {
 
     async handleIncomingMessage(message) {
         try {
+            console.log('[Handler] Processando mensagem:', {
+                type: message.type,
+                hasMessage: !!message.body?.message,
+                messageType: message.body?.message ? Object.keys(message.body.message)[0] : null
+            });
+
             const autoReply = businessHours.getAutoReplyMessage();
             if (autoReply) {
                 await this.sendMessage(message.key.remoteJid, autoReply);
@@ -499,16 +550,15 @@ class WhatsAppService {
             // Extrai a mensagem do webhook
             const extractedMessage = await this.extractMessageFromWebhook(message);
             if (!extractedMessage) {
-                console.warn(' Mensagem não reconhecida:', message);
+                console.warn('[Handler] Mensagem não reconhecida:', message);
                 return;
             }
 
-            console.log(' Mensagem extraída:', {
+            console.log('[Handler] Mensagem extraída:', {
                 type: extractedMessage.type,
-                from: extractedMessage.from,
                 hasText: extractedMessage.hasText,
-                hasImage: extractedMessage.hasImage,
-                messageLength: extractedMessage.text?.length
+                text: extractedMessage.text,
+                from: extractedMessage.from
             });
 
             // Processa mensagem de mídia (imagem/áudio)
@@ -519,23 +569,29 @@ class WhatsAppService {
                 }
             }
 
-            // Processa mensagem de texto
+            // Se temos texto, enviamos para processamento
             if (extractedMessage.hasText && extractedMessage.text) {
+                // Aqui você deve enviar a mensagem para o seu Assistant processar
+                const aiResponse = await this.aiServices.processMessage(extractedMessage.text, {
+                    from: extractedMessage.from,
+                    messageId: extractedMessage.messageId
+                });
+
                 return {
-                    text: extractedMessage.text,
+                    text: aiResponse,
                     type: 'text'
                 };
             }
 
             // Mensagem não reconhecida
-            console.warn(' Tipo de mensagem não suportado:', extractedMessage.type);
+            console.warn('[Handler] Tipo de mensagem não suportado:', extractedMessage.type);
             return {
                 text: "Desculpe, não consegui processar este tipo de mensagem. Por favor, envie texto, imagem ou áudio.",
                 type: 'text'
             };
 
         } catch (error) {
-            console.error(' Erro ao processar mensagem:', error);
+            console.error('[Handler] Erro ao processar mensagem:', error);
             throw error;
         }
     }
