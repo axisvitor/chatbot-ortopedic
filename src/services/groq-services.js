@@ -235,6 +235,124 @@ class GroqServices {
             throw error;
         }
     }
+
+    /**
+     * Transcreve um arquivo de áudio
+     * @param {FormData} formData - FormData contendo o arquivo de áudio e configurações
+     * @returns {Promise<string>} Texto transcrito
+     */
+    async transcribeAudio(formData) {
+        let attempt = 0;
+        let lastError;
+
+        while (attempt < 3) {
+            try {
+                console.log('[Groq] Enviando áudio para transcrição:', {
+                    model: formData.get('model'),
+                    language: formData.get('language'),
+                    attempt: attempt + 1
+                });
+
+                const response = await axios.post(
+                    'https://api.groq.com/v1/audio/transcriptions',
+                    formData,
+                    {
+                        headers: {
+                            ...formData.getHeaders(),
+                            'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`
+                        },
+                        timeout: 60000 // 60 segundos para arquivos grandes
+                    }
+                );
+
+                if (!response?.data?.text) {
+                    throw new Error('Resposta inválida da API de transcrição');
+                }
+
+                console.log('[Groq] Transcrição concluída:', {
+                    length: response.data.text.length,
+                    preview: response.data.text.substring(0, 100)
+                });
+
+                return response.data.text;
+
+            } catch (error) {
+                console.error(`[Groq] Erro na tentativa ${attempt + 1} de transcrição:`, {
+                    message: error.message,
+                    status: error.response?.status,
+                    data: error.response?.data
+                });
+
+                lastError = error;
+                attempt++;
+
+                if (attempt < 3) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                }
+            }
+        }
+
+        throw new Error(`Falha ao transcrever áudio após ${attempt} tentativas: ${lastError.message}`);
+    }
+
+    /**
+     * Faz uma chamada para o modelo de chat
+     * @param {Array} messages - Lista de mensagens no formato {role, content}
+     * @returns {Promise<string>} Resposta do modelo
+     */
+    async chat(messages) {
+        let attempt = 0;
+        let lastError;
+
+        while (attempt < 3) {
+            try {
+                console.log('[Groq] Enviando mensagem para chat:', {
+                    messageCount: messages.length,
+                    lastMessage: messages[messages.length - 1].content.substring(0, 100),
+                    attempt: attempt + 1
+                });
+
+                const response = await this.axiosInstance.post(
+                    'https://api.groq.com/v1/chat/completions',
+                    {
+                        model: GROQ_CONFIG.models.chat,
+                        messages,
+                        temperature: 0.7,
+                        max_tokens: 1000
+                    }
+                );
+
+                if (!response?.data?.choices?.[0]?.message?.content) {
+                    throw new Error('Resposta inválida da API de chat');
+                }
+
+                const content = response.data.choices[0].message.content.trim();
+
+                console.log('[Groq] Resposta recebida:', {
+                    length: content.length,
+                    preview: content.substring(0, 100)
+                });
+
+                return content;
+
+            } catch (error) {
+                console.error(`[Groq] Erro na tentativa ${attempt + 1} de chat:`, {
+                    message: error.message,
+                    status: error.response?.status,
+                    data: error.response?.data
+                });
+
+                lastError = error;
+                attempt++;
+
+                if (attempt < 3) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                }
+            }
+        }
+
+        throw new Error(`Falha ao processar chat após ${attempt} tentativas: ${lastError.message}`);
+    }
 }
 
 module.exports = { GroqServices };

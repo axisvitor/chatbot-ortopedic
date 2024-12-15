@@ -71,18 +71,50 @@ app.use((err, req, res, next) => {
 });
 
 // Rota para mensagens do WhatsApp
-app.post('/webhook', async (req, res) => {
+app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
-        const message = req.body;
+        const data = req.body;
         console.log(' Webhook recebido:', {
-            type: message.type,
-            hasText: !!message.text,
-            hasImage: !!message.imageMessage,
-            hasAudio: !!message.audioMessage
+            event: data.event,
+            messageId: data.messageId,
+            from: data.sender?.pushName,
+            hasText: !!data.messageText?.text,
+            hasImage: !!data.jpegThumbnail,
+            isGroup: data.isGroup
         });
 
-        const response = await chatbot.processMessage(message);
-        res.json({ success: true, response });
+        // Se for evento de mensagem recebida
+        if (data.event === 'messageReceived') {
+            const message = {
+                type: data.messageText?.text ? 'text' : 
+                      data.jpegThumbnail ? 'image' : 'unknown',
+                text: data.messageText?.text,
+                imageUrl: data.jpegThumbnail,
+                from: data.sender?.id,
+                messageId: data.messageId,
+                timestamp: data.moment
+            };
+
+            const response = await chatbot.processMessage(message);
+            console.log(' Resposta gerada:', {
+                length: response?.length,
+                preview: response?.substring(0, 100)
+            });
+
+            res.json({ success: true, response });
+        } 
+        // Se for confirmação de mensagem enviada
+        else if (data.event === 'messageSent') {
+            console.log(' Mensagem enviada com sucesso:', {
+                messageId: data.messageId,
+                to: data.recipient?.id
+            });
+            res.json({ success: true });
+        }
+        else {
+            console.log(' Evento desconhecido:', data.event);
+            res.json({ success: true });
+        }
 
     } catch (error) {
         console.error(' Erro no webhook:', error);

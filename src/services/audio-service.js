@@ -1,13 +1,21 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-const settings = require('../config/settings');
+const { GROQ_CONFIG } = require('../config/settings');
 
 class AudioService {
     constructor(groqServices) {
+        if (!groqServices) {
+            throw new Error('GroqServices é obrigatório');
+        }
         this.groqServices = groqServices;
     }
 
+    /**
+     * Processa um áudio do WhatsApp
+     * @param {Object} messageData - Dados da mensagem do WhatsApp
+     * @returns {Promise<string>} Texto transcrito
+     */
     async processWhatsAppAudio(messageData) {
         try {
             console.log('📝 Estrutura da mensagem recebida:', JSON.stringify(messageData, null, 2));
@@ -17,9 +25,16 @@ class AudioService {
                 throw new Error('Mensagem de áudio não encontrada');
             }
 
+            // Validação do tipo MIME
+            const mimeType = messageData.audioMessage.mimetype;
+            const allowedMimes = ['audio/ogg', 'audio/mpeg', 'audio/mp4'];
+            if (!allowedMimes.includes(mimeType)) {
+                throw new Error(`Tipo de áudio não suportado: ${mimeType}`);
+            }
+
             // Download e descriptografia do áudio usando Baileys
             console.log('📥 Baixando e descriptografando áudio...', {
-                mimetype: messageData.audioMessage.mimetype,
+                mimetype: mimeType,
                 seconds: messageData.audioMessage.seconds,
                 fileLength: messageData.audioMessage.fileLength
             });
@@ -51,15 +66,21 @@ class AudioService {
             const formData = new FormData();
             formData.append('file', buffer, {
                 filename: 'audio.ogg',
-                contentType: messageData.audioMessage.mimetype || 'audio/ogg; codecs=opus'
+                contentType: mimeType
             });
-            formData.append('model', settings.GROQ_CONFIG.models.audio);
-            formData.append('language', settings.GROQ_CONFIG.audioConfig.language);
-            formData.append('response_format', settings.GROQ_CONFIG.audioConfig.response_format);
-            formData.append('temperature', settings.GROQ_CONFIG.audioConfig.temperature);
+            formData.append('model', GROQ_CONFIG.models.audio);
+            formData.append('language', GROQ_CONFIG.audioConfig.language);
+            formData.append('response_format', GROQ_CONFIG.audioConfig.response_format);
+            formData.append('temperature', GROQ_CONFIG.audioConfig.temperature);
 
-            // Transcreve o áudio
+            // Transcreve o áudio usando GroqServices
             const transcription = await this.groqServices.transcribeAudio(formData);
+            
+            console.log('✅ Áudio transcrito com sucesso:', {
+                length: transcription.length,
+                preview: transcription.substring(0, 100)
+            });
+
             return transcription;
 
         } catch (error) {

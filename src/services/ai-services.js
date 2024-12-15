@@ -2,7 +2,8 @@ const { GroqServices } = require('./groq-services');
 const { WhatsAppService } = require('./whatsapp-service');
 const { WhatsAppImageService } = require('./whatsapp-image-service');
 const { RedisStore } = require('../store/redis-store');
-const { BUSINESS_HOURS } = require('../config/settings');
+const { BUSINESS_HOURS, OPENAI_CONFIG } = require('../config/settings');
+const { OpenAIService } = require('./openai-service');
 
 class AIServices {
     constructor() {
@@ -10,6 +11,7 @@ class AIServices {
         this.whatsappService = new WhatsAppService();
         this.whatsappImageService = new WhatsAppImageService();
         this.redisStore = new RedisStore();
+        this.openai = new OpenAIService(OPENAI_CONFIG);
     }
 
     /**
@@ -160,14 +162,79 @@ class AIServices {
     }
 
     /**
-     * Processa uma mensagem de texto
+     * Processa uma mensagem de texto usando o OpenAI Assistant
      * @param {string} text - Texto da mensagem
      * @returns {Promise<string>} Resposta do processamento
      */
     async processMessage(text) {
         try {
-            // TODO: Implementar integração com OpenAI
-            return "Desculpe, ainda não posso processar mensagens de texto.";
+            console.log('[AI] Processando mensagem:', {
+                length: text.length,
+                preview: text.substring(0, 100)
+            });
+
+            // Verifica se é horário comercial
+            const now = new Date();
+            const hour = now.getHours();
+            const isBusinessHours = hour >= BUSINESS_HOURS.start && hour < BUSINESS_HOURS.end;
+
+            // Se fora do horário comercial
+            if (!isBusinessHours) {
+                return `Olá! Nosso horário de atendimento é das ${BUSINESS_HOURS.start}h às ${BUSINESS_HOURS.end}h. Por favor, retorne durante o horário comercial para que possamos te atender melhor.`;
+            }
+
+            // Cria um thread
+            const threadResponse = await this.openai.beta.threads.create();
+            const threadId = threadResponse.id;
+
+            // Adiciona a mensagem ao thread
+            await this.openai.beta.threads.messages.create(threadId, {
+                role: 'user',
+                content: text
+            });
+
+            // Executa o assistant
+            const run = await this.openai.beta.threads.runs.create(threadId, {
+                assistant_id: OPENAI_CONFIG.assistantId
+            });
+
+            // Aguarda a resposta (com timeout de 30s)
+            const startTime = Date.now();
+            while (true) {
+                const runStatus = await this.openai.beta.threads.runs.retrieve(threadId, run.id);
+                
+                if (runStatus.status === 'completed') {
+                    break;
+                }
+                
+                if (runStatus.status === 'failed' || runStatus.status === 'cancelled') {
+                    throw new Error(`Assistant run failed: ${runStatus.last_error?.message || 'Unknown error'}`);
+                }
+                
+                if (Date.now() - startTime > 30000) {
+                    throw new Error('Assistant timeout after 30 seconds');
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            // Obtém a resposta
+            const messages = await this.openai.beta.threads.messages.list(threadId);
+            const assistantMessage = messages.data.find(msg => msg.role === 'assistant');
+            
+            if (!assistantMessage?.content?.[0]?.text?.value) {
+                throw new Error('Resposta inválida do Assistant');
+            }
+
+            const response = assistantMessage.content[0].text.value;
+
+            console.log('[AI] Resposta gerada:', {
+                length: response.length,
+                preview: response.substring(0, 100)
+            });
+
+            return response;
+
         } catch (error) {
             console.error('[AI] Erro ao processar mensagem:', error);
             throw error;
