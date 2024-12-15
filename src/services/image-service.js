@@ -38,17 +38,39 @@ class ImageService {
                 {
                     logger: console,
                     reuploadRequest: async (media) => {
+                        console.log('[ImageService] Tentando baixar mídia:', {
+                            url: media.url?.substring(0, 50) + '...',
+                            headers: media.headers
+                        });
+                        
                         const response = await axios.get(media.url, {
                             responseType: 'arraybuffer',
                             headers: { Origin: 'https://web.whatsapp.com' }
                         });
+                        
+                        console.log('[ImageService] Mídia baixada com sucesso:', {
+                            contentType: response.headers['content-type'],
+                            contentLength: response.data.length
+                        });
+                        
                         return response.data;
                     }
                 }
             );
 
+            console.log('[ImageService] Buffer recebido:', {
+                length: buffer?.length,
+                isBuffer: Buffer.isBuffer(buffer),
+                firstBytes: buffer?.slice(0, 16).toString('hex')
+            });
+
             // Converte para base64
             const base64Image = buffer.toString('base64');
+            
+            console.log('[ImageService] Imagem convertida para base64:', {
+                base64Length: base64Image?.length,
+                preview: base64Image?.substring(0, 50) + '...'
+            });
 
             // Analisa a imagem com Groq Vision
             const analysis = await this.groqServices.analyzeImage(base64Image);
