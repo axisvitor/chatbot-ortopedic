@@ -31,22 +31,16 @@
     "redis": "^4.6.11",
     "uuid": "^9.0.1",
     "venom-bot": "^5.0.21",
-    "winston": "^3.17.0"
+    "winston": "^3.17.0",
+    "@npmcli/fs": "^3.1.0",
+    "@eslint/config-array": "^2.0.0",
+    "@eslint/object-schema": "^2.0.0",
+    "glob": "^10.3.10",
+    "rimraf": "^5.0.5",
+    "lru-cache": "^10.2.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "overrides": {
-    "cache-manager": "^4.1.0",
-    "@typescript-eslint/eslint-plugin": "^6.9.0",
-    "@typescript-eslint/parser": "^6.9.0",
-    "@typescript-eslint/scope-manager": "^6.9.0",
-    "@typescript-eslint/type-utils": "^6.9.0",
-    "@typescript-eslint/utils": "^6.9.0",
-    "@typescript-eslint/visitor-keys": "^6.9.0",
-    "@typescript-eslint/types": "^6.9.0",
-    "@typescript-eslint/typescript-estree": "^6.9.0",
-    "@thi.ng/bitstream": "^2.4.5",
-    "@thi.ng/errors": "^2.5.19"
+    "nodemon": "^3.0.2",
+    "eslint": "^9.0.0"
   }
 }
