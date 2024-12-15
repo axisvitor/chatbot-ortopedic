@@ -134,6 +134,15 @@ class AudioService {
             formData.append('response_format', GROQ_CONFIG.audioConfig.response_format);
             formData.append('temperature', String(GROQ_CONFIG.audioConfig.temperature));
 
+            // Log do FormData antes de enviar
+            console.log('[Audio] Enviando FormData:', {
+                model: GROQ_CONFIG.models.audio,
+                language: GROQ_CONFIG.audioConfig.language,
+                response_format: GROQ_CONFIG.audioConfig.response_format,
+                temperature: GROQ_CONFIG.audioConfig.temperature,
+                fileSize: convertedBuffer.length
+            });
+
             // Transcreve o áudio usando GroqServices
             const transcription = await this.groqServices.transcribeAudio(formData);
             

@@ -265,6 +265,11 @@ class GroqServices {
                 );
 
                 if (!response?.data?.text) {
+                    // Tenta acessar a transcrição no formato alternativo
+                    const transcription = response?.data?.transcription || response?.data;
+                    if (typeof transcription === 'string') {
+                        return transcription;
+                    }
                     throw new Error('Resposta inválida da API de transcrição');
                 }
 
