@@ -11,7 +11,7 @@ class WhatsAppService {
     async init() {
         try {
             this.client = await this.createClient();
-            this.connectionKey = 'w-api_' + Math.random().toString(36).substring(7);
+            this.connectionKey = WHATSAPP_CONFIG.connectionKey || ('w-api_' + Math.random().toString(36).substring(7));
             console.log('[WhatsApp] Cliente inicializado com sucesso:', { connectionKey: this.connectionKey });
         } catch (error) {
             console.error('[WhatsApp] Erro ao inicializar cliente:', error);
@@ -30,7 +30,7 @@ class WhatsAppService {
         return axios.create({
             baseURL: WHATSAPP_CONFIG.apiUrl,
             headers: {
-                'Authorization': `Bearer cnQfI8UaFha8fVY7dR80srpxKALKkUmgG`,
+                'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
                 'Content-Type': 'application/json'
             },
             timeout: 10000
