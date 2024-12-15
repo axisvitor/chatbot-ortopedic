@@ -1,29 +1,95 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const { detectImageFormatFromBuffer } = require('../utils/image-format');
+const { GROQ_CONFIG } = require('../config/settings');
 
 class GroqServices {
     constructor() {
-        this.models = {
-            vision: 'llama-3.2-90b-vision-preview',
-            audio: 'whisper-large-v3-turbo'
-        };
-
-        this.imageAnalysisConfig = {
-            prompt: 'Analise esta imagem e me diga se é um comprovante de pagamento válido. Se for, extraia as informações relevantes como valor, data, beneficiário e tipo de transação.',
-            maxRetries: 3,
-            retryDelay: 1000
-        };
-
         this.axiosInstance = axios.create({
             headers: {
-                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`,
                 'Content-Type': 'application/json'
             },
             timeout: 30000
         });
     }
 
+    /**
+     * Analisa uma imagem usando IA
+     * @param {Buffer|string} imageData - Buffer da imagem ou URL
+     * @returns {Promise<string>} Resultado da análise
+     */
+    async analyzeImage(imageData) {
+        let attempt = 0;
+        let lastError;
+
+        while (attempt < 3) {
+            try {
+                const { format, base64 } = await this.prepareImageData(imageData);
+
+                console.log('[Groq] Enviando imagem para análise:', {
+                    format,
+                    base64Length: base64.length,
+                    attempt: attempt + 1
+                });
+
+                const requestData = {
+                    model: GROQ_CONFIG.models.vision,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: [
+                                {
+                                    type: 'image_url',
+                                    image_url: {
+                                        url: `data:${format};base64,${base64}`
+                                    }
+                                },
+                                {
+                                    type: 'text',
+                                    text: 'Analise esta imagem e me diga se é um comprovante de pagamento válido. Se for, extraia as informações relevantes como valor, data, beneficiário e tipo de transação.'
+                                }
+                            ]
+                        }
+                    ],
+                    temperature: 0.1
+                };
+
+                const response = await this.axiosInstance.post(
+                    'https://api.groq.com/v1/chat/completions',
+                    requestData
+                );
+
+                if (!response?.data?.choices?.[0]?.message?.content) {
+                    throw new Error('Resposta inválida da API');
+                }
+
+                return response.data.choices[0].message.content;
+
+            } catch (error) {
+                console.error(`[Groq] Erro na tentativa ${attempt + 1}:`, {
+                    message: error.message,
+                    status: error.response?.status,
+                    data: error.response?.data
+                });
+
+                lastError = error;
+                attempt++;
+
+                if (attempt < 3) {
+                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                }
+            }
+        }
+
+        throw new Error(`Falha ao analisar imagem após ${attempt} tentativas: ${lastError.message}`);
+    }
+
+    /**
+     * Prepara os dados da imagem para envio
+     * @param {Buffer|string} imageData - Buffer da imagem ou URL
+     * @returns {Promise<Object>} Formato e base64 da imagem
+     */
     async prepareImageData(imageData) {
         let buffer;
         
@@ -105,74 +171,69 @@ class GroqServices {
         };
     }
 
-    async analyzeImage(imageData) {
-        let attempt = 0;
-        let lastError;
-
-        while (attempt < this.imageAnalysisConfig.maxRetries) {
-            try {
-                const { format, base64, buffer } = await this.prepareImageData(imageData);
-
-                console.log('[Groq] Enviando imagem para análise:', {
-                    format,
-                    bufferSize: buffer.length,
-                    base64Length: base64.length,
-                    attempt: attempt + 1,
-                    model: this.models.vision
-                });
-
-                const requestData = {
-                    model: this.models.vision,
-                    messages: [
-                        {
-                            role: 'user',
-                            content: [
-                                {
-                                    type: 'image_url',
-                                    image_url: {
-                                        url: `data:${format};base64,${base64}`
-                                    }
-                                },
-                                {
-                                    type: 'text',
-                                    text: this.imageAnalysisConfig.prompt
-                                }
-                            ]
-                        }
-                    ],
-                    temperature: 0.1
-                };
-
-                const response = await this.axiosInstance.post(
-                    'https://api.groq.com/v1/chat/completions',
-                    requestData
-                );
-
-                if (!response?.data?.choices?.[0]?.message?.content) {
-                    throw new Error('Resposta inválida da API');
-                }
-
-                return response.data.choices[0].message.content;
-
-            } catch (error) {
-                console.error(`[Groq] Erro na tentativa ${attempt + 1}:`, {
-                    message: error.message,
-                    status: error.response?.status,
-                    data: error.response?.data
-                });
-
-                lastError = error;
-                attempt++;
-
-                if (attempt < this.imageAnalysisConfig.maxRetries) {
-                    await new Promise(resolve => 
-                        setTimeout(resolve, this.imageAnalysisConfig.retryDelay * attempt)
-                    );
-                }
+    /**
+     * Processa áudio do WhatsApp
+     * @param {Object} messageData - Dados da mensagem
+     * @returns {Promise<string>} Texto transcrito
+     */
+    async processWhatsAppAudio(messageData) {
+        try {
+            if (!messageData?.audioMessage) {
+                throw new Error('Campos obrigatórios ausentes no áudio');
             }
-        }
 
-        throw new Error(`Falha ao analisar imagem após ${attempt} tentativas: ${lastError.message}`);
+            console.log('[Groq] Processando áudio do WhatsApp:', {
+                mimetype: messageData.audioMessage.mimetype,
+                seconds: messageData.audioMessage.seconds,
+                hasStream: !!messageData.audioMessage.stream
+            });
+
+            // Verifica o tamanho do áudio
+            const maxDuration = 300; // 5 minutos
+            if (messageData.audioMessage.seconds > maxDuration) {
+                throw new Error('Áudio muito grande para processamento');
+            }
+
+            // Obtém o stream do áudio
+            const audioStream = await messageData.audioMessage.stream();
+            if (!audioStream) {
+                throw new Error('Stream de áudio não gerado');
+            }
+
+            // Prepara o FormData para envio
+            const formData = new FormData();
+            formData.append('file', audioStream, {
+                filename: 'audio.ogg',
+                contentType: messageData.audioMessage.mimetype
+            });
+            formData.append('model', GROQ_CONFIG.models.audio);
+            formData.append('language', GROQ_CONFIG.audioConfig.language);
+            formData.append('response_format', GROQ_CONFIG.audioConfig.response_format);
+            formData.append('temperature', GROQ_CONFIG.audioConfig.temperature);
+
+            // Faz a requisição para a API
+            const response = await axios.post(
+                'https://api.groq.com/v1/audio/transcriptions',
+                formData,
+                {
+                    headers: {
+                        ...formData.getHeaders(),
+                        'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`
+                    },
+                    timeout: 60000 // 1 minuto
+                }
+            );
+
+            if (!response?.data?.text) {
+                throw new Error('Resposta da API não contém texto transcrito');
+            }
+
+            return response.data.text;
+
+        } catch (error) {
+            console.error('[Groq] Erro ao processar áudio:', error);
+            throw error;
+        }
     }
 }
 

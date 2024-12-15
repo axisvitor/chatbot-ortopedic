@@ -182,8 +182,27 @@ class AIServices {
      */
     async processAudio(audioUrl, { messageInfo, from } = {}) {
         try {
-            // TODO: Implementar processamento de áudio
-            return "Desculpe, ainda não posso processar mensagens de áudio.";
+            console.log('[AI] Processando áudio:', {
+                hasUrl: !!audioUrl,
+                hasMessageInfo: !!messageInfo,
+                from
+            });
+
+            // Processa o áudio com Groq
+            const transcription = await this.groqServices.processWhatsAppAudio({
+                audioMessage: {
+                    ...messageInfo,
+                    url: audioUrl
+                }
+            });
+
+            // Log da transcrição
+            console.log('[AI] Áudio transcrito:', {
+                length: transcription.length,
+                preview: transcription.substring(0, 100) + '...'
+            });
+
+            return transcription;
         } catch (error) {
             console.error('[AI] Erro ao processar áudio:', error);
             throw error;
