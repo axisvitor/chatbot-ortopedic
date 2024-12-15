@@ -1,6 +1,7 @@
 const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
+const Tesseract = require('tesseract.js');
 const { isValidBase64Image } = require('../utils/image-validator');
 
 class WhatsAppImageService {
@@ -48,6 +49,43 @@ class WhatsAppImageService {
                 throw new Error('Timeout ao baixar imagem');
             }
             throw new Error(`Erro ao baixar imagem: ${error.message}`);
+        }
+    }
+
+    async extractTextFromImage(buffer) {
+        try {
+            console.log('[WhatsAppImage] Iniciando extração de texto com Tesseract');
+            
+            const result = await Tesseract.recognize(
+                buffer,
+                'por', // Português
+                {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            console.log(`[OCR] Progresso: ${Math.round(m.progress * 100)}%`);
+                        }
+                    }
+                }
+            );
+
+            console.log('[WhatsAppImage] Texto extraído com sucesso');
+            
+            return {
+                text: result.data.text.trim(),
+                confidence: result.data.confidence,
+                words: result.data.words.map(w => ({
+                    text: w.text,
+                    confidence: w.confidence
+                }))
+            };
+
+        } catch (error) {
+            console.error('[WhatsAppImage] Erro na extração de texto:', error);
+            return {
+                text: '',
+                confidence: 0,
+                error: error.message
+            };
         }
     }
 
@@ -102,13 +140,17 @@ class WhatsAppImageService {
                 mime: mimetype
             });
 
-            // Análise da imagem
+            // Extrai texto da imagem usando OCR
+            const ocrResult = await this.extractTextFromImage(buffer);
+
+            // Análise da imagem com Groq
             const analysis = await this.groqServices.analyzeImage(buffer);
             
             return {
                 success: true,
                 message: 'Imagem processada com sucesso',
                 analysis,
+                ocr: ocrResult,
                 metadata: {
                     type: mimetype,
                     size: buffer.length,
