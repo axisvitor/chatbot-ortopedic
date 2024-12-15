@@ -5,6 +5,8 @@ class WhatsAppService {
     constructor() {
         this.client = null;
         this.connectionKey = null;
+        this.retryCount = 0;
+        this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
         this.init();
     }
 
@@ -12,6 +14,7 @@ class WhatsAppService {
         try {
             this.client = await this.createClient();
             this.connectionKey = WHATSAPP_CONFIG.connectionKey || ('w-api_' + Math.random().toString(36).substring(7));
+            this.addInterceptor();
             console.log('[WhatsApp] Cliente inicializado com sucesso:', { connectionKey: this.connectionKey });
         } catch (error) {
             console.error('[WhatsApp] Erro ao inicializar cliente:', error);
@@ -37,25 +40,46 @@ class WhatsAppService {
         });
     }
 
-    // Adiciona interceptor para log de erros
-    async addInterceptor() {
+    // Adiciona interceptor para tratamento de erros e reconexão
+    addInterceptor() {
         this.client.interceptors.response.use(
             response => response,
-            error => {
+            async error => {
                 console.error('[WhatsApp] Erro na requisição:', {
                     status: error.response?.status,
                     data: error.response?.data,
                     message: error.message
                 });
+
+                // Se for erro 403 (Forbidden), tenta reconectar
+                if (error.response?.status === 403 && this.retryCount < this.maxRetries) {
+                    this.retryCount++;
+                    console.log(`[WhatsApp] Tentativa ${this.retryCount} de reconexão...`);
+                    
+                    try {
+                        // Aguarda 1 segundo antes de tentar novamente
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        
+                        // Reinicializa o cliente
+                        await this.init();
+                        
+                        // Tenta a requisição novamente
+                        const config = error.config;
+                        config.headers['Authorization'] = `Bearer ${WHATSAPP_CONFIG.token}`;
+                        return this.client(config);
+                    } catch (retryError) {
+                        console.error('[WhatsApp] Erro na tentativa de reconexão:', retryError);
+                        return Promise.reject(retryError);
+                    }
+                }
+
+                // Se excedeu o número de tentativas ou não é erro 403
+                this.retryCount = 0;
                 return Promise.reject(error);
             }
         );
     }
 
-    /**
-     * Delay entre mensagens para evitar bloqueio
-     * @returns {Promise<void>}
-     */
     async delay() {
         return new Promise(resolve => setTimeout(resolve, WHATSAPP_CONFIG.messageDelay));
     }
@@ -74,19 +98,15 @@ class WhatsAppService {
                 connectionKey: this.connectionKey
             });
 
-            const response = await this.client.post(`${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`, {
-                phoneNumber: to,
-                text: message,
-                delayMessage: WHATSAPP_CONFIG.messageDelay / 1000 // Convertendo ms para segundos
-            });
+            const response = await this.sendMessage(to, message, 'text');
 
             console.log('[WhatsApp] Mensagem enviada com sucesso:', {
-                messageId: response.data?.messageId,
-                error: response.data?.error
+                messageId: response.messageId,
+                error: response.error
             });
 
             await this.delay();
-            return response.data;
+            return response;
         } catch (error) {
             console.error('[WhatsApp] Erro ao enviar mensagem:', error.message);
             throw error;
@@ -102,15 +122,10 @@ class WhatsAppService {
      */
     async sendImage(to, imageUrl, caption = '') {
         try {
-            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.image, {
-                connectionKey: this.connectionKey,
-                phone: to,
-                image: imageUrl,
-                caption
-            });
+            const response = await this.sendMessage(to, { url: imageUrl, caption }, 'image');
 
             await this.delay();
-            return response.data;
+            return response;
         } catch (error) {
             console.error('[WhatsApp] Erro ao enviar imagem:', error.message);
             throw error;
@@ -149,17 +164,58 @@ class WhatsAppService {
      */
     async sendAudio(to, audioUrl) {
         try {
-            const response = await this.client.post(WHATSAPP_CONFIG.endpoints.audio, {
-                connectionKey: this.connectionKey,
-                phone: to,
-                audio: audioUrl
-            });
+            const response = await this.sendMessage(to, audioUrl, 'audio');
 
             await this.delay();
-            return response.data;
+            return response;
         } catch (error) {
             console.error('[WhatsApp] Erro ao enviar áudio:', error.message);
             throw error;
+        }
+    }
+
+    async sendMessage(to, message, type = 'text') {
+        try {
+            const endpoint = WHATSAPP_CONFIG.endpoints[type];
+            if (!endpoint) {
+                throw new Error(`Tipo de mensagem '${type}' não suportado`);
+            }
+
+            const payload = {
+                connectionKey: this.connectionKey,
+                phoneNumber: to,
+                ...this._formatMessagePayload(message, type)
+            };
+
+            console.log('[WhatsApp] Enviando mensagem:', {
+                to,
+                messagePreview: typeof message === 'string' ? message.substring(0, 100) : 'Conteúdo não textual',
+                type
+            });
+
+            const response = await this.client.post(endpoint, payload);
+            return response.data;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao enviar mensagem:', error);
+            throw error;
+        }
+    }
+
+    _formatMessagePayload(message, type) {
+        switch (type) {
+            case 'text':
+                return { message };
+            case 'image':
+                return {
+                    image: message.url || message,
+                    caption: message.caption
+                };
+            case 'audio':
+                return {
+                    audio: message.url || message
+                };
+            default:
+                return { message };
         }
     }
 
