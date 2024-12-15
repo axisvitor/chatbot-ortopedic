@@ -169,31 +169,41 @@ class AIServices {
      * @param {Object} options - Opções adicionais
      * @returns {Promise<string>} Resposta do processamento
      */
-    async processMessage(text, { from, messageId } = {}) {
+    async processMessage(message, options = {}) {
         try {
-            if (!text?.trim()) {
+            const { from, messageId, isAudioTranscription = false, businessHours = false } = options;
+
+            // Se for uma solicitação de atendimento financeiro e estiver fora do horário comercial
+            if (!businessHours && message.toLowerCase().includes('financeiro')) {
+                return 'Desculpe, o atendimento interno só está disponível em horário comercial (Segunda a Sexta, das 8h às 18h). Por favor, retorne durante nosso horário de atendimento. Posso ajudar com outras informações?';
+            }
+
+            // Processa a mensagem normalmente para outros casos
+            let response;
+
+            if (!message?.trim()) {
                 return "Por favor, reformule sua mensagem para que eu possa entender melhor como ajudar.";
             }
 
             console.log('[AI] Processando mensagem:', {
                 from,
                 messageId,
-                length: text?.length,
-                preview: text?.substring(0, 100)
+                length: message?.length,
+                preview: message?.substring(0, 100)
             });
 
             // Verifica se precisa de atendimento humano
-            const needsHuman = await this.needsHumanSupport(text);
+            const needsHuman = await this.needsHumanSupport(message);
             if (needsHuman) {
                 console.log('[AI] Encaminhando para atendimento humano');
                 return businessHours.getHumanSupportMessage();
             }
 
             // Verifica se é questão financeira
-            const isFinancial = await this.isFinancialIssue(text);
+            const isFinancial = await this.isFinancialIssue(message);
             if (isFinancial) {
                 console.log('[AI] Encaminhando para financeiro');
-                return businessHours.forwardToFinancial(text, from);
+                return businessHours.forwardToFinancial(message, from);
             }
 
             // Cria um thread
@@ -202,14 +212,16 @@ class AIServices {
             // Adiciona a mensagem ao thread
             await this.openai.addMessage(thread.id, {
                 role: 'user',
-                content: text
+                content: message
             });
 
             // Executa o assistant
-            const run = await this.openai.runAssistant(thread.id);
+            const run = await this.openai.createRun(thread.id, {
+                assistant_id: this.assistantId
+            });
 
-            // Aguarda resposta
-            const response = await this.waitForAssistantResponse(thread.id, run.id);
+            // Aguarda a conclusão
+            response = await this.openai.waitForRun(thread.id, run.id);
 
             console.log('[AI] Resposta gerada:', {
                 length: response?.length,

@@ -1,8 +1,10 @@
 const moment = require('moment-timezone');
+require('moment/locale/pt-br');
 const settings = require('../config/settings');
 
 class BusinessHoursService {
     constructor() {
+        moment.locale('pt-br');
         this.config = settings.BUSINESS_HOURS;
     }
 
@@ -11,7 +13,7 @@ class BusinessHoursService {
     }
 
     getDayOfWeek() {
-        return this.getCurrentTime().format('dddd').toLowerCase();
+        return this.getCurrentTime().format('dddd');
     }
 
     isHoliday() {
@@ -27,7 +29,7 @@ class BusinessHoursService {
 
         const now = this.getCurrentTime();
         const day = this.getDayOfWeek();
-        const schedule = this.config.schedule[day];
+        const schedule = this.config.schedule[day.toLowerCase()];
 
         // Se não há horário definido para este dia (ex: domingo)
         if (!schedule?.start || !schedule?.end) {
@@ -55,7 +57,7 @@ class BusinessHoursService {
     getNextWorkDay() {
         const now = this.getCurrentTime();
         const weekDays = Object.entries(this.config.schedule);
-        const currentDayIndex = weekDays.findIndex(([day]) => day === this.getDayOfWeek());
+        const currentDayIndex = weekDays.findIndex(([day]) => day === this.getDayOfWeek().toLowerCase());
         
         // Procura o próximo dia útil
         for (let i = 1; i <= 7; i++) {
@@ -72,14 +74,14 @@ class BusinessHoursService {
         // Se não encontrar (não deveria acontecer), retorna segunda-feira
         return {
             name: 'Segunda-feira',
-            schedule: this.config.schedule.monday
+            schedule: this.config.schedule.segunda-feira
         };
     }
 
     getOutOfHoursMessage() {
         const now = this.getCurrentTime();
         const day = this.getDayOfWeek();
-        const schedule = this.config.schedule[day];
+        const schedule = this.config.schedule[day.toLowerCase()];
 
         if (this.isHoliday()) {
             return this.config.messages.holiday;

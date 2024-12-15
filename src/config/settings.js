@@ -78,21 +78,32 @@ const TRACKING_CONFIG = {
 const BUSINESS_HOURS = {
     timezone: 'America/Sao_Paulo',
     schedule: {
-        monday: { start: '08:00', end: '18:00' },
-        tuesday: { start: '08:00', end: '18:00' },
-        wednesday: { start: '08:00', end: '18:00' },
-        thursday: { start: '08:00', end: '18:00' },
-        friday: { start: '08:00', end: '18:00' },
-        saturday: { start: '08:00', end: '12:00' },
-        sunday: { start: null, end: null }
+        'segunda-feira': { start: '08:00', end: '18:00' },
+        'terça-feira': { start: '08:00', end: '18:00' },
+        'quarta-feira': { start: '08:00', end: '18:00' },
+        'quinta-feira': { start: '08:00', end: '18:00' },
+        'sexta-feira': { start: '08:00', end: '18:00' },
+        'sábado': null,
+        'domingo': null
     },
-    holidays: [],
+    holidays: [
+        '2024-01-01', // Ano Novo
+        '2024-02-12', // Carnaval
+        '2024-02-13', // Carnaval
+        '2024-03-29', // Sexta-feira Santa
+        '2024-04-21', // Tiradentes
+        '2024-05-01', // Dia do Trabalho
+        '2024-05-30', // Corpus Christi
+        '2024-09-07', // Independência
+        '2024-10-12', // Nossa Senhora Aparecida
+        '2024-11-02', // Finados
+        '2024-11-15', // Proclamação da República
+        '2024-12-25'  // Natal
+    ],
     messages: {
-        outsideHours: "🕒 Nosso horário de atendimento é das {START_TIME} às {END_TIME}. Por favor, retorne durante nosso horário comercial para falar com nossa equipe.",
-        weekend: "Hoje não há expediente. Nosso próximo atendimento será {NEXT_DAY} a partir das 8h. Você pode deixar sua mensagem e retornaremos assim que possível.",
-        holiday: "Hoje é feriado e não há expediente. Retornaremos seu contato no próximo dia útil. Você pode deixar sua mensagem e retornaremos assim que possível.",
-        humanSupport: "Entendi que você precisa de atendimento humano. Vou encaminhar para nossa equipe de atendimento.",
-        financialDepartment: "Sua solicitação será encaminhada para nosso setor financeiro. Durante o horário comercial (seg-sex 8h-18h, sáb 8h-12h), nossa equipe entrará em contato."
+        outOfHours: 'Nosso atendimento financeiro funciona de Segunda-feira a Sexta-feira, das 8h às 18h. Por favor, retorne durante nosso horário de atendimento.',
+        holiday: 'Hoje é feriado. Nosso próximo atendimento será no próximo dia útil a partir das 8h.',
+        weekend: 'Não há expediente aos finais de semana. Nosso próximo atendimento será Segunda-feira a partir das 8h.'
     }
 };
 

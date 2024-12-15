@@ -66,21 +66,14 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // Verifica se está no horário de atendimento
-        if (!businessHours.isWithinBusinessHours()) {
-            console.log('⏰ Fora do horário de atendimento');
-            const response = businessHours.getOutOfHoursMessage();
-            await whatsappService.sendText(message.from, response);
-            return res.sendStatus(200);
-        }
-
         let response;
 
         // Processa mensagens de texto
         if (message.type === 'text' && message.text) {
             response = await aiServices.processMessage(message.text, {
                 from: message.from,
-                messageId: message.messageId
+                messageId: message.messageId,
+                businessHours: businessHours.isWithinBusinessHours()
             });
         }
         // Processa mensagens de áudio
@@ -98,7 +91,8 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                 response = await aiServices.processMessage(transcription, {
                     from: message.from,
                     messageId: message.messageId,
-                    isAudioTranscription: true
+                    isAudioTranscription: true,
+                    businessHours: businessHours.isWithinBusinessHours()
                 });
             } catch (error) {
                 console.error('❌ Erro ao processar áudio:', error);
@@ -112,7 +106,8 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                     imageMessage: message.imageMessage,
                     caption: message.caption,
                     from: message.from,
-                    messageId: message.messageId
+                    messageId: message.messageId,
+                    businessHours: businessHours.isWithinBusinessHours()
                 });
             } catch (error) {
                 console.error('❌ Erro ao processar imagem:', error);
