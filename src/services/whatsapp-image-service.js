@@ -40,14 +40,14 @@ class WhatsAppImageService {
         if (!mimetype) throw new Error('mimetype é obrigatório');
         if (!url && !directPath) throw new Error('url ou directPath é obrigatório');
 
-        // Validação do tipo MIME
-        const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+        // Validação do tipo MIME usando configurações do departamento financeiro
+        const allowedMimes = WHATSAPP_CONFIG.departments.financial.paymentProofs.allowedTypes;
         if (!allowedMimes.includes(mimetype)) {
-            throw new Error(`Tipo MIME não suportado: ${mimetype}`);
+            throw new Error(`Tipo MIME não suportado: ${mimetype}. Tipos permitidos: ${allowedMimes.join(', ')}`);
         }
 
-        // Validação do tamanho (10MB)
-        const maxSize = 10 * 1024 * 1024;
+        // Validação do tamanho usando configurações do departamento financeiro
+        const maxSize = WHATSAPP_CONFIG.departments.financial.paymentProofs.maxSize;
         if (filesize && filesize > maxSize) {
             throw new Error(`Arquivo muito grande: ${filesize} bytes (máximo: ${maxSize} bytes)`);
         }
