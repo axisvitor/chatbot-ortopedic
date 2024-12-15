@@ -67,7 +67,7 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
         }
 
         // Verifica se está no horário de atendimento
-        if (!businessHours.isBusinessHour()) {
+        if (!businessHours.isWithinBusinessHours()) {
             console.log('⏰ Fora do horário de atendimento');
             const response = businessHours.getOutOfHoursMessage();
             await whatsappService.sendMessage(message.from, response);
