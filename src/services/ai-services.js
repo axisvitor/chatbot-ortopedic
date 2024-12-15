@@ -1,207 +1,33 @@
-'use strict';
-
-const { OpenAI } = require('openai');
-const settings = require('../config/settings');
-const businessHours = require('./business-hours');
+const { GroqServices } = require('./groq-services');
+const { WhatsAppService } = require('./whatsapp-service');
+const { RedisStore } = require('../store/redis-store');
+const { BUSINESS_HOURS } = require('../config/settings');
 
 class AIServices {
-    constructor(trackingService, whatsappService, groqServices, redisStore) {
-        this.openai = new OpenAI({
-            apiKey: settings.OPENAI_CONFIG.apiKey
-        });
-        this.trackingService = trackingService;
-        this.whatsappService = whatsappService;
-        this.groqServices = groqServices;
-        this.redisStore = redisStore;
-        this.assistantId = settings.OPENAI_CONFIG.assistantId;
+    constructor() {
+        this.groqServices = new GroqServices();
+        this.whatsappService = new WhatsAppService();
+        this.redisStore = new RedisStore();
     }
 
-    async createThread() {
-        return await this.openai.beta.threads.create();
-    }
-
-    async processMessage(message, context = {}) {
-        try {
-            // Verifica se é uma solicitação que requer atendimento humano
-            if (await this._requiresHumanSupport(message)) {
-                const humanSupportMessage = businessHours.getHumanSupportMessage();
-                if (humanSupportMessage) {
-                    return {
-                        text: humanSupportMessage,
-                        requiresHuman: true
-                    };
-                }
-            }
-
-            // Verifica se é uma questão financeira
-            if (await this._isFinancialIssue(message)) {
-                const financialResponse = await businessHours.forwardToFinancial(
-                    message.text,
-                    message.key.remoteJid
-                );
-                return {
-                    text: financialResponse,
-                    forwardedToFinancial: true
-                };
-            }
-
-            if (!message || message.trim() === '') {
-                throw new Error('Mensagem vazia ou inválida');
-            }
-
-            if (!this.assistantId) {
-                throw new Error('Assistant ID não configurado');
-            }
-
-            // Tenta recuperar o threadId do Redis
-            let threadId = await this.redisStore.get(`thread:${context.phone}`);
-            
-            // Cria um novo thread se não existir
-            if (!threadId) {
-                const thread = await this.createThread();
-                threadId = thread.id;
-                await this.redisStore.set(`thread:${context.phone}`, threadId);
-            }
-
-            // Adiciona a mensagem ao thread
-            await this.openai.beta.threads.messages.create(threadId, {
-                role: "user",
-                content: message
-            });
-
-            // Executa o assistant
-            const run = await this.openai.beta.threads.runs.create(threadId, {
-                assistant_id: this.assistantId
-            });
-
-            // Aguarda a conclusão
-            let runStatus = await this.openai.beta.threads.runs.retrieve(threadId, run.id);
-            while (runStatus.status !== 'completed') {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                runStatus = await this.openai.beta.threads.runs.retrieve(threadId, run.id);
-                
-                if (runStatus.status === 'requires_action') {
-                    // Processa funções chamadas pelo assistant
-                    const actions = runStatus.required_action.submit_tool_outputs.tool_calls;
-                    const toolOutputs = [];
-                    
-                    for (const action of actions) {
-                        if (action.function.name === 'checkOrderStatus') {
-                            const { trackingNumber, cpf } = JSON.parse(action.function.arguments);
-                            const status = await this.checkOrderStatus(trackingNumber, cpf);
-                            toolOutputs.push({
-                                tool_call_id: action.id,
-                                output: JSON.stringify(status)
-                            });
-                        }
-                    }
-
-                    if (toolOutputs.length > 0) {
-                        await this.openai.beta.threads.runs.submitToolOutputs(threadId, run.id, {
-                            tool_outputs: toolOutputs
-                        });
-                    }
-                }
-                
-                if (runStatus.status === 'failed') {
-                    throw new Error(`Assistant run failed: ${runStatus.last_error?.message || 'Unknown error'}`);
-                }
-            }
-
-            // Obtém as mensagens
-            const messages = await this.openai.beta.threads.messages.list(threadId);
-            const lastMessage = messages.data[0];
-
-            if (!lastMessage || !lastMessage.content || !lastMessage.content[0]) {
-                throw new Error('Resposta do Assistant inválida');
-            }
-
-            return lastMessage.content[0].text.value;
-        } catch (error) {
-            console.error('Error processing message:', error);
-            throw error;
-        }
-    }
-
-    async _requiresHumanSupport(message) {
-        // Se não houver texto na mensagem, não requer suporte humano
-        if (!message?.text) {
-            return false;
-        }
-
-        const humanSupportKeywords = [
-            'humano',
-            'atendente',
-            'pessoa real',
-            'funcionário',
-            'gerente'
-        ];
-
-        return humanSupportKeywords.some(keyword => 
-            message.text.toLowerCase().includes(keyword)
-        );
-    }
-
-    async _isFinancialIssue(message) {
-        // Se não houver texto na mensagem, não é uma questão financeira
-        if (!message?.text) {
-            return false;
-        }
-
-        const financialKeywords = [
-            'pagamento',
-            'boleto',
-            'fatura',
-            'cobrança',
-            'financeiro',
-            'reembolso',
-            'estorno'
-        ];
-
-        return financialKeywords.some(keyword => 
-            message.text.toLowerCase().includes(keyword)
-        );
-    }
-
-    async checkOrderStatus(trackingNumber, cpf) {
-        try {
-            const trackingInfo = await this.trackingService.processTrackingRequest(trackingNumber, cpf);
-            return trackingInfo;
-        } catch (error) {
-            console.error('Error checking order status:', error);
-            throw error;
-        }
-    }
-
-    async processAudio(messageData) {
-        try {
-            console.log('🎙️ Iniciando processamento de áudio...');
-            const transcription = await this.groqServices.processWhatsAppAudio(messageData);
-            console.log('✅ Áudio processado com sucesso:', transcription);
-            return transcription;
-        } catch (error) {
-            console.error('❌ Erro no processamento de áudio:', error);
-            
-            // Mensagens de erro personalizadas
-            if (error.message.includes('Campos obrigatórios ausentes')) {
-                return "Desculpe, não consegui acessar o áudio corretamente. Por favor, tente enviar novamente ou digite sua mensagem.";
-            }
-            if (error.message.includes('Stream de áudio não gerado')) {
-                return "Houve um problema ao processar o áudio. Por favor, tente enviar novamente ou digite sua mensagem.";
-            }
-            if (error.message.includes('formato')) {
-                return "Este formato de áudio não é suportado. Por favor, tente gravar novamente usando o gravador padrão do WhatsApp.";
-            }
-            if (error.message.includes('muito grande')) {
-                return "O áudio é muito longo. Por favor, tente uma mensagem mais curta.";
-            }
-            
-            return "Sinto muito, estou tendo dificuldades para processar áudios no momento. Por favor, tente digitar sua mensagem.";
-        }
-    }
-
+    /**
+     * Processa um comprovante de pagamento
+     * @param {string} imageUrl - URL ou dados base64 da imagem
+     * @param {Object} customerInfo - Informações do cliente
+     * @returns {Promise<Object>} Informações extraídas do comprovante
+     */
     async processPaymentProof(imageUrl, customerInfo = {}) {
         try {
+            console.log('[AI] Processando comprovante de pagamento:', {
+                imageUrl: imageUrl?.substring(0, 50) + '...',
+                hasCustomerInfo: !!customerInfo
+            });
+
+            // Verifica se a URL é válida
+            if (!imageUrl || typeof imageUrl !== 'string') {
+                throw new Error('URL da imagem inválida');
+            }
+
             // Análise da imagem usando Groq
             const imageAnalysis = await this.groqServices.analyzeImage(imageUrl);
 
@@ -217,58 +43,178 @@ class AIServices {
                 timestamp: new Date().toISOString()
             };
 
+            // Log das informações extraídas
+            console.log('[AI] Informações extraídas:', {
+                amount: paymentInfo.amount,
+                bank: paymentInfo.bank,
+                paymentType: paymentInfo.paymentType
+            });
+
             // Armazena no Redis para histórico
-            await this.redisStore.set(
-                `payment:${paymentInfo.timestamp}:${paymentInfo.customerPhone}`,
-                paymentInfo,
-                86400 * 30 // 30 dias
-            );
+            const redisKey = `payment:${paymentInfo.timestamp}:${paymentInfo.customerPhone}`;
+            await this.redisStore.set(redisKey, JSON.stringify(paymentInfo), 86400 * 30);
 
             // Notifica o departamento financeiro
             await this.whatsappService.notifyFinancialDepartment(paymentInfo);
 
             return paymentInfo;
         } catch (error) {
-            console.error('Error processing payment proof:', error);
+            console.error('[AI] Erro ao processar comprovante:', error);
             throw error;
         }
     }
 
+    /**
+     * Extrai o valor do pagamento do texto da análise
+     * @param {string} analysis - Texto da análise
+     * @returns {number|null} Valor do pagamento ou null se não encontrado
+     */
     extractAmount(analysis) {
-        const amountRegex = /R\$\s*(\d+(?:\.\d{3})*(?:,\d{2})?)/;
-        const match = analysis.match(amountRegex);
-        return match ? match[0] : null;
+        try {
+            const matches = analysis.match(/R\$\s*(\d+(?:\.\d{3})*(?:,\d{2})?)/);
+            if (matches) {
+                const amount = matches[1].replace(/\./g, '').replace(',', '.');
+                return parseFloat(amount);
+            }
+            return null;
+        } catch (error) {
+            console.error('[AI] Erro ao extrair valor:', error);
+            return null;
+        }
     }
 
+    /**
+     * Extrai o banco do texto da análise
+     * @param {string} analysis - Texto da análise
+     * @returns {string|null} Nome do banco ou null se não encontrado
+     */
     extractBank(analysis) {
         const banks = [
-            'Banco do Brasil', 'Bradesco', 'Itaú', 'Santander', 'Caixa',
-            'Nubank', 'Inter', 'C6', 'PicPay', 'Mercado Pago'
+            'Nubank', 'Itaú', 'Bradesco', 'Santander', 'Banco do Brasil',
+            'Caixa', 'Inter', 'C6', 'PicPay', 'Mercado Pago'
         ];
 
-        for (const bank of banks) {
-            if (analysis.toLowerCase().includes(bank.toLowerCase())) {
-                return bank;
+        try {
+            const lowerAnalysis = analysis.toLowerCase();
+            for (const bank of banks) {
+                if (lowerAnalysis.includes(bank.toLowerCase())) {
+                    return bank;
+                }
             }
+            return null;
+        } catch (error) {
+            console.error('[AI] Erro ao extrair banco:', error);
+            return null;
         }
-        return null;
     }
 
+    /**
+     * Extrai o tipo de pagamento do texto da análise
+     * @param {string} analysis - Texto da análise
+     * @returns {string|null} Tipo de pagamento ou null se não encontrado
+     */
     extractPaymentType(analysis) {
         const types = {
-            'pix': 'PIX',
-            'transferência': 'Transferência',
-            'ted': 'TED',
-            'doc': 'DOC',
-            'boleto': 'Boleto'
+            'pix': ['pix', 'transferência pix', 'pagamento pix'],
+            'ted': ['ted', 'transferência ted', 'transferência eletrônica'],
+            'doc': ['doc', 'transferência doc'],
+            'boleto': ['boleto', 'pagamento de boleto'],
+            'débito': ['débito', 'cartão de débito'],
+            'crédito': ['crédito', 'cartão de crédito']
         };
 
-        for (const [key, value] of Object.entries(types)) {
-            if (analysis.toLowerCase().includes(key)) {
-                return value;
+        try {
+            const lowerAnalysis = analysis.toLowerCase();
+            for (const [type, keywords] of Object.entries(types)) {
+                if (keywords.some(keyword => lowerAnalysis.includes(keyword))) {
+                    return type;
+                }
             }
+            return null;
+        } catch (error) {
+            console.error('[AI] Erro ao extrair tipo de pagamento:', error);
+            return null;
         }
-        return null;
+    }
+
+    /**
+     * Verifica se é horário comercial
+     * @returns {boolean} true se estiver em horário comercial
+     */
+    isBusinessHours() {
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0 = Domingo, 1 = Segunda, ...
+        
+        // Verifica se é fim de semana
+        if (dayOfWeek === 0 || dayOfWeek === 6) {
+            return false;
+        }
+
+        // Converte para timezone do Brasil
+        const brasilTime = now.toLocaleString('en-US', { timeZone: BUSINESS_HOURS.timezone });
+        const currentHour = new Date(brasilTime).getHours();
+
+        // Verifica se está dentro do horário comercial
+        return currentHour >= 8 && currentHour < 18;
+    }
+
+    /**
+     * Verifica se uma mensagem precisa de atendimento humano
+     * @param {string} message - Mensagem do usuário
+     * @returns {Promise<boolean>} true se precisar de atendimento humano
+     */
+    async needsHumanSupport(message) {
+        try {
+            // Palavras-chave que indicam necessidade de atendimento humano
+            const humanKeywords = [
+                'falar com atendente',
+                'falar com humano',
+                'atendimento humano',
+                'pessoa real',
+                'não quero falar com robô',
+                'preciso de ajuda urgente',
+                'problema grave',
+                'reclamação'
+            ];
+
+            const lowerMessage = message.toLowerCase();
+            return humanKeywords.some(keyword => lowerMessage.includes(keyword.toLowerCase()));
+        } catch (error) {
+            console.error('[AI] Erro ao verificar necessidade de suporte:', error);
+            return true; // Em caso de erro, melhor encaminhar para humano
+        }
+    }
+
+    /**
+     * Verifica se uma mensagem está relacionada a questões financeiras
+     * @param {string} message - Mensagem do usuário
+     * @returns {Promise<boolean>} true se for questão financeira
+     */
+    async isFinancialIssue(message) {
+        try {
+            const financialKeywords = [
+                'pagamento',
+                'reembolso',
+                'estorno',
+                'cobrança',
+                'fatura',
+                'boleto',
+                'cartão',
+                'pix',
+                'transferência',
+                'dinheiro',
+                'valor',
+                'preço',
+                'desconto',
+                'promoção'
+            ];
+
+            const lowerMessage = message.toLowerCase();
+            return financialKeywords.some(keyword => lowerMessage.includes(keyword.toLowerCase()));
+        } catch (error) {
+            console.error('[AI] Erro ao verificar questão financeira:', error);
+            return false;
+        }
     }
 }
 

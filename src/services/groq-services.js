@@ -1,37 +1,29 @@
 const axios = require('axios');
 const FormData = require('form-data');
-const { detectImageFormatFromBuffer, validateGroqResponse } = require('../utils/image-format');
+const { detectImageFormatFromBuffer } = require('../utils/image-format');
 
 class GroqServices {
     constructor() {
-        // Modelo atual recomendado para visão
         this.models = {
             vision: 'llama-3.2-90b-vision-preview',
             audio: 'whisper-large-v3-turbo'
         };
 
-        // Configurações padrão para análise de imagem
         this.imageAnalysisConfig = {
             prompt: 'Analise esta imagem e me diga se é um comprovante de pagamento válido. Se for, extraia as informações relevantes como valor, data, beneficiário e tipo de transação.',
             maxRetries: 3,
             retryDelay: 1000
         };
 
-        // Cliente axios com configuração base
         this.axiosInstance = axios.create({
             headers: {
                 'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
                 'Content-Type': 'application/json'
             },
-            timeout: 30000 // 30 segundos
+            timeout: 30000
         });
     }
 
-    /**
-     * Prepara os dados da imagem para envio
-     * @param {Buffer|string} imageData - Buffer da imagem ou string base64
-     * @returns {Object} Objeto com formato e dados base64
-     */
     async prepareImageData(imageData) {
         let buffer;
         
@@ -40,21 +32,38 @@ class GroqServices {
             type: typeof imageData,
             isBuffer: Buffer.isBuffer(imageData),
             length: imageData?.length,
-            isString: typeof imageData === 'string'
+            isString: typeof imageData === 'string',
+            startsWithHttp: typeof imageData === 'string' && imageData.startsWith('http')
         });
 
         // Converte para Buffer se necessário
         if (typeof imageData === 'string') {
-            // Verifica se é uma data URL
-            if (imageData.startsWith('data:')) {
+            // Se for uma URL, faz o download
+            if (imageData.startsWith('http')) {
+                try {
+                    const response = await axios({
+                        method: 'GET',
+                        url: imageData,
+                        responseType: 'arraybuffer',
+                        timeout: 10000,
+                        maxContentLength: 10 * 1024 * 1024 // 10MB
+                    });
+                    buffer = Buffer.from(response.data);
+                } catch (error) {
+                    throw new Error(`Falha ao baixar imagem: ${error.message}`);
+                }
+            } 
+            // Se for uma data URL
+            else if (imageData.startsWith('data:')) {
                 const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
                 if (matches) {
                     buffer = Buffer.from(matches[2], 'base64');
                 } else {
                     throw new Error('Data URL inválida');
                 }
-            } else {
-                // Assume que é base64 puro
+            } 
+            // Se for base64 puro
+            else {
                 try {
                     buffer = Buffer.from(imageData, 'base64');
                 } catch (error) {
@@ -64,7 +73,7 @@ class GroqServices {
         } else if (Buffer.isBuffer(imageData)) {
             buffer = imageData;
         } else {
-            throw new Error('Dados inválidos: esperado Buffer ou string base64');
+            throw new Error('Dados inválidos: esperado Buffer, URL ou string base64');
         }
 
         // Validação do buffer
@@ -72,14 +81,17 @@ class GroqServices {
             throw new Error('Buffer inválido ou muito pequeno');
         }
 
+        // Log do buffer para debug
+        console.log('[Groq] Buffer recebido:', {
+            length: buffer.length,
+            firstBytes: buffer.slice(0, 32).toString('hex').toUpperCase(),
+            isJPEG: buffer.slice(0, 2).toString('hex').toUpperCase() === 'FFD8',
+            isPNG: buffer.slice(0, 8).toString('hex').toUpperCase().includes('89504E47')
+        });
+
         // Detecta o formato
         const detectedFormat = detectImageFormatFromBuffer(buffer);
         if (!detectedFormat) {
-            // Log detalhado para debug
-            console.error('[Groq] Formato não reconhecido:', {
-                bufferLength: buffer.length,
-                firstBytes: buffer.slice(0, 16).toString('hex').toUpperCase()
-            });
             throw new Error('Formato de imagem não reconhecido');
         }
 
@@ -89,29 +101,19 @@ class GroqServices {
         return {
             format: detectedFormat,
             base64: base64Data,
-            buffer // Retorna o buffer também para uso posterior se necessário
+            buffer
         };
     }
 
-    /**
-     * Analisa uma imagem usando a API Groq
-     * @param {Buffer|string} imageData - Buffer da imagem ou string base64
-     * @returns {Promise<string>} Resultado da análise
-     */
     async analyzeImage(imageData) {
         let attempt = 0;
         let lastError;
 
         while (attempt < this.imageAnalysisConfig.maxRetries) {
             try {
-                // Log inicial
-                console.log(`[Groq] Tentativa ${attempt + 1} de análise de imagem`);
-
-                // Prepara os dados da imagem
                 const { format, base64, buffer } = await this.prepareImageData(imageData);
 
-                // Log detalhado
-                console.log('[Groq] Imagem preparada para análise:', {
+                console.log('[Groq] Enviando imagem para análise:', {
                     format,
                     bufferSize: buffer.length,
                     base64Length: base64.length,
@@ -119,7 +121,6 @@ class GroqServices {
                     model: this.models.vision
                 });
 
-                // Prepara a requisição
                 const requestData = {
                     model: this.models.vision,
                     messages: [
@@ -139,35 +140,30 @@ class GroqServices {
                             ]
                         }
                     ],
-                    temperature: 0.1 // Mais preciso
+                    temperature: 0.1
                 };
 
-                // Faz a requisição
                 const response = await this.axiosInstance.post(
                     'https://api.groq.com/v1/chat/completions',
                     requestData
                 );
 
-                // Valida a resposta
-                const validation = validateGroqResponse(response);
-                if (!validation.isValid) {
-                    throw new Error(validation.error);
+                if (!response?.data?.choices?.[0]?.message?.content) {
+                    throw new Error('Resposta inválida da API');
                 }
 
-                return validation.content;
+                return response.data.choices[0].message.content;
 
             } catch (error) {
                 console.error(`[Groq] Erro na tentativa ${attempt + 1}:`, {
                     message: error.message,
                     status: error.response?.status,
-                    data: error.response?.data,
-                    stack: error.stack
+                    data: error.response?.data
                 });
 
                 lastError = error;
                 attempt++;
 
-                // Se não for a última tentativa, espera antes de tentar novamente
                 if (attempt < this.imageAnalysisConfig.maxRetries) {
                     await new Promise(resolve => 
                         setTimeout(resolve, this.imageAnalysisConfig.retryDelay * attempt)
@@ -176,64 +172,7 @@ class GroqServices {
             }
         }
 
-        // Se todas as tentativas falharam
-        const errorMessage = lastError?.response?.data?.error?.message || lastError?.message;
-        throw new Error(`Falha ao analisar imagem após ${attempt} tentativas: ${errorMessage}`);
-    }
-
-    /**
-     * Transcreve áudio usando a API Groq
-     * @param {Buffer} audioBuffer - Buffer do áudio
-     * @param {string} mimeType - Tipo MIME do áudio
-     * @returns {Promise<string>} Texto transcrito
-     */
-    async transcribeAudio(audioBuffer, mimeType) {
-        try {
-            if (!audioBuffer || !Buffer.isBuffer(audioBuffer)) {
-                throw new Error('Áudio inválido: buffer não fornecido ou inválido');
-            }
-
-            if (!mimeType || typeof mimeType !== 'string') {
-                throw new Error('Tipo MIME do áudio não fornecido');
-            }
-
-            // Converte o buffer para base64
-            const base64Audio = audioBuffer.toString('base64');
-
-            // Log do áudio
-            console.log('[Groq] Preparando áudio para transcrição:', {
-                bufferSize: audioBuffer.length,
-                mimeType,
-                base64Length: base64Audio.length,
-                model: this.models.audio
-            });
-
-            // Prepara os dados para envio
-            const requestData = {
-                model: this.models.audio,
-                file: `data:${mimeType};base64,${base64Audio}`,
-                language: 'pt'
-            };
-
-            const response = await this.axiosInstance.post(
-                'https://api.groq.com/v1/audio/transcriptions',
-                requestData
-            );
-
-            if (!response?.data?.text) {
-                throw new Error('Resposta da API não contém texto transcrito');
-            }
-
-            return response.data.text;
-
-        } catch (error) {
-            console.error('[Groq] Erro ao transcrever áudio:', {
-                message: error.message,
-                status: error.response?.status,
-                data: error.response?.data
-            });
-            throw error;
-        }
+        throw new Error(`Falha ao analisar imagem após ${attempt} tentativas: ${lastError.message}`);
     }
 }
 
