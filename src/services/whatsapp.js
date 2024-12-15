@@ -240,10 +240,10 @@ class WhatsAppService {
                 timestamp: metadata.timestamp,
                 hasText: !!text,
                 text: text,
-                hasImage: messageTypes.includes('image'),
-                hasAudio: messageTypes.includes('audio'),
-                hasDocument: messageTypes.includes('document'),
-                hasVideo: messageTypes.includes('video')
+                hasImage: messageTypes.includes('imageMessage'),
+                hasAudio: messageTypes.includes('audioMessage'),
+                hasDocument: messageTypes.includes('documentMessage'),
+                hasVideo: messageTypes.includes('videoMessage')
             };
 
             console.log('[Extractor] Mensagem extraída:', {
@@ -272,66 +272,65 @@ class WhatsAppService {
                 return types;
             }
 
-            // Log da estrutura da mensagem
-            console.log('[MessageTypes] Estrutura da mensagem:', {
-                hasConversation: !!message.conversation,
+            // Log para debug
+            console.log('[MessageTypes] Analisando mensagem:', {
+                hasMessage: !!message,
+                messageKeys: Object.keys(message),
                 hasExtendedText: !!message.extendedTextMessage,
-                text: message.extendedTextMessage?.text || message.conversation,
-                messageKeys: Object.keys(message)
+                messageContent: message.extendedTextMessage?.text
             });
 
             // Verifica cada tipo possível de mensagem
             if (message.conversation) {
-                types.push('text');
+                types.push('conversation');
             }
-            if (message.extendedTextMessage) {
-                types.push('text');
+            if (message.extendedTextMessage?.text) {
+                types.push('extendedTextMessage');
             }
             if (message.imageMessage) {
-                types.push('image');
+                types.push('imageMessage');
             }
             if (message.audioMessage) {
-                types.push('audio');
+                types.push('audioMessage');
             }
             if (message.documentMessage) {
-                types.push('document');
-            }
-            if (message.videoMessage) {
-                types.push('video');
+                types.push('documentMessage');
             }
 
-            // Se nenhum tipo foi identificado mas temos texto
-            if (types.length === 0 && (message.conversation || message.extendedTextMessage?.text)) {
+            // Se é uma mensagem de texto (conversation ou extendedTextMessage)
+            if (types.includes('conversation') || types.includes('extendedTextMessage')) {
                 types.push('text');
             }
 
-            console.log('[MessageTypes] Tipos identificados:', types);
+            console.log('[MessageTypes] Tipos encontrados:', types);
             return types;
         } catch (error) {
             console.error('[MessageTypes] Erro ao identificar tipos:', error);
-            return ['text']; // Fallback para texto em caso de erro
+            return [];
         }
     }
 
     _extractMessageText(messageData) {
-        const text = messageData.conversation ||
-                    messageData.extendedTextMessage?.text ||
-                    messageData.imageMessage?.caption ||
-                    messageData.videoMessage?.caption;
+        try {
+            // Log para debug
+            console.log('[TextExtractor] Analisando mensagem:', {
+                hasConversation: !!messageData.conversation,
+                hasExtendedText: !!messageData.extendedTextMessage,
+                text: messageData.extendedTextMessage?.text || messageData.conversation
+            });
 
-        // Extrai informações de links se presentes
-        const linkInfo = messageData.extendedTextMessage || {};
-        
-        return {
-            text,
-            hasText: !!text,
-            matchedText: linkInfo.matchedText,
-            canonicalUrl: linkInfo.canonicalUrl,
-            description: linkInfo.description,
-            title: linkInfo.title,
-            previewType: linkInfo.previewType,
-            jpegThumbnail: linkInfo.jpegThumbnail
-        };
+            // Tenta extrair o texto da mensagem
+            const text = messageData.conversation || 
+                        messageData.extendedTextMessage?.text || 
+                        messageData.imageMessage?.caption ||
+                        messageData.documentMessage?.caption ||
+                        null;
+
+            return text;
+        } catch (error) {
+            console.error('[TextExtractor] Erro ao extrair texto:', error);
+            return null;
+        }
     }
 
     _extractMessageMetadata(messageContent) {
@@ -562,7 +561,7 @@ class WhatsAppService {
             });
 
             // Processa mensagem de mídia (imagem/áudio)
-            if (extractedMessage.type === 'image' || extractedMessage.type === 'audio') {
+            if (extractedMessage.type === 'imageMessage' || extractedMessage.type === 'audioMessage') {
                 const mediaResult = await this.handleMediaMessage(message);
                 if (mediaResult?.mediaHandled) {
                     return mediaResult;
