@@ -74,26 +74,45 @@ app.use((err, req, res, next) => {
 app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
         const data = req.body;
+        
+        // Log dos dados brutos para debug
+        console.log(' Dados brutos do webhook:', JSON.stringify(data, null, 2));
+        
+        // Se não houver dados, retorna erro
+        if (!data) {
+            console.error(' Webhook recebido sem dados');
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Dados não fornecidos' 
+            });
+        }
+
+        // Log estruturado dos dados processados
         console.log(' Webhook recebido:', {
             event: data.event,
             messageId: data.messageId,
             from: data.sender?.pushName,
             hasText: !!data.messageText?.text,
             hasImage: !!data.jpegThumbnail,
-            isGroup: data.isGroup
+            isGroup: data.isGroup,
+            rawMessage: data.message || data.messageText, // adicionado para debug
+            rawSender: data.sender || data.from // adicionado para debug
         });
 
         // Se for evento de mensagem recebida
-        if (data.event === 'messageReceived') {
+        if (data.message || data.messageText) {
             const message = {
                 type: data.messageText?.text ? 'text' : 
+                      data.message?.text ? 'text' :
                       data.jpegThumbnail ? 'image' : 'unknown',
-                text: data.messageText?.text,
+                text: data.messageText?.text || data.message?.text,
                 imageUrl: data.jpegThumbnail,
-                from: data.sender?.id,
-                messageId: data.messageId,
-                timestamp: data.moment
+                from: data.sender?.id || data.from,
+                messageId: data.messageId || data.id,
+                timestamp: data.moment || new Date().toISOString()
             };
+
+            console.log(' Mensagem processada:', message);
 
             const response = await chatbot.processMessage(message);
             console.log(' Resposta gerada:', {
@@ -112,7 +131,7 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             res.json({ success: true });
         }
         else {
-            console.log(' Evento desconhecido:', data.event);
+            console.log(' Evento não reconhecido:', data);
             res.json({ success: true });
         }
 

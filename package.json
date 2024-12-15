@@ -4,7 +4,7 @@
   "description": "Integration of ChatGPT with WhatsApp for e-commerce.",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node --no-warnings src/server.js",
     "build": "echo 'No build step required'",
     "dev": "nodemon src/server.js",
     "test": "node src/test-audio.js"
