@@ -5,18 +5,22 @@ const path = require('path');
 const os = require('os');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-const { promisify } = require('util');
+const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { GROQ_CONFIG } = require('../config/settings');
 
 // Configura o caminho do ffmpeg
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 class AudioService {
-    constructor(groqServices) {
+    constructor(groqServices, whatsappClient) {
         if (!groqServices) {
             throw new Error('GroqServices é obrigatório');
         }
+        if (!whatsappClient) {
+            throw new Error('WhatsappClient é obrigatório');
+        }
         this.groqServices = groqServices;
+        this.whatsappClient = whatsappClient;
     }
 
     /**
@@ -39,7 +43,10 @@ class AudioService {
                     .toFormat('mp3')
                     .audioChannels(1)
                     .audioFrequency(16000)
-                    .on('error', reject)
+                    .on('error', (err) => {
+                        console.error('❌ Erro no ffmpeg:', err);
+                        reject(err);
+                    })
                     .on('end', resolve)
                     .save(outputPath);
             });
@@ -49,8 +56,8 @@ class AudioService {
 
             // Limpa arquivos temporários
             await Promise.all([
-                fs.promises.unlink(inputPath),
-                fs.promises.unlink(outputPath)
+                fs.promises.unlink(inputPath).catch(() => {}),
+                fs.promises.unlink(outputPath).catch(() => {})
             ]);
 
             return convertedBuffer;
@@ -74,39 +81,35 @@ class AudioService {
                 throw new Error('Mensagem de áudio não encontrada');
             }
 
-            // Validação do tipo MIME
-            const mimeType = messageData.audioMessage.mimetype;
-            const allowedMimes = ['audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/opus'];
-            const baseMimeType = mimeType.split(';')[0].trim();
-            
-            if (!allowedMimes.includes(baseMimeType) && !mimeType.startsWith('audio/')) {
-                throw new Error(`Tipo de áudio não suportado: ${mimeType}`);
-            }
-
-            // Download do áudio da URL
-            console.log('📥 Baixando áudio...', {
-                url: messageData.audioMessage.url,
+            // Baixa e descriptografa o áudio usando o Baileys
+            console.log('📥 Baixando e descriptografando áudio...', {
                 mimetype: messageData.audioMessage.mimetype,
                 seconds: messageData.audioMessage.seconds,
                 fileLength: messageData.audioMessage.fileLength
             });
-            
-            const response = await axios({
-                method: 'GET',
-                url: messageData.audioMessage.url,
-                responseType: 'arraybuffer',
-                timeout: 30000,
-                maxContentLength: 10 * 1024 * 1024 // 10MB
-            });
 
-            const buffer = Buffer.from(response.data);
+            const buffer = await downloadMediaMessage(
+                { message: { audioMessage: messageData.audioMessage } },
+                'buffer',
+                {},
+                {
+                    logger: console,
+                    reuploadRequest: async (media) => {
+                        const response = await axios.get(media.url, {
+                            responseType: 'arraybuffer',
+                            headers: { Origin: 'https://web.whatsapp.com' }
+                        });
+                        return response.data;
+                    }
+                }
+            );
 
-            if (!buffer.length) {
+            if (!buffer?.length) {
                 console.error('❌ Buffer vazio após download');
                 throw new Error('Download do áudio falhou');
             }
 
-            console.log('✅ Áudio baixado:', {
+            console.log('✅ Áudio baixado e descriptografado:', {
                 tamanhoBuffer: buffer.length,
                 primeirosBytes: buffer.slice(0, 16).toString('hex')
             });
@@ -114,6 +117,11 @@ class AudioService {
             // Converte o áudio para MP3
             console.log('🔄 Convertendo áudio para MP3...');
             const convertedBuffer = await this.convertAudio(buffer);
+
+            console.log('✅ Áudio convertido:', {
+                tamanhoOriginal: buffer.length,
+                tamanhoConvertido: convertedBuffer.length
+            });
 
             // Prepara o FormData com o áudio convertido
             const formData = new FormData();
@@ -147,4 +155,4 @@ class AudioService {
     }
 }
 
-module.exports = { AudioService };
+module.exports = AudioService;

@@ -21,9 +21,9 @@ app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 // Serviços
 const groqServices = new GroqServices();
 const webhookService = new WebhookService();
-const aiServices = new AIServices();
 const whatsappService = new WhatsAppService();
-const audioService = new AudioService(groqServices);
+const aiServices = new AIServices(groqServices);
+const audioService = new AudioService(groqServices, whatsappService.client);
 const imageService = new ImageService(groqServices);
 
 // Rota de healthcheck
