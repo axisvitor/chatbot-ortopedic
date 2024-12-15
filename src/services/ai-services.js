@@ -60,11 +60,71 @@ class AIServices {
             if (paymentInfo.isPaymentProof) {
                 const redisKey = `payment:${paymentInfo.timestamp}:${from}`;
                 await this.redisStore.set(redisKey, JSON.stringify(paymentInfo), 86400 * 30);
+                
+                // Salva o estado do usuário para esperar o nome
+                await this.redisStore.set(`state:${from}`, JSON.stringify({
+                    state: 'waiting_name',
+                    paymentKey: redisKey
+                }), 3600); // expira em 1 hora
+
+                // Envia mensagem solicitando o nome
+                await this.whatsappService.sendTextMessage(
+                    from,
+                    "✅ Comprovante recebido! Por favor, me informe seu nome completo para que eu possa encaminhar para análise."
+                );
             }
 
             return paymentInfo;
         } catch (error) {
             console.error('[AI] Erro ao processar comprovante:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Processa a resposta do nome do usuário
+     * @param {string} from - Número do WhatsApp do usuário
+     * @param {string} message - Mensagem com o nome do usuário
+     */
+    async processUserName(from, message) {
+        try {
+            // Verifica se está esperando o nome
+            const stateJson = await this.redisStore.get(`state:${from}`);
+            if (!stateJson) return null;
+
+            const state = JSON.parse(stateJson);
+            if (state.state !== 'waiting_name') return null;
+
+            // Recupera as informações do pagamento
+            const paymentJson = await this.redisStore.get(state.paymentKey);
+            if (!paymentJson) return null;
+
+            const paymentInfo = JSON.parse(paymentJson);
+            
+            // Adiciona o nome ao pagamento
+            paymentInfo.buyerName = message.trim();
+            await this.redisStore.set(state.paymentKey, JSON.stringify(paymentInfo), 86400 * 30);
+
+            // Limpa o estado
+            await this.redisStore.del(`state:${from}`);
+
+            // Envia confirmação para o usuário
+            await this.whatsappService.sendTextMessage(
+                from,
+                "✅ Obrigado! Seu comprovante foi encaminhado para análise. Em breve retornaremos com a confirmação."
+            );
+
+            // Envia análise detalhada para o setor financeiro
+            if (process.env.FINANCIAL_DEPT_NUMBER) {
+                await this.whatsappService.sendTextMessage(
+                    process.env.FINANCIAL_DEPT_NUMBER,
+                    `📋 Novo comprovante recebido:\n\nComprador: ${paymentInfo.buyerName}\nTelefone: ${from}\n\n${paymentInfo.analysis}`
+                );
+            }
+
+            return paymentInfo;
+        } catch (error) {
+            console.error('[AI] Erro ao processar nome do usuário:', error);
             throw error;
         }
     }

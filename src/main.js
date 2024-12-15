@@ -26,6 +26,14 @@ class ChatbotController {
 
             let response = '';
 
+            // Verifica se é uma resposta com o nome do comprador
+            if (message.type === 'text') {
+                const nameProcessResult = await this.aiServices.processUserName(message.from, message.text);
+                if (nameProcessResult) {
+                    return; // Resposta já foi enviada pelo processUserName
+                }
+            }
+
             // Verifica se precisa de atendimento humano
             if (message.text && await this.aiServices.needsHumanSupport(message.text)) {
                 return this.handleHumanSupportRequest(message);
