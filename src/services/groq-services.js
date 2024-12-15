@@ -5,17 +5,22 @@ const settings = require('../config/settings');
 
 class GroqServices {
     constructor() {
-        this.models = settings.GROQ_CONFIG.models
+        this.models = settings.GROQ_CONFIG.models;
         this.axiosInstance = axios.create({
             headers: {
                 'Authorization': `Bearer ${settings.GROQ_CONFIG.apiKey}`,
                 'Content-Type': 'application/json'
             }
-        })
+        });
     }
 
     async analyzeImage(imageData) {
         try {
+            // Validação inicial
+            if (!imageData) {
+                throw new Error('Dados da imagem não fornecidos');
+            }
+
             let buffer;
             let base64Data;
             let detectedFormat;
@@ -55,154 +60,126 @@ class GroqServices {
                 throw new Error('Formato de imagem inválido. Esperado: Buffer ou string base64');
             }
 
+            // Validação do buffer
+            if (!buffer || buffer.length < 8) {
+                throw new Error('Buffer de imagem inválido ou muito pequeno');
+            }
+
             // Verifica o tamanho do buffer
             const sizeInMB = buffer.length / (1024 * 1024);
             if (sizeInMB > 4) {
                 throw new Error('Imagem muito grande. O limite máximo é 4MB');
             }
 
+            // Magic numbers atualizados para detecção de formato
+            const magicNumbers = {
+                'FFD8FF': 'image/jpeg',    // JPEG (todos os tipos)
+                '89504E47': 'image/png',   // PNG
+                '47494638': 'image/gif',   // GIF
+                '52494646': 'image/webp',  // WEBP
+                '49492A00': 'image/tiff',  // TIFF
+                '4D4D002A': 'image/tiff'   // TIFF (big endian)
+            };
+
             // Se o formato ainda não foi detectado via data URL, tenta pelos magic numbers
             if (!detectedFormat) {
-                const magicNumbers = {
-                    'ffd8': 'image/jpeg',     // JPEG pode começar com ffd8
-                    '89504e47': 'image/png',  // PNG
-                    '47494638': 'image/gif',  // GIF
-                    '52494646': 'image/webp', // WEBP
-                    'FFD8FFE0': 'image/jpeg', // JPEG (JFIF)
-                    'FFD8FFE1': 'image/jpeg', // JPEG (Exif)
-                    'FFD8FFE2': 'image/jpeg', // JPEG (SPIFF)
-                    'FFD8FFE3': 'image/jpeg', // JPEG (JPS)
-                    'FFD8FFE8': 'image/jpeg'  // JPEG (SPIFF)
-                };
-
                 const fileHeader = buffer.slice(0, 4).toString('hex').toUpperCase();
-                const shortHeader = fileHeader.slice(0, 4);
                 
                 console.log('🔍 Analisando cabeçalho da imagem:', {
                     header: fileHeader,
-                    shortHeader,
                     bufferLength: buffer.length,
                     firstBytes: buffer.slice(0, 16).toString('hex').toUpperCase()
                 });
                 
-                // Primeiro tenta com o cabeçalho completo
                 for (const [magic, format] of Object.entries(magicNumbers)) {
-                    if (fileHeader.startsWith(magic.toUpperCase())) {
+                    if (fileHeader.startsWith(magic)) {
                         detectedFormat = format;
                         break;
                     }
                 }
 
-                // Se não encontrou, tenta com o cabeçalho curto (para JPEG)
-                if (!detectedFormat && magicNumbers[shortHeader]) {
-                    detectedFormat = magicNumbers[shortHeader];
-                }
-
-                // Se ainda não encontrou mas começa com FFD8, assume JPEG
-                if (!detectedFormat && shortHeader.startsWith('FFD8')) {
+                if (!detectedFormat && fileHeader.startsWith('FFD8')) {
                     detectedFormat = 'image/jpeg';
                 }
             }
 
             if (!detectedFormat) {
-                console.error('❌ Formato não reconhecido:', {
-                    header: buffer.slice(0, 4).toString('hex').toUpperCase(),
-                    bufferStart: buffer.slice(0, 16).toString('hex').toUpperCase()
-                });
-                throw new Error('Formato de imagem não reconhecido ou corrompido');
+                throw new Error('Formato de imagem não reconhecido');
             }
 
-            console.log('🖼️ Processando imagem:', {
-                formato: detectedFormat,
-                tamanhoMB: sizeInMB.toFixed(2),
-                bufferLength: buffer.length
+            // Log detalhado antes de enviar para análise
+            console.log('[Groq] Enviando imagem para análise:', {
+                format: detectedFormat,
+                bufferSize: buffer.length,
+                base64Length: base64Data.length,
+                isValidBuffer: Buffer.isBuffer(buffer),
+                firstBytes: buffer.slice(0, 16).toString('hex').toUpperCase()
             });
 
-            // Prepara o payload para o Groq
-            const payload = {
+            // Prepara os dados para envio
+            const requestData = {
                 model: this.models.vision,
                 messages: [
                     {
-                        role: "user",
+                        role: 'user',
                         content: [
                             {
-                                type: "text",
-                                text: "Analise esta imagem e me diga se é um comprovante de pagamento. Se for, extraia as informações relevantes como valor, data, tipo de pagamento (PIX, TED, etc), banco origem e destino. Se não for um comprovante, apenas diga que não é um comprovante de pagamento."
-                            },
-                            {
-                                type: "image_url",
+                                type: 'image_url',
                                 image_url: {
                                     url: `data:${detectedFormat};base64,${base64Data}`
                                 }
+                            },
+                            {
+                                type: 'text',
+                                text: 'Analise esta imagem e me diga se é um comprovante de pagamento válido. Se for, extraia as informações relevantes como valor, data, beneficiário e tipo de transação.'
                             }
                         ]
                     }
-                ],
-                max_tokens: 1000,
-                temperature: 0.7
+                ]
             };
 
-            const response = await this.axiosInstance.post(
-                'https://api.groq.com/openai/v1/chat/completions',
-                payload
-            );
-
-            if (!response.data?.choices?.[0]?.message?.content) {
-                throw new Error('Resposta inválida do Groq');
-            }
-
+            const response = await this.axiosInstance.post('https://api.groq.com/v1/chat/completions', requestData);
             return response.data.choices[0].message.content;
 
         } catch (error) {
-            console.error('❌ Erro ao analisar imagem:', {
-                erro: error.message,
-                stack: error.stack,
-                tipo: typeof imageData
-            });
+            console.error('[Groq] Erro ao analisar imagem:', error);
             throw error;
         }
     }
 
-    async transcribeAudio(formData) {
+    async transcribeAudio(audioBuffer, mimeType) {
         try {
-            console.log('🎤 Iniciando transcrição com Groq');
-            
-            // Remove o Content-Type padrão para permitir que o FormData defina o boundary
-            const headers = { ...this.axiosInstance.defaults.headers };
-            delete headers['Content-Type'];
-            
-            const response = await this.axiosInstance.post(
-                'https://api.groq.com/openai/v1/audio/transcriptions',
-                formData,
-                {
-                    headers: {
-                        ...headers,
-                        ...formData.getHeaders(),
-                        'Accept': 'application/json'
-                    },
-                    maxBodyLength: Infinity,
-                    maxContentLength: Infinity
-                }
-            );
-
-            console.log('✅ Resposta da transcrição:', response.data);
-
-            if (response.data?.text) {
-                return response.data.text.trim();
-            } else {
-                throw new Error('Formato de resposta inválido');
+            if (!audioBuffer || !Buffer.isBuffer(audioBuffer)) {
+                throw new Error('Áudio inválido: buffer não fornecido ou inválido');
             }
-        } catch (error) {
-            console.error('❌ Erro na transcrição com Groq:', {
-                message: error.message,
-                status: error.response?.status,
-                data: error.response?.data,
-                headers: error.response?.headers,
-                requestHeaders: error.config?.headers,
-                requestUrl: error.config?.url,
-                requestData: error.config?.data
+
+            if (!mimeType || typeof mimeType !== 'string') {
+                throw new Error('Tipo MIME do áudio não fornecido');
+            }
+
+            // Converte o buffer para base64
+            const base64Audio = audioBuffer.toString('base64');
+
+            // Log do áudio
+            console.log('[Groq] Preparando áudio para transcrição:', {
+                bufferSize: audioBuffer.length,
+                mimeType,
+                base64Length: base64Audio.length
             });
-            throw new Error(`Erro na transcrição: ${error.message}. Status: ${error.response?.status}. Detalhes: ${JSON.stringify(error.response?.data)}`);
+
+            // Prepara os dados para envio
+            const requestData = {
+                model: this.models.transcription,
+                file: `data:${mimeType};base64,${base64Audio}`,
+                language: 'pt'
+            };
+
+            const response = await this.axiosInstance.post('https://api.groq.com/v1/audio/transcriptions', requestData);
+            return response.data.text;
+
+        } catch (error) {
+            console.error('[Groq] Erro ao transcrever áudio:', error);
+            throw error;
         }
     }
 }

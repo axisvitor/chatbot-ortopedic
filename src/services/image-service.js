@@ -63,17 +63,29 @@ class ImageService {
 
             console.log('[Image] Iniciando download...');
             
-            // Download da mídia usando Venom
-            const buffer = await messageInfo.mediaData.download();
+            // Download da mídia usando Venom com timeout
+            const buffer = await Promise.race([
+                messageInfo.mediaData.download(),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Timeout no download')), 30000)
+                )
+            ]);
             
-            if (!buffer || !buffer.length) {
-                throw new Error('Buffer vazio após download');
+            // Validação extra do buffer
+            if (!Buffer.isBuffer(buffer)) {
+                throw new Error('Download falhou: resultado não é um buffer válido');
             }
 
-            console.log('[Image] Download concluído:', {
+            if (buffer.length < 8) {
+                throw new Error('Download falhou: buffer muito pequeno');
+            }
+
+            // Log detalhado do buffer
+            console.log('[Image] Verificação do buffer:', {
+                isBuffer: Buffer.isBuffer(buffer),
                 size: buffer.length,
-                sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2),
-                header: buffer.slice(0, 8).toString('hex')
+                header: buffer.slice(0, 16).toString('hex').toUpperCase(),
+                mime: messageInfo.mimetype
             });
 
             // Análise da imagem com Groq
@@ -97,93 +109,6 @@ class ImageService {
                 message: error.message,
                 error: error.stack
             };
-        }
-    }
-
-    async processWhatsAppDocument(messageInfo) {
-        try {
-            if (!messageInfo?.mediaData) {
-                throw new Error('Dados do documento ausentes ou inválidos');
-            }
-
-            console.log('[Document] Recebido documento:', {
-                type: messageInfo.type,
-                size: messageInfo.size,
-                mimetype: messageInfo.mimetype,
-                filename: messageInfo.filename
-            });
-
-            // Verifica o tamanho (limite de 10MB para documentos)
-            const maxDocSize = 10 * 1024 * 1024;
-            if (messageInfo.size > maxDocSize) {
-                throw new Error(`Documento muito grande (max: ${maxDocSize / (1024 * 1024)}MB)`);
-            }
-
-            console.log('[Document] Iniciando download...');
-            
-            // Download do documento usando Venom
-            const buffer = await messageInfo.mediaData.download();
-            
-            if (!buffer || !buffer.length) {
-                throw new Error('Buffer vazio após download');
-            }
-
-            // Salva o documento temporariamente se necessário
-            const tempPath = path.join(this.tempDir, messageInfo.filename || 'document');
-            await fs.writeFile(tempPath, buffer);
-
-            console.log('[Document] Download concluído:', {
-                size: buffer.length,
-                sizeInMB: (buffer.length / (1024 * 1024)).toFixed(2),
-                path: tempPath
-            });
-
-            return {
-                success: true,
-                message: 'Documento processado com sucesso',
-                metadata: {
-                    type: messageInfo.mimetype,
-                    size: buffer.length,
-                    filename: messageInfo.filename,
-                    path: tempPath
-                }
-            };
-
-        } catch (error) {
-            console.error('[Document] Erro:', error);
-            return {
-                success: false,
-                message: error.message,
-                error: error.stack
-            };
-        }
-    }
-
-    async isPaymentProof(messageInfo) {
-        try {
-            const result = await this.processWhatsAppImage(messageInfo);
-            if (!result.success) {
-                return false;
-            }
-
-            const analysis = result.analysis.toLowerCase();
-            const paymentKeywords = [
-                'comprovante',
-                'pagamento',
-                'transferência',
-                'pix',
-                'ted',
-                'doc',
-                'depósito',
-                'bancário',
-                'recibo',
-                'valor'
-            ];
-
-            return paymentKeywords.some(keyword => analysis.includes(keyword.toLowerCase()));
-        } catch (error) {
-            console.error('[PaymentCheck] Erro:', error);
-            return false;
         }
     }
 }
