@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Instalar dependências necessárias para compilação
-RUN apk add --no-cache python3 make g++ gcc
+RUN apk add --no-cache python3 make g++ gcc git
 
 # Copiar package.json e package-lock.json (se existir)
 COPY package*.json ./
