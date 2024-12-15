@@ -21,6 +21,7 @@ class BusinessHoursService {
 
     isWithinBusinessHours() {
         if (this.isHoliday()) {
+            console.log('[BusinessHours] Hoje é feriado');
             return false;
         }
 
@@ -29,7 +30,8 @@ class BusinessHoursService {
         const schedule = this.config.schedule[day];
 
         // Se não há horário definido para este dia (ex: domingo)
-        if (!schedule.start || !schedule.end) {
+        if (!schedule?.start || !schedule?.end) {
+            console.log('[BusinessHours] Não há expediente hoje');
             return false;
         }
 
@@ -39,49 +41,79 @@ class BusinessHoursService {
         const startTime = moment(now).set({ hour: startHour, minute: startMinute, second: 0 });
         const endTime = moment(now).set({ hour: endHour, minute: endMinute, second: 0 });
 
-        return now.isBetween(startTime, endTime);
+        const isWithin = now.isBetween(startTime, endTime);
+        console.log('[BusinessHours] Verificação de horário:', {
+            now: now.format('HH:mm'),
+            start: startTime.format('HH:mm'),
+            end: endTime.format('HH:mm'),
+            isWithin
+        });
+
+        return isWithin;
+    }
+
+    getOutOfHoursMessage() {
+        const now = this.getCurrentTime();
+        const day = this.getDayOfWeek();
+        const schedule = this.config.schedule[day];
+
+        if (this.isHoliday()) {
+            return this.config.messages.holiday;
+        }
+
+        if (!schedule?.start) {
+            // Encontra o próximo dia útil
+            const weekDays = Object.entries(this.config.schedule);
+            const nextWorkDay = weekDays.find(([_, hours]) => hours.start);
+            if (nextWorkDay) {
+                return this.config.messages.weekend.replace('{NEXT_DAY}', nextWorkDay[0]);
+            }
+            return this.config.messages.weekend;
+        }
+
+        return this.config.messages.outsideHours
+            .replace('{START_TIME}', schedule.start)
+            .replace('{END_TIME}', schedule.end);
     }
 
     async forwardToFinancial(message, userContact) {
-        // Aqui você implementaria a lógica de encaminhamento
-        // Por exemplo, enviando email ou salvando em um banco de dados
-        const department = this.config.departments.financial;
-        
-        // Exemplo de estrutura da mensagem a ser encaminhada
         const forwardData = {
             timestamp: this.getCurrentTime().format(),
             contact: userContact,
             message: message,
             withinBusinessHours: this.isWithinBusinessHours(),
-            department: department
+            department: this.config.departments.financial
         };
 
-        console.log(' Encaminhando para financeiro:', forwardData);
+        console.log('[BusinessHours] Encaminhando para financeiro:', forwardData);
         
-        // Aqui você implementaria o envio real
+        // TODO: Implementar envio real
         // await sendEmail(department.email, forwardData);
         // ou
         // await saveToDatabase(forwardData);
 
-        return this.config.autoReply.financialDepartment;
+        return this.isWithinBusinessHours() 
+            ? this.config.messages.financialDepartment
+            : this.getOutOfHoursMessage();
     }
 
     getHumanSupportMessage() {
         if (!this.isWithinBusinessHours()) {
-            return this.config.autoReply.humanSupportNeeded;
+            return this.getOutOfHoursMessage();
         }
-        return null; // Durante horário comercial, não precisa de mensagem especial
+        return this.config.messages.humanSupport;
     }
 
     formatBusinessHours() {
         const days = Object.entries(this.config.schedule)
-            .filter(([_, schedule]) => schedule.start && schedule.end)
+            .filter(([_, schedule]) => schedule?.start && schedule?.end)
             .map(([day, schedule]) => {
-                return `${day.charAt(0).toUpperCase() + day.slice(1)}: ${schedule.start} - ${schedule.end}`;
+                const dayName = day.charAt(0).toUpperCase() + day.slice(1);
+                return `${dayName}: ${schedule.start} às ${schedule.end}`;
             })
             .join('\n');
 
-        return `Horário de Atendimento Humano:\n${days}`;
+        return `🕒 Horário de Atendimento:\n${days}`;
     }
 }
 

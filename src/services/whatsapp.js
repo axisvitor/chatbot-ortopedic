@@ -226,24 +226,20 @@ class WhatsAppService {
 
             const messageData = webhookData.body;
             const messageTypes = this._getMessageTypes(messageData);
-            const baseType = messageTypes[0] || null;
-
-            // Extrai texto e metadados básicos
-            const text = this._extractMessageText(messageData.message);
+            const text = this._extractMessageText(messageData);
             const metadata = this._extractMessageMetadata(messageData);
 
             // Monta o objeto da mensagem
             const extractedMessage = {
-                type: baseType,
+                type: messageTypes[0] || null,
                 from: metadata.from,
                 messageId: metadata.messageId,
                 timestamp: metadata.timestamp,
                 hasText: !!text,
                 text: text,
-                hasImage: messageTypes.includes('imageMessage'),
-                hasAudio: messageTypes.includes('audioMessage'),
-                hasDocument: messageTypes.includes('documentMessage'),
-                hasVideo: messageTypes.includes('videoMessage')
+                hasImage: messageTypes.includes('image'),
+                hasAudio: messageTypes.includes('audio'),
+                hasDocument: messageTypes.includes('document')
             };
 
             console.log('[Extractor] Mensagem extraída:', {
@@ -272,7 +268,6 @@ class WhatsAppService {
                 return types;
             }
 
-            // Log para debug
             console.log('[MessageTypes] Analisando mensagem:', {
                 hasMessage: !!message,
                 messageKeys: Object.keys(message),
@@ -282,24 +277,19 @@ class WhatsAppService {
 
             // Verifica cada tipo possível de mensagem
             if (message.conversation) {
-                types.push('conversation');
+                types.push('text');
             }
             if (message.extendedTextMessage?.text) {
-                types.push('extendedTextMessage');
+                types.push('text');
             }
             if (message.imageMessage) {
-                types.push('imageMessage');
+                types.push('image');
             }
             if (message.audioMessage) {
-                types.push('audioMessage');
+                types.push('audio');
             }
             if (message.documentMessage) {
-                types.push('documentMessage');
-            }
-
-            // Se é uma mensagem de texto (conversation ou extendedTextMessage)
-            if (types.includes('conversation') || types.includes('extendedTextMessage')) {
-                types.push('text');
+                types.push('document');
             }
 
             console.log('[MessageTypes] Tipos encontrados:', types);
@@ -312,18 +302,20 @@ class WhatsAppService {
 
     _extractMessageText(messageData) {
         try {
-            // Log para debug
+            const message = messageData?.message;
+            if (!message) return null;
+
             console.log('[TextExtractor] Analisando mensagem:', {
-                hasConversation: !!messageData.conversation,
-                hasExtendedText: !!messageData.extendedTextMessage,
-                text: messageData.extendedTextMessage?.text || messageData.conversation
+                hasConversation: !!message.conversation,
+                hasExtendedText: !!message.extendedTextMessage,
+                text: message.extendedTextMessage?.text || message.conversation
             });
 
             // Tenta extrair o texto da mensagem
-            const text = messageData.conversation || 
-                        messageData.extendedTextMessage?.text || 
-                        messageData.imageMessage?.caption ||
-                        messageData.documentMessage?.caption ||
+            const text = message.conversation || 
+                        message.extendedTextMessage?.text || 
+                        message.imageMessage?.caption ||
+                        message.documentMessage?.caption ||
                         null;
 
             return text;

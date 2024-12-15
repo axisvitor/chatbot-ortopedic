@@ -23,16 +23,23 @@ class WebhookService {
                 device: webhookData.body.device
             };
 
-            // Extrai conteúdo baseado no tipo
-            if (webhookData.body.message.conversation) {
-                messageData.text = webhookData.body.message.conversation;
-            } else if (webhookData.body.text) {
-                messageData.text = webhookData.body.text;
-            }
+            // Extrai texto da mensagem
+            const message = webhookData.body.message;
+            messageData.text = message.conversation || 
+                             message.extendedTextMessage?.text ||
+                             message.imageMessage?.caption ||
+                             message.documentMessage?.caption ||
+                             null;
 
-            // Adiciona dados da imagem se presente
-            if (webhookData.body.message?.imageMessage) {
-                messageData.imageMessage = webhookData.body.message.imageMessage;
+            // Adiciona dados da mídia se presente
+            if (message.imageMessage) {
+                messageData.imageMessage = message.imageMessage;
+            }
+            if (message.audioMessage) {
+                messageData.audioMessage = message.audioMessage;
+            }
+            if (message.documentMessage) {
+                messageData.documentMessage = message.documentMessage;
             }
 
             console.log('[Webhook] Mensagem extraída:', {
@@ -40,7 +47,10 @@ class WebhookService {
                 from: messageData.from,
                 messageId: messageData.messageId,
                 hasText: !!messageData.text,
-                hasImage: !!messageData.imageMessage
+                textPreview: messageData.text?.substring(0, 100),
+                hasImage: !!messageData.imageMessage,
+                hasAudio: !!messageData.audioMessage,
+                hasDocument: !!messageData.documentMessage
             });
 
             return messageData;
@@ -51,21 +61,23 @@ class WebhookService {
     }
 
     getMessageType(messageBody) {
-        if (messageBody.message?.conversation || messageBody.text) {
+        const message = messageBody.message;
+        if (!message) return null;
+
+        // Verifica tipos de mensagem em ordem de prioridade
+        if (message.conversation || message.extendedTextMessage?.text) {
             return 'text';
         }
-        if (messageBody.message?.imageMessage) {
+        if (message.imageMessage) {
             return 'image';
         }
-        if (messageBody.message?.audioMessage) {
-            return {
-                type: 'audio',
-                audioMessage: messageBody.message.audioMessage
-            };
+        if (message.audioMessage) {
+            return 'audio';
         }
-        if (messageBody.message?.documentMessage) {
+        if (message.documentMessage) {
             return 'document';
         }
+        
         return null;
     }
 }

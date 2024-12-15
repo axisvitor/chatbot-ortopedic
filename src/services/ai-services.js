@@ -169,12 +169,39 @@ class AIServices {
      */
     async processMessage(text, { from, messageId } = {}) {
         try {
+            // Validação básica
+            if (!text) {
+                console.warn('[AI] Texto da mensagem vazio');
+                return "Desculpe, não consegui entender sua mensagem. Pode reformular?";
+            }
+
             console.log('[AI] Processando mensagem:', {
                 from,
                 messageId,
-                length: text.length,
-                preview: text.substring(0, 100)
+                length: text?.length,
+                preview: text?.substring(0, 100)
             });
+
+            // Verifica se é horário comercial
+            const isBusinessHours = BUSINESS_HOURS.isBusinessHours();
+            if (!isBusinessHours) {
+                console.log('[AI] Fora do horário comercial');
+                return BUSINESS_HOURS.getOutOfHoursMessage();
+            }
+
+            // Verifica se precisa de atendimento humano
+            const needsHuman = await this.needsHumanSupport(text);
+            if (needsHuman) {
+                console.log('[AI] Encaminhando para atendimento humano');
+                return "Entendi que você precisa de um atendimento mais específico. Vou encaminhar para um de nossos atendentes humanos.";
+            }
+
+            // Verifica se é questão financeira
+            const isFinancial = await this.isFinancialIssue(text);
+            if (isFinancial) {
+                console.log('[AI] Encaminhando para setor financeiro');
+                return "Para assuntos financeiros, por favor entre em contato com nosso setor financeiro no horário comercial.";
+            }
 
             // Cria um thread
             const thread = await this.openai.createThread();
@@ -192,15 +219,15 @@ class AIServices {
             const response = await this.waitForAssistantResponse(thread.id, run.id);
 
             console.log('[AI] Resposta gerada:', {
-                length: response.length,
-                preview: response.substring(0, 100)
+                length: response?.length,
+                preview: response?.substring(0, 100)
             });
 
-            return response;
+            return response || "Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.";
 
         } catch (error) {
             console.error('[AI] Erro ao processar mensagem:', error);
-            throw error;
+            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
         }
     }
 
