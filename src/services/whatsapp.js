@@ -229,12 +229,27 @@ class WhatsAppService {
             const messageType = messageTypes[0];
             const messageContent = webhookData.body;
 
+            // Extrai o texto da mensagem primeiro
+            let messageText = null;
+            let hasText = false;
+
+            // Verifica todas as possíveis fontes de texto
+            if (messageContent?.message) {
+                messageText = messageContent.message.conversation ||
+                            messageContent.message.extendedTextMessage?.text ||
+                            messageContent.message.imageMessage?.caption ||
+                            messageContent.message.videoMessage?.caption;
+                
+                hasText = !!messageText;
+            }
+
             let extractedMessage = {
                 type: messageType,
                 from: messageContent?.key?.remoteJid?.replace('@s.whatsapp.net', ''),
                 messageId: messageContent?.key?.id,
                 pushName: messageContent?.pushName,
-                hasText: false
+                hasText: hasText,
+                text: messageText
             };
 
             switch (messageType) {
@@ -266,27 +281,42 @@ class WhatsAppService {
                         ...extractedMessage,
                         type: 'image',
                         imageUrl: imageMessage?.url,
-                        hasImage: true
+                        hasImage: true,
+                        imageMessage: {
+                            url: imageMessage?.url,
+                            mimetype: imageMessage?.mimetype,
+                            caption: imageMessage?.caption,
+                            mediaKey: imageMessage?.mediaKey,
+                            fileEncSha256: imageMessage?.fileEncSha256,
+                            fileSha256: imageMessage?.fileSha256,
+                            fileLength: imageMessage?.fileLength
+                        }
                     };
                     break;
 
                 case 'conversation':
                 case 'extendedTextMessage':
-                    const text = messageContent?.message?.conversation || 
-                               messageContent?.message?.extendedTextMessage?.text;
+                    // O texto já foi extraído acima
                     extractedMessage = {
                         ...extractedMessage,
-                        type: 'text',
-                        text: text,
-                        hasText: !!text
+                        type: 'text'
                     };
                     break;
 
                 case 'documentMessage':
+                    const documentMessage = messageContent?.message?.documentMessage;
                     extractedMessage = {
                         ...extractedMessage,
                         type: 'document',
-                        documentUrl: messageContent?.message?.documentMessage?.url
+                        documentMessage: {
+                            url: documentMessage?.url,
+                            mimetype: documentMessage?.mimetype,
+                            title: documentMessage?.title,
+                            fileSha256: documentMessage?.fileSha256,
+                            fileLength: documentMessage?.fileLength,
+                            mediaKey: documentMessage?.mediaKey,
+                            fileName: documentMessage?.fileName
+                        }
                     };
                     break;
             }
@@ -456,14 +486,44 @@ class WhatsAppService {
                 return;
             }
 
-            // Processar a mensagem normalmente
+            // Extrai a mensagem do webhook
             const extractedMessage = await this.extractMessageFromWebhook(message);
             if (!extractedMessage) {
                 console.warn(' Mensagem não reconhecida:', message);
                 return;
             }
 
-            // Resto do código de processamento da mensagem...
+            console.log(' Mensagem extraída:', {
+                type: extractedMessage.type,
+                from: extractedMessage.from,
+                hasText: extractedMessage.hasText,
+                hasImage: extractedMessage.hasImage,
+                messageLength: extractedMessage.text?.length
+            });
+
+            // Processa mensagem de mídia (imagem/áudio)
+            if (extractedMessage.type === 'image' || extractedMessage.type === 'audio') {
+                const mediaResult = await this.handleMediaMessage(message);
+                if (mediaResult?.mediaHandled) {
+                    return mediaResult;
+                }
+            }
+
+            // Processa mensagem de texto
+            if (extractedMessage.hasText && extractedMessage.text) {
+                return {
+                    text: extractedMessage.text,
+                    type: 'text'
+                };
+            }
+
+            // Mensagem não reconhecida
+            console.warn(' Tipo de mensagem não suportado:', extractedMessage.type);
+            return {
+                text: "Desculpe, não consegui processar este tipo de mensagem. Por favor, envie texto, imagem ou áudio.",
+                type: 'text'
+            };
+
         } catch (error) {
             console.error(' Erro ao processar mensagem:', error);
             throw error;
