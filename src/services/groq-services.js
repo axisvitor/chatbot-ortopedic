@@ -6,6 +6,7 @@ const { GROQ_CONFIG } = require('../config/settings');
 class GroqServices {
     constructor() {
         this.axiosInstance = axios.create({
+            baseURL: 'https://api.groq.com/openai/v1',
             headers: {
                 'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`,
                 'Content-Type': 'application/json'
@@ -29,12 +30,12 @@ class GroqServices {
 
                 console.log('[Groq] Enviando imagem para análise:', {
                     format,
-                    base64Length: base64.length,
+                    base64Length: base64?.length,
                     attempt: attempt + 1
                 });
 
                 const requestData = {
-                    model: GROQ_CONFIG.models.vision,
+                    model: "llama-3.2-11b-vision-preview",
                     messages: [
                         {
                             role: "user",
@@ -44,10 +45,9 @@ class GroqServices {
                                     text: "Analise esta imagem com foco em problemas ortopédicos. Se identificar algum problema, forneça uma análise detalhada e orientações iniciais. Se não identificar problemas, descreva o que vê na imagem."
                                 },
                                 {
-                                    type: "image",
-                                    image: {
-                                        data: base64,
-                                        mime_type: format
+                                    type: "image_url",
+                                    image_url: {
+                                        url: `data:${format};base64,${base64}`
                                     }
                                 }
                             ]
@@ -56,11 +56,12 @@ class GroqServices {
                     temperature: 0.7,
                     max_tokens: 1024,
                     top_p: 1,
-                    stream: false
+                    stream: false,
+                    stop: null
                 };
 
                 const response = await this.axiosInstance.post(
-                    'https://api.groq.com/v1/chat/completions',
+                    '/chat/completions',
                     requestData
                 );
 
@@ -318,7 +319,7 @@ class GroqServices {
                 });
 
                 const response = await this.axiosInstance.post(
-                    'https://api.groq.com/v1/chat/completions',
+                    '/chat/completions',
                     {
                         model: GROQ_CONFIG.models.chat,
                         messages,
