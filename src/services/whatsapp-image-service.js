@@ -1,7 +1,9 @@
 const fs = require('fs').promises;
 const path = require('path');
+const axios = require('axios');
 const Tesseract = require('tesseract.js');
 const { validateImageBuffer, detectImageFormat, isValidBase64Image } = require('../utils/image-validator');
+const { decryptMedia } = require('../utils/whatsapp-crypto');
 
 class WhatsAppImageService {
     constructor(groqServices) {
@@ -29,7 +31,7 @@ class WhatsAppImageService {
         }
     }
 
-    async downloadImage(url, timeout = 30000) {
+    async downloadImage(url, mediaInfo, timeout = 30000) {
         try {
             console.log('[WhatsAppImage] Iniciando download da URL:', url);
             
@@ -42,7 +44,17 @@ class WhatsAppImageService {
                 validateStatus: (status) => status === 200
             });
 
-            const buffer = Buffer.from(response.data);
+            // Primeiro cria o buffer dos dados brutos
+            let buffer = Buffer.from(response.data);
+            
+            // Tenta descriptografar se houver informações de mídia
+            if (mediaInfo) {
+                console.log('[WhatsAppImage] Tentando descriptografar imagem:', {
+                    hasMediaKey: !!mediaInfo.mediaKey,
+                    mimetype: mediaInfo.mimetype
+                });
+                buffer = await decryptMedia(buffer, mediaInfo);
+            }
             
             // Validação adicional do buffer
             if (!await validateImageBuffer(buffer)) {
@@ -115,6 +127,7 @@ class WhatsAppImageService {
                 type: messageInfo.type,
                 hasUrl: !!messageInfo?.imageMessage?.url,
                 hasThumbnail: !!messageInfo?.imageMessage?.jpegThumbnail,
+                hasMediaKey: !!messageInfo?.imageMessage?.mediaKey,
                 mimetype: messageInfo?.imageMessage?.mimetype
             });
 
@@ -134,7 +147,7 @@ class WhatsAppImageService {
             }
 
             // Download e validação da imagem
-            const buffer = await this.downloadImage(cleanUrl);
+            const buffer = await this.downloadImage(cleanUrl, messageInfo.imageMessage);
             
             // Validações adicionais do buffer
             if (!Buffer.isBuffer(buffer) || buffer.length < 100) {
