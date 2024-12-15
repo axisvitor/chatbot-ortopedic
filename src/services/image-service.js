@@ -1,6 +1,6 @@
 const fs = require('fs').promises;
 const path = require('path');
-const venom = require('venom-bot');
+const { isValidBase64Image } = require('../utils/image-validator');
 
 class ImageService {
     constructor(groqServices) {
@@ -16,7 +16,6 @@ class ImageService {
             'image/heif'
         ]);
         
-        // Cria a pasta temp se não existir
         this.initTempDir();
     }
 
@@ -24,7 +23,6 @@ class ImageService {
         try {
             await fs.access(this.tempDir);
         } catch (error) {
-            // Se a pasta não existe, cria
             if (error.code === 'ENOENT') {
                 try {
                     await fs.mkdir(this.tempDir, { recursive: true });
@@ -63,7 +61,7 @@ class ImageService {
 
             console.log('[Image] Iniciando download...');
             
-            // Download da mídia usando Venom com timeout
+            // Download da mídia com timeout
             const buffer = await Promise.race([
                 messageInfo.mediaData.download(),
                 new Promise((_, reject) => 
@@ -71,7 +69,7 @@ class ImageService {
                 )
             ]);
             
-            // Validação extra do buffer
+            // Validação do buffer
             if (!Buffer.isBuffer(buffer)) {
                 throw new Error('Download falhou: resultado não é um buffer válido');
             }
@@ -80,12 +78,19 @@ class ImageService {
                 throw new Error('Download falhou: buffer muito pequeno');
             }
 
+            // Converte para base64 para validação
+            const base64Data = buffer.toString('base64');
+            if (!isValidBase64Image(`data:${messageInfo.mimetype};base64,${base64Data}`)) {
+                throw new Error('Imagem inválida ou corrompida após download');
+            }
+
             // Log detalhado do buffer
             console.log('[Image] Verificação do buffer:', {
                 isBuffer: Buffer.isBuffer(buffer),
                 size: buffer.length,
                 header: buffer.slice(0, 16).toString('hex').toUpperCase(),
-                mime: messageInfo.mimetype
+                mime: messageInfo.mimetype,
+                base64Length: base64Data.length
             });
 
             // Análise da imagem com Groq
