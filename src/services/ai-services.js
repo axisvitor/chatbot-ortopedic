@@ -143,11 +143,23 @@ class AIServices {
             'ted',
             'doc',
             'boleto',
-            'recibo'
+            'recibo',
+            'valor final',
+            'destinatário',
+            'pagador'
         ];
         
         const lowerAnalysis = analysis.toLowerCase();
-        return keywords.some(keyword => lowerAnalysis.includes(keyword.toLowerCase()));
+        const hasKeywords = keywords.some(keyword => lowerAnalysis.includes(keyword.toLowerCase()));
+        
+        // Verifica se tem valor monetário (R$)
+        const hasAmount = /R\$\s*\d+(?:\.\d{3})*(?:,\d{2})?/.test(analysis);
+        
+        // Verifica se tem data
+        const hasDate = /\d{2}\/\d{2}\/\d{4}/.test(analysis);
+        
+        // Considera comprovante se tiver palavras-chave E valor E data
+        return hasKeywords && hasAmount && hasDate;
     }
 
     /**
