@@ -1,43 +1,20 @@
 const axios = require('axios');
+const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const groqServices = require('./groq-services');
 const settings = require('../config/settings');
 
 class ImageService {
-    constructor(groqServices) {
+    constructor(groqServices, whatsappClient) {
+        if (!groqServices) {
+            throw new Error('GroqServices é obrigatório');
+        }
+        if (!whatsappClient) {
+            throw new Error('WhatsappClient é obrigatório');
+        }
         this.groqServices = groqServices;
+        this.whatsappClient = whatsappClient;
         this.MAX_RETRIES = 3;
         this.RETRY_DELAY = 1000; // 1 second
-    }
-
-    async downloadImage(url, retryCount = 0) {
-        try {
-            const imageResponse = await axios.get(url, {
-                responseType: 'arraybuffer',
-                headers: {
-                    'Authorization': `Bearer ${settings.WHATSAPP_CONFIG.token}`
-                },
-                maxContentLength: 50 * 1024 * 1024 // 50MB
-            });
-            return imageResponse.data;
-        } catch (error) {
-            if (error.response) {
-                const status = error.response.status;
-                if (status === 404) {
-                    throw new Error('Imagem não encontrada ou expirada (mais de 14 dias).');
-                } else if (status === 401) {
-                    throw new Error('Erro de autenticação ao acessar a imagem.');
-                }
-            }
-
-            // Retry logic for network errors
-            if (retryCount < this.MAX_RETRIES) {
-                console.log(`[ImageService] Tentativa ${retryCount + 1} de ${this.MAX_RETRIES} para baixar imagem`);
-                await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY));
-                return this.downloadImage(url, retryCount + 1);
-            }
-
-            throw error;
-        }
     }
 
     async processWhatsAppImage({ imageMessage, caption = '', from, messageId, businessHours }) {
@@ -46,14 +23,32 @@ class ImageService {
                 from,
                 messageId,
                 hasCaption: !!caption,
-                mediaId: imageMessage.id
+                mediaId: imageMessage.id,
+                mimetype: imageMessage.mimetype,
+                fileLength: imageMessage.fileLength
             });
 
-            // Download da imagem com retry
-            const imageData = await this.downloadImage(imageMessage.url);
+            // Baixa e descriptografa a imagem usando o Baileys
+            console.log('📥 Baixando e descriptografando imagem...');
             
+            const buffer = await downloadMediaMessage(
+                { message: { imageMessage } },
+                'buffer',
+                {},
+                {
+                    logger: console,
+                    reuploadRequest: async (media) => {
+                        const response = await axios.get(media.url, {
+                            responseType: 'arraybuffer',
+                            headers: { Origin: 'https://web.whatsapp.com' }
+                        });
+                        return response.data;
+                    }
+                }
+            );
+
             // Converte para base64
-            const base64Image = Buffer.from(imageData).toString('base64');
+            const base64Image = buffer.toString('base64');
 
             // Analisa a imagem com Groq Vision
             const analysis = await this.groqServices.analyzeImage(base64Image);
