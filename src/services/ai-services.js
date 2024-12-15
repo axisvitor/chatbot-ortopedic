@@ -227,7 +227,7 @@ class AIServices {
         const startTime = Date.now();
         
         while (true) {
-            const runStatus = await this.openai.retrieveRun(threadId, runId);
+            const runStatus = await this.openai.checkRunStatus(threadId, runId);
             
             if (runStatus.status === 'completed') {
                 const messages = await this.openai.listMessages(threadId);
