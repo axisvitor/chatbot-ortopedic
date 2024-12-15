@@ -64,12 +64,8 @@ class ChatbotController {
                     });
                     
                     if (imageAnalysis.isPaymentProof) {
-                        await this.whatsappService.notifyFinancialDepartment({
-                            from: message.from,
-                            imageUrl: message.imageUrl,
-                            analysis: imageAnalysis.analysis
-                        });
-                        response = "✅ Comprovante recebido e encaminhado para análise. Em breve retornaremos com a confirmação.";
+                        // Não envia mais a análise como resposta
+                        return; // A resposta já foi enviada pelo processPaymentProof
                     } else {
                         response = imageAnalysis.analysis;
                     }

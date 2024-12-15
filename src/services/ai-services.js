@@ -48,6 +48,13 @@ class AIServices {
                 timestamp: new Date().toISOString()
             };
 
+            console.log('[AI] Verificando se é comprovante:', {
+                analysis: imageAnalysis.substring(0, 100),
+                keywords: this.findMatchingKeywords(imageAnalysis),
+                hasAmount: /R\$\s*\d+(?:\.\d{3})*(?:,\d{2})?/.test(imageAnalysis),
+                hasDate: /\d{2}\/\d{2}\/\d{4}/.test(imageAnalysis)
+            });
+
             // Log das informações extraídas
             console.log('[AI] Informações extraídas:', {
                 amount: paymentInfo.amount,
@@ -56,7 +63,7 @@ class AIServices {
                 isPaymentProof: paymentInfo.isPaymentProof
             });
 
-            // Armazena no Redis se for comprovante
+            // Se for comprovante, inicia o fluxo de coleta de nome
             if (paymentInfo.isPaymentProof) {
                 const redisKey = `payment:${paymentInfo.timestamp}:${from}`;
                 await this.redisStore.set(redisKey, JSON.stringify(paymentInfo), 86400 * 30);
@@ -71,6 +78,12 @@ class AIServices {
                 await this.whatsappService.sendTextMessage(
                     from,
                     "✅ Comprovante recebido! Por favor, me informe seu nome completo para que eu possa encaminhar para análise."
+                );
+            } else {
+                // Se não for comprovante, responde diretamente
+                await this.whatsappService.sendTextMessage(
+                    from,
+                    "❌ A imagem enviada não parece ser um comprovante de pagamento válido. Por favor, envie um comprovante de transferência, PIX ou depósito."
                 );
             }
 
@@ -130,11 +143,11 @@ class AIServices {
     }
 
     /**
-     * Verifica se o texto indica um comprovante de pagamento
-     * @param {string} analysis - Texto da análise
-     * @returns {boolean} true se for comprovante
+     * Encontra as palavras-chave presentes no texto
+     * @param {string} text - Texto para buscar
+     * @returns {string[]} Lista de palavras-chave encontradas
      */
-    isPaymentProof(analysis) {
+    findMatchingKeywords(text) {
         const keywords = [
             'comprovante',
             'pagamento',
@@ -149,8 +162,17 @@ class AIServices {
             'pagador'
         ];
         
-        const lowerAnalysis = analysis.toLowerCase();
-        const hasKeywords = keywords.some(keyword => lowerAnalysis.includes(keyword.toLowerCase()));
+        const lowerText = text.toLowerCase();
+        return keywords.filter(keyword => lowerText.includes(keyword.toLowerCase()));
+    }
+
+    /**
+     * Verifica se o texto indica um comprovante de pagamento
+     * @param {string} analysis - Texto da análise
+     * @returns {boolean} true se for comprovante
+     */
+    isPaymentProof(analysis) {
+        const hasKeywords = this.findMatchingKeywords(analysis).length >= 2; // Pelo menos 2 palavras-chave
         
         // Verifica se tem valor monetário (R$)
         const hasAmount = /R\$\s*\d+(?:\.\d{3})*(?:,\d{2})?/.test(analysis);
