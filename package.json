@@ -1,16 +1,15 @@
 {
-  "name": "chatbot-whatsapp-integration",
-  "version": "1.0.0",
-  "description": "Integration of ChatGPT with WhatsApp for e-commerce.",
+  "name": "chatbot-ortopedic",
+  "version": "1.1.0",
+  "description": "Chatbot inteligente para atendimento de clientes de loja de calçados ortopédicos.",
   "main": "src/server.js",
   "scripts": {
     "start": "node --no-warnings src/server.js",
-    "build": "echo 'No build step required'",
     "dev": "nodemon src/server.js",
-    "test": "node src/test-audio.js"
+    "test": "node src/test-groq.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.5.0",
@@ -30,9 +29,25 @@
     "morgan": "^1.10.0",
     "openai": "^4.24.1",
     "redis": "^4.6.11",
-    "tesseract.js": "^5.1.1"
+    "sharp": "^0.33.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/seu-usuario/chatbot-ortopedic"
+  },
+  "keywords": [
+    "chatbot",
+    "whatsapp",
+    "openai",
+    "groq",
+    "ortopedic",
+    "ai",
+    "audio",
+    "image"
+  ],
+  "author": "MasterMind",
+  "license": "MIT"
 }

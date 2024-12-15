@@ -5,16 +5,24 @@ buildCommand = "npm install"
 [deploy]
 startCommand = "npm start"
 healthcheckPath = "/"
-healthcheckTimeout = 600
+healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 5
+restartPolicyMaxRetries = 3
 
 [service]
-name = "chatbot-whatsapp"
-internal_port = 1988
+name = "chatbot-ortopedic"
+internal_port = 8080
 auto_deploy = true
 
 [[services.ports]]
-port = 1988
+port = 8080
 handlers = ["http"]
 force_https = true
+
+[[services.environment]]
+key = "NODE_ENV"
+value = "production"
+
+[[services.environment]]
+key = "TZ"
+value = "America/Sao_Paulo"

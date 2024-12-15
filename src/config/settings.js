@@ -45,11 +45,11 @@ const WHATSAPP_CONFIG = {
     messageDelay: 1000, // delay entre mensagens em ms
     retryAttempts: 3,
     endpoints: {
-        text: '/v1/message/send-text',
-        image: '/v1/message/send-image',
-        document: '/v1/message/send-document',
-        audio: '/v1/message/send-audio',
-        status: '/v1/message/status'
+        text: 'message/send-text',
+        image: 'message/send-image',
+        document: 'message/send-document',
+        audio: 'message/send-audio',
+        status: 'message/status'
     },
     departments: {
         financial: {
