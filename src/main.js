@@ -63,13 +63,8 @@ class ChatbotController {
                         from: message.from
                     });
                     
-                    if (imageAnalysis.isPaymentProof) {
-                        // Não envia mais a análise como resposta
-                        return; // A resposta já foi enviada pelo processPaymentProof
-                    } else {
-                        response = imageAnalysis.analysis;
-                    }
-                    break;
+                    // Não retorna nenhuma resposta, pois o processPaymentProof já cuida disso
+                    return '';
 
                 case 'audio':
                     console.log('🎤 Processando áudio...', {

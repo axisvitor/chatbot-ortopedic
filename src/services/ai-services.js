@@ -129,9 +129,18 @@ class AIServices {
 
             // Envia análise detalhada para o setor financeiro
             if (process.env.FINANCIAL_DEPT_NUMBER) {
+                const formattedDate = new Date(paymentInfo.timestamp).toLocaleString('pt-BR');
+                const formattedPhone = this.formatPhoneNumber(from);
                 await this.whatsappService.sendTextMessage(
                     process.env.FINANCIAL_DEPT_NUMBER,
-                    `📋 Novo comprovante recebido:\n\nComprador: ${paymentInfo.buyerName}\nTelefone: ${from}\n\n${paymentInfo.analysis}`
+                    `📋 *Novo Comprovante de Pagamento*\n\n` +
+                    `📅 Data: ${formattedDate}\n` +
+                    `👤 Cliente: ${paymentInfo.buyerName}\n` +
+                    `📱 Telefone: ${formattedPhone}\n` +
+                    `💰 Valor: ${paymentInfo.amount || 'Não identificado'}\n` +
+                    `🏦 Banco: ${paymentInfo.bank || 'Não identificado'}\n` +
+                    `💳 Tipo: ${paymentInfo.paymentType || 'Não identificado'}\n\n` +
+                    `📝 *Análise do Comprovante:*\n${paymentInfo.analysis}`
                 );
             }
 
@@ -187,14 +196,13 @@ class AIServices {
     /**
      * Extrai o valor do pagamento do texto da análise
      * @param {string} analysis - Texto da análise
-     * @returns {number|null} Valor do pagamento ou null se não encontrado
+     * @returns {string|null} Valor do pagamento ou null se não encontrado
      */
     extractAmount(analysis) {
         try {
             const matches = analysis.match(/R\$\s*(\d+(?:\.\d{3})*(?:,\d{2})?)/);
             if (matches) {
-                const amount = matches[1].replace(/\./g, '').replace(',', '.');
-                return parseFloat(amount);
+                return matches[0].trim();
             }
             return null;
         } catch (error) {
@@ -209,16 +217,18 @@ class AIServices {
      * @returns {string|null} Nome do banco ou null se não encontrado
      */
     extractBank(analysis) {
-        const banks = [
-            'Nubank', 'Itaú', 'Bradesco', 'Santander', 'Banco do Brasil',
-            'Caixa', 'Inter', 'C6', 'PicPay', 'Mercado Pago'
-        ];
-
         try {
-            const lowerAnalysis = analysis.toLowerCase();
-            for (const bank of banks) {
-                if (lowerAnalysis.includes(bank.toLowerCase())) {
-                    return bank;
+            const bankPatterns = [
+                /(?:banco|bank)\s+([^.,\n]+)/i,
+                /(?:origem|destino):\s*([^.,\n]+)/i,
+                /banrisul[^.,\n]*/i,
+                /banco do estado[^.,\n]*/i
+            ];
+
+            for (const pattern of bankPatterns) {
+                const match = analysis.match(pattern);
+                if (match) {
+                    return match[0].trim();
                 }
             }
             return null;
@@ -234,26 +244,50 @@ class AIServices {
      * @returns {string|null} Tipo de pagamento ou null se não encontrado
      */
     extractPaymentType(analysis) {
-        const types = {
-            'pix': ['pix', 'transferência pix', 'pagamento pix'],
-            'ted': ['ted', 'transferência ted', 'transferência eletrônica'],
-            'doc': ['doc', 'transferência doc'],
-            'boleto': ['boleto', 'pagamento de boleto'],
-            'débito': ['débito', 'cartão de débito'],
-            'crédito': ['crédito', 'cartão de crédito']
-        };
-
         try {
-            const lowerAnalysis = analysis.toLowerCase();
-            for (const [type, keywords] of Object.entries(types)) {
-                if (keywords.some(keyword => lowerAnalysis.includes(keyword))) {
-                    return type;
+            const typePatterns = [
+                /\b(pix)\b/i,
+                /\b(ted)\b/i,
+                /\b(doc)\b/i,
+                /\b(transferência)\b/i,
+                /tipo de transação:\s*([^.,\n]+)/i
+            ];
+
+            for (const pattern of typePatterns) {
+                const match = analysis.match(pattern);
+                if (match) {
+                    return match[1] ? match[1].toUpperCase() : match[0].toUpperCase();
                 }
             }
             return null;
         } catch (error) {
             console.error('[AI] Erro ao extrair tipo de pagamento:', error);
             return null;
+        }
+    }
+
+    /**
+     * Formata um número de telefone para exibição
+     * @param {string} phone - Número do telefone
+     * @returns {string} Número formatado
+     */
+    formatPhoneNumber(phone) {
+        try {
+            // Remove tudo que não for número
+            const numbers = phone.replace(/\D/g, '');
+            
+            // Se começar com 55, formata como brasileiro
+            if (numbers.startsWith('55')) {
+                const ddd = numbers.slice(2, 4);
+                const part1 = numbers.slice(4, 9);
+                const part2 = numbers.slice(9, 13);
+                return `(${ddd}) ${part1}-${part2}`;
+            }
+            
+            // Se não, retorna como está
+            return phone;
+        } catch (error) {
+            return phone;
         }
     }
 
