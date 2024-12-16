@@ -10,6 +10,7 @@ const { GroqServices } = require('./services/groq-services');
 const { WebhookService } = require('./services/webhook-service');
 const { WhatsAppService } = require('./services/whatsapp-service');
 const { AIServices } = require('./services/ai-services');
+const { RedisStore } = require('./store/redis-store');
 const AudioService = require('./services/audio-service');
 const ImageService = require('./services/image-service');
 const businessHours = require('./services/business-hours');
@@ -26,6 +27,7 @@ const groqServices = new GroqServices();
 const webhookService = new WebhookService();
 const whatsappService = new WhatsAppService();
 const aiServices = new AIServices(groqServices);
+const redisStore = new RedisStore();
 
 // Aguarda o cliente do WhatsApp estar pronto
 let audioService;
@@ -130,6 +132,55 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     }
 
     res.sendStatus(200);
+});
+
+// Webhook do 17track
+app.post('/tracking/webhook', async (req, res) => {
+    try {
+        console.log('[17Track] Webhook recebido:', JSON.stringify(req.body, null, 2));
+        
+        // Verifica se temos os dados necessários
+        if (!req.body || !req.body.data) {
+            return res.status(400).json({ error: 'Dados inválidos' });
+        }
+
+        const trackingData = req.body.data;
+        
+        // Processa cada item de rastreamento
+        for (const item of trackingData) {
+            try {
+                if (item.number && item.track_info) {
+                    const trackingInfo = {
+                        tracking_number: item.number,
+                        status: item.track_info.latest_status,
+                        details: item.track_info.latest_event,
+                        updated_at: item.track_info.latest_time
+                    };
+
+                    // Recupera o número do WhatsApp associado a este rastreio
+                    const userPhone = await redisStore.get(`tracking:${item.number}`);
+                    
+                    if (userPhone) {
+                        await whatsappService.sendMessage(
+                            userPhone,
+                            `🚚 *Atualização do Rastreamento*\n\n` +
+                            `📦 Código: ${trackingInfo.tracking_number}\n` +
+                            `📍 Status: ${trackingInfo.status}\n` +
+                            `📅 Última Atualização: ${new Date(trackingInfo.updated_at).toLocaleString('pt-BR')}\n\n` +
+                            `✍️ Detalhes: ${trackingInfo.details || 'Sem detalhes disponíveis'}`
+                        );
+                    }
+                }
+            } catch (itemError) {
+                console.error('[17Track] Erro ao processar item:', itemError);
+            }
+        }
+
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error('[17Track] Erro no webhook:', error);
+        res.status(500).json({ error: 'Erro interno do servidor' });
+    }
 });
 
 // Inicia o servidor
