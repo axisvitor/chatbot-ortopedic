@@ -109,34 +109,57 @@ class TrackingService {
                 throw new Error('Número de rastreamento é obrigatório');
             }
 
+            // CPF é apenas para controle interno
             if (!cpf) {
                 throw new Error('CPF é obrigatório para consulta de rastreamento');
             }
 
+            // Remove espaços e caracteres especiais do número de rastreamento
+            trackingNumber = trackingNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
+            console.log('[Tracking] Iniciando consulta:', {
+                trackingNumber
+            });
+
             // 1. Registrar o número de rastreamento
             const registrationResult = await this.registerTracking(trackingNumber);
             
+            console.log('[Tracking] Resultado do registro:', {
+                code: registrationResult.code,
+                message: registrationResult.message,
+                hasData: !!registrationResult.data,
+                accepted: registrationResult.data?.accepted?.length
+            });
+
             if (registrationResult.code !== 0) {
                 throw new Error(`Erro ao registrar rastreamento: ${registrationResult.message || 'Erro desconhecido'}`);
             }
 
             // 2. Se o registro foi bem sucedido e retornou um carrier
-            if (registrationResult.data && registrationResult.data.accepted && registrationResult.data.accepted.length > 0) {
+            if (registrationResult.data?.accepted?.[0]) {
                 const carrier = registrationResult.data.accepted[0].carrier;
                 
+                console.log('[Tracking] Carrier identificado:', carrier);
+
                 // 3. Consultar o status usando o carrier retornado
                 const statusResult = await this.getTrackingStatus(trackingNumber, carrier);
                 
+                console.log('[Tracking] Resultado da consulta:', {
+                    code: statusResult.code,
+                    message: statusResult.message,
+                    hasData: !!statusResult.data
+                });
+
                 if (statusResult.code !== 0) {
                     throw new Error(`Erro ao consultar status: ${statusResult.message || 'Erro desconhecido'}`);
                 }
 
                 return this._formatTrackingResponse(statusResult);
             } else {
-                throw new Error('Número de rastreamento inválido ou não reconhecido');
+                throw new Error('Número de rastreamento inválido ou não reconhecido. Por favor, verifique se o número está correto.');
             }
         } catch (error) {
-            console.error('Erro ao processar rastreamento:', error);
+            console.error('[Tracking] Erro ao processar rastreamento:', error);
             throw error;
         }
     }
