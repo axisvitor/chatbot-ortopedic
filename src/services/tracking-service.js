@@ -60,6 +60,25 @@ class TrackingService {
         return await this._makeRequest(options, data);
     }
 
+    async getTrackingStatus(trackingNumber) {
+        const data = JSON.stringify({
+            "tracking_number": trackingNumber
+        });
+
+        const options = {
+            hostname: this.config.endpoint,
+            path: this.config.paths.status,
+            method: 'POST',
+            headers: {
+                '17token': this.config.apiKey,
+                'Content-Type': 'application/json',
+                'Content-Length': data.length
+            }
+        };
+
+        return await this._makeRequest(options, data);
+    }
+
     async _makeRequest(options, data) {
         return new Promise((resolve, reject) => {
             const req = https.request(options, (res) => {
@@ -121,34 +140,8 @@ class TrackingService {
                 trackingNumber
             });
 
-            // 1. Registrar o número de rastreamento
-            const registrationResult = await this.registerTracking(trackingNumber);
-            
-            // Log detalhado do resultado
-            console.log('[Tracking] Resultado do registro:', JSON.stringify(registrationResult, null, 2));
-
-            if (registrationResult.code !== 0) {
-                throw new Error(`Erro ao registrar rastreamento: ${registrationResult.message || 'Erro desconhecido'}`);
-            }
-
-            // Se o código foi rejeitado, vamos ver o motivo
-            if (registrationResult.data?.rejected?.length > 0) {
-                const rejection = registrationResult.data.rejected[0];
-                console.log('[Tracking] Detalhes da rejeição:', JSON.stringify(rejection, null, 2));
-                
-                // Mensagem amigável baseada no erro
-                let errorMessage = 'Código de rastreamento inválido ou não reconhecido.';
-                if (rejection.error?.includes('carrier cannot be detected')) {
-                    errorMessage = 'Não foi possível identificar a transportadora para este código. Por favor, verifique se o número está correto.';
-                }
-                throw new Error(errorMessage);
-            }
-
-            // Aguarda um momento para o sistema processar o registro
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            // 2. Consultar o status usando o número original
-            const statusResult = await this.getTrackingStatus(trackingNumber, '');
+            // Consultar o status diretamente
+            const statusResult = await this.getTrackingStatus(trackingNumber);
             
             console.log('[Tracking] Resultado da consulta:', JSON.stringify(statusResult, null, 2));
 
@@ -163,18 +156,20 @@ class TrackingService {
                 throw new Error(`Erro na consulta: ${error.message || 'Erro desconhecido'}`);
             }
 
-            // Se não tem dados
-            if (!statusResult.data || !Array.isArray(statusResult.data)) {
+            // Verifica se tem dados aceitos
+            if (!statusResult.data?.accepted?.length) {
                 return 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
             }
 
-            // Se tem dados mas não tem eventos
-            if (!statusResult.data[0]?.track_info?.length) {
+            const trackInfo = statusResult.data.accepted[0];
+
+            // Se não tem eventos
+            if (!trackInfo.latest_event_info) {
                 return `📦 *Status do Rastreamento*\n\n*Código:* ${trackingNumber}\n\n_Ainda não há eventos de movimentação registrados._`;
             }
 
             // Formata a resposta com os eventos
-            return this._formatTrackingResponse(statusResult.data[0]);
+            return this._formatTrackingResponse(trackInfo);
             
         } catch (error) {
             console.error('[Tracking] Erro ao processar rastreamento:', error);
@@ -182,27 +177,46 @@ class TrackingService {
         }
     }
 
-    _formatTrackingResponse(trackingInfo) {
+    _formatTrackingResponse(trackInfo) {
         try {
-            const events = trackingInfo.track_info || [];
-            
             // Formata a resposta com os eventos disponíveis
             let response = `📦 *Status do Rastreamento*\n\n`;
-            response += `*Código:* ${trackingInfo.tracking_number}\n`;
-            if (trackingInfo.carrier_name) {
-                response += `*Transportadora:* ${trackingInfo.carrier_name}\n`;
+            response += `*Código:* ${trackInfo.number}\n`;
+            
+            // Adiciona informações do status atual
+            if (trackInfo.package_status) {
+                let status = '';
+                switch(trackInfo.package_status) {
+                    case 'InTransit':
+                        status = '📫 Em Trânsito';
+                        break;
+                    case 'Delivered':
+                        status = '✅ Entregue';
+                        break;
+                    case 'Pickup':
+                        status = '🚚 Coletado';
+                        break;
+                    default:
+                        status = trackInfo.package_status;
+                }
+                response += `*Status:* ${status}\n`;
             }
-            response += '\n*Movimentações:*\n';
 
-            events.forEach((event) => {
-                const date = event.date || 'Data não informada';
-                const status = event.status_description || event.status || 'Status não informado';
-                const location = event.location || '';
+            // Adiciona última atualização
+            if (trackInfo.latest_event_time) {
+                const date = new Date(trackInfo.latest_event_time);
+                response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
+            }
 
-                response += `\n📍 ${date}\n`;
-                response += `${status}\n`;
-                if (location) response += `📌 ${location}\n`;
-            });
+            // Adiciona última informação
+            if (trackInfo.latest_event_info) {
+                response += `*Situação:* ${trackInfo.latest_event_info}\n`;
+            }
+
+            // Adiciona tempo em trânsito
+            if (trackInfo.days_of_transit) {
+                response += `\n_Tempo em trânsito: ${trackInfo.days_of_transit} dias_\n`;
+            }
 
             return response;
 
