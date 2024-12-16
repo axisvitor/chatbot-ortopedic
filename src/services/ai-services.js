@@ -313,20 +313,7 @@ class AIServices {
      * @returns {Promise<string>} Resposta do processamento
      */
     async processMessage(text, { from, messageId, businessHours = true } = {}) {
-        // Aguarda o WhatsApp estar pronto
-        if (!this.whatsappReady) {
-            console.log('[AI] Aguardando WhatsApp inicializar...');
-            await new Promise(resolve => {
-                const checkReady = () => {
-                    if (this.whatsappReady) {
-                        resolve();
-                    } else {
-                        setTimeout(checkReady, 100);
-                    }
-                };
-                checkReady();
-            });
-        }
+        if (!text) return null;
 
         try {
             console.log('[AI] Processando mensagem:', {
@@ -335,6 +322,17 @@ class AIServices {
                 length: text?.length,
                 preview: text
             });
+
+            // Verifica se é a primeira mensagem do usuário
+            const firstMessageKey = `first_message_${from}`;
+            const isFirstMessage = !(await this.redisStore.get(firstMessageKey));
+            
+            if (isFirstMessage) {
+                // Marca que não é mais primeira mensagem
+                await this.redisStore.set(firstMessageKey, 'true');
+                // Envia mensagem de boas-vindas
+                await this.whatsappService.sendText(from, 'Olá! 👋 Sou o assistente virtual da Loja Ortopedic. Em que posso ajudar você hoje?');
+            }
 
             // Verifica se é um código de rastreio (formato típico dos Correios)
             const trackingRegex = /^[A-Z]{2}[0-9]{9}[A-Z]{2}$/;
