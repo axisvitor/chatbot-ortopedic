@@ -405,12 +405,13 @@ class AIServices {
             // Cria um thread para esta conversa
             const thread = await this.openai.createThread();
 
-            // Adiciona a mensagem ao thread com contexto adicional
+            // Adiciona o contexto como uma mensagem do usuário
             await this.openai.addMessage(thread.id, {
-                role: 'system',
-                content: 'Quando o cliente perguntar sobre status de pedido ou rastreamento, peça apenas o número do pedido. Não mencione CPF neste momento.'
+                role: 'user',
+                content: 'Instruções importantes: Quando o cliente perguntar sobre status de pedido ou rastreamento, peça apenas o número do pedido. Não mencione CPF neste momento.'
             });
 
+            // Adiciona a mensagem do usuário
             await this.openai.addMessage(thread.id, {
                 role: 'user',
                 content: text
