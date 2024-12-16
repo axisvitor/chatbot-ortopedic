@@ -11,11 +11,22 @@ class AIServices {
             throw new Error('GroqServices é obrigatório');
         }
         this.groqServices = groqServices;
-        this.whatsappService = new WhatsAppService();
         this.whatsappImageService = new WhatsAppImageService();
         this.redisStore = new RedisStore();
         this.openai = new OpenAIService();
         this.trackingService = new TrackingService();
+        this.initWhatsApp();
+    }
+
+    async initWhatsApp() {
+        try {
+            this.whatsappService = new WhatsAppService();
+            await this.whatsappService.getClient();
+            console.log('[AI] WhatsApp inicializado com sucesso');
+        } catch (error) {
+            console.error('[AI] Erro ao inicializar WhatsApp:', error);
+            throw error;
+        }
     }
 
     /**

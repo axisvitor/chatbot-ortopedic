@@ -30,10 +30,14 @@ const aiServices = new AIServices(groqServices);
 // Aguarda o cliente do WhatsApp estar pronto
 let audioService;
 let imageService;
-whatsappService.getClient().then(client => {
+
+Promise.all([
+    whatsappService.getClient(),
+    aiServices.initWhatsApp()
+]).then(([client]) => {
     audioService = new AudioService(groqServices, client);
     imageService = new ImageService(groqServices, client);
-    console.log('✅ AudioService e ImageService inicializados com sucesso');
+    console.log('✅ Serviços inicializados com sucesso');
 }).catch(error => {
     console.error('❌ Erro ao inicializar serviços:', error);
 });
