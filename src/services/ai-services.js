@@ -15,6 +15,7 @@ class AIServices {
         this.redisStore = new RedisStore();
         this.openai = new OpenAIService();
         this.trackingService = new TrackingService();
+        this.whatsappReady = false;  
         this.initWhatsApp();
     }
 
@@ -22,6 +23,7 @@ class AIServices {
         try {
             this.whatsappService = new WhatsAppService();
             await this.whatsappService.getClient();
+            this.whatsappReady = true;  
             console.log('[AI] WhatsApp inicializado com sucesso');
         } catch (error) {
             console.error('[AI] Erro ao inicializar WhatsApp:', error);
@@ -311,6 +313,21 @@ class AIServices {
      * @returns {Promise<string>} Resposta do processamento
      */
     async processMessage(text, { from, messageId, businessHours = true } = {}) {
+        // Aguarda o WhatsApp estar pronto
+        if (!this.whatsappReady) {
+            console.log('[AI] Aguardando WhatsApp inicializar...');
+            await new Promise(resolve => {
+                const checkReady = () => {
+                    if (this.whatsappReady) {
+                        resolve();
+                    } else {
+                        setTimeout(checkReady, 100);
+                    }
+                };
+                checkReady();
+            });
+        }
+
         try {
             console.log('[AI] Processando mensagem:', {
                 from,
