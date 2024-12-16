@@ -342,7 +342,7 @@ class AIServices {
                 console.log('[AI] Código de rastreio detectado:', text);
                 
                 // Envia mensagem inicial
-                await this.whatsappService.sendMessage(from, 'Parece que você forneceu um número de rastreamento. Vou verificar o status do seu pedido agora mesmo. Um momento, por favor! \n\n🔍✨');
+                await this.whatsappService.sendText(from, 'Parece que você forneceu um número de rastreamento. Vou verificar o status do seu pedido agora mesmo. Um momento, por favor! \n\n🔍✨');
                 
                 try {
                     // Registra e consulta o rastreamento
@@ -350,52 +350,39 @@ class AIServices {
                     
                     // Envia o resultado do rastreamento
                     if (trackingInfo) {
-                        await this.whatsappService.sendMessage(from, trackingInfo);
+                        await this.whatsappService.sendText(from, trackingInfo);
                     } else {
-                        await this.whatsappService.sendMessage(from, 'Desculpe, não foi possível obter informações sobre este rastreamento no momento. Por favor, tente novamente mais tarde.');
+                        await this.whatsappService.sendText(from, 'Desculpe, não consegui encontrar informações sobre este código de rastreamento. Por favor, verifique se o código está correto e tente novamente.');
                     }
+                    return;
                 } catch (error) {
                     console.error('[AI] Erro ao processar rastreamento:', error);
-                    await this.whatsappService.sendMessage(from, 'Desculpe, ocorreu um erro ao consultar o rastreamento. Por favor, tente novamente mais tarde.');
+                    await this.whatsappService.sendText(from, 'Desculpe, ocorreu um erro ao consultar o rastreamento. Por favor, tente novamente em alguns instantes.');
+                    return;
                 }
-                return;
             }
 
             // Se for uma solicitação de atendimento financeiro e estiver fora do horário comercial
-            if (!businessHours && text.toLowerCase().includes('financeiro')) {
-                return 'Desculpe, o atendimento interno só está disponível em horário comercial (Segunda a Sexta, das 8h às 18h). Por favor, retorne durante nosso horário de atendimento. Posso ajudar com outras informações?';
+            if (await this.isFinancialIssue(text) && !businessHours) {
+                const response = 'Nosso atendimento financeiro funciona de Segunda a Sexta, das 8h às 18h. Por favor, retorne durante nosso horário comercial para que possamos te ajudar da melhor forma possível! 🕒';
+                await this.whatsappService.sendText(from, response);
+                return response;
             }
 
-            // Processa a mensagem normalmente para outros casos
-            let response;
-
-            if (!text?.trim()) {
-                return "Por favor, reformule sua mensagem para que eu possa entender melhor como ajudar.";
+            // Verifica se é uma solicitação de atendimento humano
+            if (await this.needsHumanSupport(text)) {
+                const response = 'Entendo que você deseja falar com um atendente humano. Por favor, aguarde um momento enquanto direciono seu atendimento. 👨‍💼';
+                await this.whatsappService.sendText(from, response);
+                return response;
             }
 
-            console.log('[AI] Processando mensagem:', {
-                from,
-                messageId,
-                length: text?.length,
-                preview: text.substring(0, 100) + '...'
-            });
-
-            // Verifica se precisa de atendimento humano
-            const needsHuman = await this.needsHumanSupport(text);
-            if (needsHuman) {
-                console.log('[AI] Encaminhando para atendimento humano');
-                return businessHours.getHumanSupportMessage();
+            // Se não houver thread, cria uma nova
+            let thread = await this.redisStore.getThread(from);
+            
+            if (!thread) {
+                thread = await this.openai.createThread();
+                await this.redisStore.setThread(from, thread);
             }
-
-            // Verifica se é questão financeira
-            const isFinancial = await this.isFinancialIssue(text);
-            if (isFinancial) {
-                console.log('[AI] Encaminhando para financeiro');
-                return businessHours.forwardToFinancial(text, from);
-            }
-
-            // Cria um thread
-            const thread = await this.openai.createThread();
 
             // Adiciona a mensagem ao thread
             await this.openai.addMessage(thread.id, {
@@ -407,15 +394,21 @@ class AIServices {
             const run = await this.openai.runAssistant(thread.id);
 
             // Aguarda a conclusão
-            response = await this.openai.waitForRun(thread.id, run.id);
+            const response = await this.openai.waitForRun(thread.id, run.id);
 
             console.log('[AI] Resposta gerada:', {
                 length: response?.length,
                 preview: response?.substring(0, 100)
             });
 
-            return response || "Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.";
+            // Envia a resposta
+            if (response) {
+                await this.whatsappService.sendText(from, response);
+            } else {
+                await this.whatsappService.sendText(from, 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.');
+            }
 
+            return response;
         } catch (error) {
             console.error('[AI] Erro ao processar mensagem:', error);
             return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
