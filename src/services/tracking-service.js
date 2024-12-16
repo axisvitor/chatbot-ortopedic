@@ -15,10 +15,9 @@ class TrackingService {
             hasApiKey: !!this.config.apiKey
         });
 
-        const data = JSON.stringify([{
-            number: trackingNumber,
-            carrier: 'auto'
-        }]);
+        const data = JSON.stringify({
+            "tracking_number": trackingNumber
+        });
 
         const options = {
             hostname: this.config.endpoint,
@@ -34,17 +33,18 @@ class TrackingService {
         console.log('[17Track] Configuração da requisição:', {
             endpoint: options.hostname,
             path: options.path,
-            method: options.method
+            method: options.method,
+            requestData: JSON.parse(data)
         });
 
         return await this._makeRequest(options, data);
     }
 
     async getTrackingStatus(trackingNumber, carrier) {
-        const data = JSON.stringify([{
-            number: trackingNumber,
-            carrier: carrier || 'auto'
-        }]);
+        const data = JSON.stringify({
+            "tracking_number": trackingNumber,
+            "carrier_code": carrier || undefined
+        });
 
         const options = {
             hostname: this.config.endpoint,
@@ -124,27 +124,57 @@ class TrackingService {
             // 1. Registrar o número de rastreamento
             const registrationResult = await this.registerTracking(trackingNumber);
             
-            console.log('[Tracking] Resultado do registro:', registrationResult);
+            // Log detalhado do resultado
+            console.log('[Tracking] Resultado do registro:', JSON.stringify(registrationResult, null, 2));
 
             if (registrationResult.code !== 0) {
                 throw new Error(`Erro ao registrar rastreamento: ${registrationResult.message || 'Erro desconhecido'}`);
             }
 
-            // Tenta consultar o status mesmo sem carrier identificado
-            const statusResult = await this.getTrackingStatus(trackingNumber, 'auto');
+            // Se o código foi rejeitado, vamos ver o motivo
+            if (registrationResult.data?.rejected?.length > 0) {
+                const rejection = registrationResult.data.rejected[0];
+                console.log('[Tracking] Detalhes da rejeição:', JSON.stringify(rejection, null, 2));
+                
+                // Mensagem amigável baseada no erro
+                let errorMessage = 'Código de rastreamento inválido ou não reconhecido.';
+                if (rejection.error?.includes('carrier cannot be detected')) {
+                    errorMessage = 'Não foi possível identificar a transportadora para este código. Por favor, verifique se o número está correto.';
+                }
+                throw new Error(errorMessage);
+            }
+
+            // Aguarda um momento para o sistema processar o registro
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // 2. Consultar o status usando o número original
+            const statusResult = await this.getTrackingStatus(trackingNumber, '');
             
-            console.log('[Tracking] Resultado da consulta:', statusResult);
+            console.log('[Tracking] Resultado da consulta:', JSON.stringify(statusResult, null, 2));
 
             if (statusResult.code !== 0) {
                 throw new Error(`Erro ao consultar status: ${statusResult.message || 'Erro desconhecido'}`);
             }
 
-            if (!statusResult.data || !Array.isArray(statusResult.data)) {
-                throw new Error('Formato de resposta inválido do serviço de rastreamento');
+            // Se tem erros na resposta
+            if (statusResult.data?.errors?.length > 0) {
+                const error = statusResult.data.errors[0];
+                console.log('[Tracking] Erro na consulta:', JSON.stringify(error, null, 2));
+                throw new Error(`Erro na consulta: ${error.message || 'Erro desconhecido'}`);
             }
 
-            // Formata a resposta mesmo se não houver eventos
-            return this._formatTrackingResponse(statusResult);
+            // Se não tem dados
+            if (!statusResult.data || !Array.isArray(statusResult.data)) {
+                return 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
+            }
+
+            // Se tem dados mas não tem eventos
+            if (!statusResult.data[0]?.track_info?.length) {
+                return `📦 *Status do Rastreamento*\n\n*Código:* ${trackingNumber}\n\n_Ainda não há eventos de movimentação registrados._`;
+            }
+
+            // Formata a resposta com os eventos
+            return this._formatTrackingResponse(statusResult.data[0]);
             
         } catch (error) {
             console.error('[Tracking] Erro ao processar rastreamento:', error);
@@ -152,30 +182,26 @@ class TrackingService {
         }
     }
 
-    _formatTrackingResponse(statusResult) {
+    _formatTrackingResponse(trackingInfo) {
         try {
-            if (!statusResult.data || !Array.isArray(statusResult.data)) {
-                return 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
-            }
-
-            // Se não houver eventos ainda
-            if (statusResult.data.length === 0 || !statusResult.data[0].events || statusResult.data[0].events.length === 0) {
-                return 'O código de rastreamento foi registrado, mas ainda não há eventos de movimentação. Por favor, aguarde e tente novamente mais tarde.';
-            }
-
-            const tracking = statusResult.data[0];
-            const events = tracking.events || [];
+            const events = trackingInfo.track_info || [];
             
             // Formata a resposta com os eventos disponíveis
             let response = `📦 *Status do Rastreamento*\n\n`;
-            response += `*Código:* ${tracking.number}\n`;
-            response += `*Transportadora:* ${tracking.carrier || 'Não identificada'}\n\n`;
-            
-            response += '*Movimentações:*\n';
-            events.forEach((event, index) => {
-                response += `\n📍 ${event.date || 'Data não informada'}\n`;
-                response += `${event.status || 'Status não informado'}\n`;
-                if (event.location) response += `📌 ${event.location}\n`;
+            response += `*Código:* ${trackingInfo.tracking_number}\n`;
+            if (trackingInfo.carrier_name) {
+                response += `*Transportadora:* ${trackingInfo.carrier_name}\n`;
+            }
+            response += '\n*Movimentações:*\n';
+
+            events.forEach((event) => {
+                const date = event.date || 'Data não informada';
+                const status = event.status_description || event.status || 'Status não informado';
+                const location = event.location || '';
+
+                response += `\n📍 ${date}\n`;
+                response += `${status}\n`;
+                if (location) response += `📌 ${location}\n`;
             });
 
             return response;
