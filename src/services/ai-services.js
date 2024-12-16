@@ -339,11 +339,14 @@ class AIServices {
             if (trackingRegex.test(text)) {
                 console.log('[AI] Código de rastreio detectado:', text);
                 
-                // Envia mensagem solicitando CPF
-                await this.whatsappService.sendText(from, 'Para consultar o status do seu pedido, preciso que você me informe seu CPF (apenas números). Por favor, digite seu CPF:');
-                
-                // Armazena o código de rastreio para usar quando receber o CPF
+                // Armazena o código de rastreio
                 await this.redisStore.set(`tracking_${from}`, text);
+                
+                // Solicita o CPF
+                await this.whatsappService.sendText(from, 'Ótimo! Agora, para confirmar sua identidade e garantir a segurança das informações, preciso que você me informe seu CPF (apenas números). Por favor, digite seu CPF:');
+                
+                // Marca que estamos esperando o CPF
+                await this.redisStore.set(`waiting_cpf_${from}`, 'true');
                 
                 return;
             }
@@ -351,30 +354,36 @@ class AIServices {
             // Verifica se é um CPF (apenas números, 11 dígitos)
             const cpfRegex = /^\d{11}$/;
             if (cpfRegex.test(text)) {
-                // Recupera o código de rastreio armazenado
-                const trackingNumber = await this.redisStore.get(`tracking_${from}`);
+                // Verifica se estamos esperando um CPF
+                const isWaitingCpf = await this.redisStore.get(`waiting_cpf_${from}`);
                 
-                if (trackingNumber) {
-                    await this.whatsappService.sendText(from, 'Obrigado! Vou verificar o status do seu pedido agora mesmo. Um momento, por favor! \n\n🔍✨');
+                if (isWaitingCpf) {
+                    // Recupera o código de rastreio armazenado
+                    const trackingNumber = await this.redisStore.get(`tracking_${from}`);
                     
-                    try {
-                        // Registra e consulta o rastreamento com o CPF
-                        const trackingInfo = await this.trackingService.processTrackingRequest(trackingNumber, text);
+                    if (trackingNumber) {
+                        await this.whatsappService.sendText(from, 'Obrigado! Vou verificar o status do seu pedido agora mesmo. Um momento, por favor! \n\n🔍✨');
                         
-                        // Limpa o código de rastreio armazenado
-                        await this.redisStore.del(`tracking_${from}`);
-                        
-                        // Envia o resultado do rastreamento
-                        if (trackingInfo) {
-                            await this.whatsappService.sendText(from, trackingInfo);
-                        } else {
-                            await this.whatsappService.sendText(from, 'Desculpe, não consegui encontrar informações sobre este código de rastreamento. Por favor, verifique se o código está correto.');
+                        try {
+                            // Registra e consulta o rastreamento com o CPF
+                            const trackingInfo = await this.trackingService.processTrackingRequest(trackingNumber, text);
+                            
+                            // Limpa as chaves do Redis
+                            await this.redisStore.del(`tracking_${from}`);
+                            await this.redisStore.del(`waiting_cpf_${from}`);
+                            
+                            // Envia o resultado do rastreamento
+                            if (trackingInfo) {
+                                await this.whatsappService.sendText(from, trackingInfo);
+                            } else {
+                                await this.whatsappService.sendText(from, 'Desculpe, não consegui encontrar informações sobre este código de rastreamento. Por favor, verifique se o código está correto.');
+                            }
+                            return;
+                        } catch (error) {
+                            console.error('[AI] Erro ao processar rastreamento:', error);
+                            await this.whatsappService.sendText(from, 'Desculpe, ocorreu um erro ao consultar o rastreamento. Por favor, tente novamente mais tarde.');
+                            return;
                         }
-                        return;
-                    } catch (error) {
-                        console.error('[AI] Erro ao processar rastreamento:', error);
-                        await this.whatsappService.sendText(from, 'Desculpe, ocorreu um erro ao consultar o rastreamento. Por favor, tente novamente mais tarde.');
-                        return;
                     }
                 }
             }
@@ -396,7 +405,12 @@ class AIServices {
             // Cria um thread para esta conversa
             const thread = await this.openai.createThread();
 
-            // Adiciona a mensagem ao thread
+            // Adiciona a mensagem ao thread com contexto adicional
+            await this.openai.addMessage(thread.id, {
+                role: 'system',
+                content: 'Quando o cliente perguntar sobre status de pedido ou rastreamento, peça apenas o número do pedido. Não mencione CPF neste momento.'
+            });
+
             await this.openai.addMessage(thread.id, {
                 role: 'user',
                 content: text
@@ -406,7 +420,12 @@ class AIServices {
             const run = await this.openai.runAssistant(thread.id);
 
             // Aguarda a conclusão
-            const response = await this.openai.waitForRun(thread.id, run.id);
+            let response = await this.openai.waitForRun(thread.id, run.id);
+
+            // Remove saudação duplicada se for primeira mensagem
+            if (isFirstMessage && response) {
+                response = response.replace(/^(olá!?|oi!?|hey!?)\s*👋?\s*/i, '');
+            }
 
             console.log('[AI] Resposta gerada:', {
                 length: response?.length,
