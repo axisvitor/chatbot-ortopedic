@@ -124,40 +124,28 @@ class TrackingService {
             // 1. Registrar o número de rastreamento
             const registrationResult = await this.registerTracking(trackingNumber);
             
-            console.log('[Tracking] Resultado do registro:', {
-                code: registrationResult.code,
-                message: registrationResult.message,
-                hasData: !!registrationResult.data,
-                accepted: registrationResult.data?.accepted?.length
-            });
+            console.log('[Tracking] Resultado do registro:', registrationResult);
 
             if (registrationResult.code !== 0) {
                 throw new Error(`Erro ao registrar rastreamento: ${registrationResult.message || 'Erro desconhecido'}`);
             }
 
-            // 2. Se o registro foi bem sucedido e retornou um carrier
-            if (registrationResult.data?.accepted?.[0]) {
-                const carrier = registrationResult.data.accepted[0].carrier;
-                
-                console.log('[Tracking] Carrier identificado:', carrier);
+            // Tenta consultar o status mesmo sem carrier identificado
+            const statusResult = await this.getTrackingStatus(trackingNumber, 'auto');
+            
+            console.log('[Tracking] Resultado da consulta:', statusResult);
 
-                // 3. Consultar o status usando o carrier retornado
-                const statusResult = await this.getTrackingStatus(trackingNumber, carrier);
-                
-                console.log('[Tracking] Resultado da consulta:', {
-                    code: statusResult.code,
-                    message: statusResult.message,
-                    hasData: !!statusResult.data
-                });
-
-                if (statusResult.code !== 0) {
-                    throw new Error(`Erro ao consultar status: ${statusResult.message || 'Erro desconhecido'}`);
-                }
-
-                return this._formatTrackingResponse(statusResult);
-            } else {
-                throw new Error('Número de rastreamento inválido ou não reconhecido. Por favor, verifique se o número está correto.');
+            if (statusResult.code !== 0) {
+                throw new Error(`Erro ao consultar status: ${statusResult.message || 'Erro desconhecido'}`);
             }
+
+            if (!statusResult.data || !Array.isArray(statusResult.data)) {
+                throw new Error('Formato de resposta inválido do serviço de rastreamento');
+            }
+
+            // Formata a resposta mesmo se não houver eventos
+            return this._formatTrackingResponse(statusResult);
+            
         } catch (error) {
             console.error('[Tracking] Erro ao processar rastreamento:', error);
             throw error;
@@ -166,51 +154,35 @@ class TrackingService {
 
     _formatTrackingResponse(statusResult) {
         try {
-            if (!statusResult.data || !statusResult.data.accepted || statusResult.data.accepted.length === 0) {
-                return 'Não foi possível encontrar informações para este rastreamento.';
+            if (!statusResult.data || !Array.isArray(statusResult.data)) {
+                return 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
             }
 
-            const tracking = statusResult.data.accepted[0];
+            // Se não houver eventos ainda
+            if (statusResult.data.length === 0 || !statusResult.data[0].events || statusResult.data[0].events.length === 0) {
+                return 'O código de rastreamento foi registrado, mas ainda não há eventos de movimentação. Por favor, aguarde e tente novamente mais tarde.';
+            }
+
+            const tracking = statusResult.data[0];
+            const events = tracking.events || [];
             
-            // Verifica se temos as informações necessárias
-            if (!tracking.package_status || !tracking.latest_event_info) {
-                return 'Ainda não há informações disponíveis para este rastreamento.';
-            }
-
-            const status = tracking.package_status;
-            const lastEvent = tracking.latest_event_info;
-            const lastEventTime = tracking.latest_event_time ? 
-                new Date(tracking.latest_event_time).toLocaleString('pt-BR') :
-                'Não disponível';
-
-            // Verifica se o pedido está taxado ou aguardando pagamento
-            const isTaxed = lastEvent.toLowerCase().includes('aguardando pagamento') || 
-                          lastEvent.toLowerCase().includes('tributo') ||
-                          lastEvent.toLowerCase().includes('taxa') ||
-                          status.toLowerCase().includes('taxado');
-
-            let response = `Status do rastreamento:
- Número: ${tracking.number}
- Situação: ${status}
- Última atualização: ${lastEventTime}
- Detalhes: ${lastEvent}`;
-
-            if (isTaxed) {
-                response += `\n\n⚠️ ATENÇÃO: Seu pedido foi taxado!
- 
- Para prosseguir com a entrega, é necessário pagar a taxa dos Correios.
- Para pagar a taxa:
- 1. Acesse: https://apps.correios.com.br/portalimportador
- 2. Digite seu CPF e o código de rastreamento
- 3. Siga as instruções para pagamento
- 
- ℹ️ Após o pagamento, aguarde 1-2 dias úteis para atualização do status.`;
-            }
+            // Formata a resposta com os eventos disponíveis
+            let response = `📦 *Status do Rastreamento*\n\n`;
+            response += `*Código:* ${tracking.number}\n`;
+            response += `*Transportadora:* ${tracking.carrier || 'Não identificada'}\n\n`;
+            
+            response += '*Movimentações:*\n';
+            events.forEach((event, index) => {
+                response += `\n📍 ${event.date || 'Data não informada'}\n`;
+                response += `${event.status || 'Status não informado'}\n`;
+                if (event.location) response += `📌 ${event.location}\n`;
+            });
 
             return response;
+
         } catch (error) {
-            console.error('Erro ao formatar resposta:', error);
-            return 'Ocorreu um erro ao processar as informações do rastreamento. Por favor, tente novamente mais tarde.';
+            console.error('[Tracking] Erro ao formatar resposta:', error);
+            return 'Desculpe, ocorreu um erro ao formatar as informações do rastreamento.';
         }
     }
 }
