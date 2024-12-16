@@ -93,6 +93,11 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                     audioMessage: message.audioMessage
                 });
 
+                console.log('✅ Áudio transcrito com sucesso:', {
+                    length: transcription?.length,
+                    preview: transcription?.substring(0, 100)
+                });
+
                 response = await aiServices.processMessage(transcription, {
                     from: message.from,
                     messageId: message.messageId,
@@ -125,8 +130,6 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
                 para: message.from,
                 resposta: response
             });
-
-            await whatsappService.sendText(message.from, response);
         }
 
     } catch (error) {

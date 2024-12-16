@@ -399,7 +399,7 @@ class AIServices {
             // Envia a resposta
             if (response) {
                 await this.whatsappService.sendText(from, response);
-                console.log('📤 Enviando resposta:', {
+                console.log('[AI] Mensagem enviada:', {
                     para: from,
                     resposta: response
                 });
