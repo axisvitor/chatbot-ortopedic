@@ -376,13 +376,8 @@ class AIServices {
                 return response;
             }
 
-            // Se não houver thread, cria uma nova
-            let thread = await this.redisStore.getThread(from);
-            
-            if (!thread) {
-                thread = await this.openai.createThread();
-                await this.redisStore.setThread(from, thread);
-            }
+            // Cria um thread para esta conversa
+            const thread = await this.openai.createThread();
 
             // Adiciona a mensagem ao thread
             await this.openai.addMessage(thread.id, {
