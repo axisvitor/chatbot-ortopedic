@@ -2,6 +2,7 @@ const { WhatsAppService } = require('./whatsapp-service');
 const { WhatsAppImageService } = require('./whatsapp-image-service');
 const { RedisStore } = require('../store/redis-store');
 const { OpenAIService } = require('./openai-service');
+const { TrackingService } = require('./tracking-service');
 const businessHours = require('./business-hours');
 
 class AIServices {
@@ -14,6 +15,7 @@ class AIServices {
         this.whatsappImageService = new WhatsAppImageService();
         this.redisStore = new RedisStore();
         this.openai = new OpenAIService();
+        this.trackingService = new TrackingService();
     }
 
     /**
@@ -297,41 +299,71 @@ class AIServices {
      * @param {Object} options - Opções adicionais
      * @returns {Promise<string>} Resposta do processamento
      */
-    async processMessage(message, options = {}) {
+    async processMessage(text, { from, messageId, businessHours = true } = {}) {
         try {
-            const { from, messageId, isAudioTranscription = false, businessHours = false } = options;
+            console.log('[AI] Processando mensagem:', {
+                from,
+                messageId,
+                length: text?.length,
+                preview: text
+            });
+
+            // Verifica se é um código de rastreio (formato típico dos Correios)
+            const trackingRegex = /^[A-Z]{2}[0-9]{9}[A-Z]{2}$/;
+            if (trackingRegex.test(text)) {
+                console.log('[AI] Código de rastreio detectado:', text);
+                
+                // Envia mensagem inicial
+                await this.whatsappService.sendMessage(from, 'Parece que você forneceu um número de rastreamento. Vou verificar o status do seu pedido agora mesmo. Um momento, por favor! \n\n🔍✨');
+                
+                try {
+                    // Registra e consulta o rastreamento
+                    const trackingInfo = await this.trackingService.processTrackingRequest(text);
+                    
+                    // Envia o resultado do rastreamento
+                    if (trackingInfo) {
+                        await this.whatsappService.sendMessage(from, trackingInfo);
+                    } else {
+                        await this.whatsappService.sendMessage(from, 'Desculpe, não foi possível obter informações sobre este rastreamento no momento. Por favor, tente novamente mais tarde.');
+                    }
+                } catch (error) {
+                    console.error('[AI] Erro ao processar rastreamento:', error);
+                    await this.whatsappService.sendMessage(from, 'Desculpe, ocorreu um erro ao consultar o rastreamento. Por favor, tente novamente mais tarde.');
+                }
+                return;
+            }
 
             // Se for uma solicitação de atendimento financeiro e estiver fora do horário comercial
-            if (!businessHours && message.toLowerCase().includes('financeiro')) {
+            if (!businessHours && text.toLowerCase().includes('financeiro')) {
                 return 'Desculpe, o atendimento interno só está disponível em horário comercial (Segunda a Sexta, das 8h às 18h). Por favor, retorne durante nosso horário de atendimento. Posso ajudar com outras informações?';
             }
 
             // Processa a mensagem normalmente para outros casos
             let response;
 
-            if (!message?.trim()) {
+            if (!text?.trim()) {
                 return "Por favor, reformule sua mensagem para que eu possa entender melhor como ajudar.";
             }
 
             console.log('[AI] Processando mensagem:', {
                 from,
                 messageId,
-                length: message?.length,
-                preview: message?.substring(0, 100)
+                length: text?.length,
+                preview: text.substring(0, 100) + '...'
             });
 
             // Verifica se precisa de atendimento humano
-            const needsHuman = await this.needsHumanSupport(message);
+            const needsHuman = await this.needsHumanSupport(text);
             if (needsHuman) {
                 console.log('[AI] Encaminhando para atendimento humano');
                 return businessHours.getHumanSupportMessage();
             }
 
             // Verifica se é questão financeira
-            const isFinancial = await this.isFinancialIssue(message);
+            const isFinancial = await this.isFinancialIssue(text);
             if (isFinancial) {
                 console.log('[AI] Encaminhando para financeiro');
-                return businessHours.forwardToFinancial(message, from);
+                return businessHours.forwardToFinancial(text, from);
             }
 
             // Cria um thread
@@ -340,7 +372,7 @@ class AIServices {
             // Adiciona a mensagem ao thread
             await this.openai.addMessage(thread.id, {
                 role: 'user',
-                content: message
+                content: text
             });
 
             // Executa o assistant

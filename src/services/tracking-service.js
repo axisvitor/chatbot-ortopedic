@@ -9,6 +9,12 @@ class TrackingService {
     }
 
     async registerTracking(trackingNumber) {
+        console.log('[17Track] Iniciando registro de rastreio:', {
+            trackingNumber,
+            apiKeyLength: this.config.apiKey?.length,
+            hasApiKey: !!this.config.apiKey
+        });
+
         const data = JSON.stringify([{
             number: trackingNumber,
             carrier: 'auto'
@@ -24,6 +30,12 @@ class TrackingService {
                 'Content-Length': data.length
             }
         };
+
+        console.log('[17Track] Configuração da requisição:', {
+            endpoint: options.hostname,
+            path: options.path,
+            method: options.method
+        });
 
         return await this._makeRequest(options, data);
     }
