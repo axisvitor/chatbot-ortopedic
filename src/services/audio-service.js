@@ -7,214 +7,72 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { GROQ_CONFIG } = require('../config/settings');
-
-// Configura o caminho do ffmpeg
-ffmpeg.setFfmpegPath(ffmpegPath);
+const { Queue } = require('../utils/queue'); // Importa a classe Queue
 
 class AudioService {
-    constructor(groqServices, whatsappClient) {
-        if (!groqServices) {
-            throw new Error('GroqServices é obrigatório');
-        }
-        if (!whatsappClient) {
-            throw new Error('WhatsappClient é obrigatório');
-        }
-        this.groqServices = groqServices;
-        this.whatsappClient = whatsappClient;
+    constructor() {
+        this.audioQueue = new Queue(); // Inicializa a fila de áudio
+        ffmpeg.setFfmpegPath(ffmpegPath);
     }
 
-    /**
-     * Converte áudio para formato compatível usando ffmpeg
-     * @param {Buffer} inputBuffer - Buffer do áudio original
-     * @returns {Promise<Buffer>} Buffer do áudio convertido
-     */
-    async convertAudio(inputBuffer) {
-        const tempDir = os.tmpdir();
-        const inputPath = path.join(tempDir, `input-${Date.now()}.ogg`);
-        const outputPath = path.join(tempDir, `output-${Date.now()}.mp3`);
-
-        try {
-            // Salva o buffer em um arquivo temporário
-            await fs.promises.writeFile(inputPath, inputBuffer);
-
-            // Converte para MP3 usando ffmpeg
-            await new Promise((resolve, reject) => {
-                ffmpeg(inputPath)
-                    .toFormat('mp3')
-                    .audioChannels(1)
-                    .audioFrequency(16000)
-                    .on('error', (err) => {
-                        console.error('❌ Erro no ffmpeg:', err);
-                        reject(err);
-                    })
-                    .on('end', resolve)
-                    .save(outputPath);
-            });
-
-            // Lê o arquivo convertido
-            const convertedBuffer = await fs.promises.readFile(outputPath);
-
-            // Limpa arquivos temporários
-            await Promise.all([
-                fs.promises.unlink(inputPath).catch(() => {}),
-                fs.promises.unlink(outputPath).catch(() => {})
-            ]);
-
-            return convertedBuffer;
-        } catch (error) {
-            console.error('❌ Erro ao converter áudio:', error);
-            throw new Error(`Falha ao converter áudio: ${error.message}`);
-        }
-    }
-
-    /**
-     * Comprime áudio para reduzir tamanho
-     * @param {Buffer} buffer - Buffer do áudio
-     * @returns {Promise<Buffer>} Buffer do áudio comprimido
-     */
-    async compressAudio(buffer) {
-        const tempDir = os.tmpdir();
-        const inputPath = path.join(tempDir, `input-${Date.now()}.ogg`);
-        const outputPath = path.join(tempDir, `compressed-${Date.now()}.mp3`);
-
-        try {
-            // Salva o buffer em arquivo temporário
-            await fs.promises.writeFile(inputPath, buffer);
-
-            // Comprime usando ffmpeg
-            await new Promise((resolve, reject) => {
-                ffmpeg(inputPath)
-                    .toFormat('mp3')
-                    .audioCodec('libmp3lame')
-                    .audioBitrate('64k')
-                    .audioChannels(1)
-                    .audioFrequency(16000)
-                    .on('error', (err) => {
-                        console.error('❌ Erro ao comprimir áudio:', err);
-                        reject(err);
-                    })
-                    .on('end', resolve)
-                    .save(outputPath);
-            });
-
-            // Lê o arquivo comprimido
-            const compressedBuffer = await fs.promises.readFile(outputPath);
-
-            // Limpa arquivos temporários
-            await Promise.all([
-                fs.promises.unlink(inputPath).catch(() => {}),
-                fs.promises.unlink(outputPath).catch(() => {})
-            ]);
-
-            return compressedBuffer;
-        } catch (error) {
-            console.error('❌ Erro ao comprimir áudio:', error);
-            throw new Error(`Falha ao comprimir áudio: ${error.message}`);
-        }
-    }
-
-    /**
-     * Processa um áudio do WhatsApp
-     * @param {Object} messageData - Dados da mensagem do WhatsApp
-     * @returns {Promise<string>} Texto transcrito
-     */
-    async processWhatsAppAudio(messageData) {
-        try {
-            console.log('📝 Estrutura da mensagem recebida:', JSON.stringify(messageData, null, 2));
-
-            // Verifica se é uma mensagem de áudio válida
-            if (!messageData?.audioMessage) {
-                throw new Error('Mensagem de áudio não encontrada');
-            }
-
-            // Baixa e descriptografa o áudio usando o Baileys
-            console.log('📥 Baixando e descriptografando áudio...', {
-                mimetype: messageData.audioMessage.mimetype,
-                seconds: messageData.audioMessage.seconds,
-                fileLength: messageData.audioMessage.fileLength
-            });
-
-            const buffer = await downloadMediaMessage(
-                { message: { audioMessage: messageData.audioMessage } },
-                'buffer',
-                {},
-                {
-                    logger: console,
-                    reuploadRequest: async (media) => {
-                        const response = await axios.get(media.url, {
-                            responseType: 'arraybuffer',
-                            headers: { Origin: 'https://web.whatsapp.com' }
-                        });
-                        return response.data;
-                    }
+    async processAudio(media, message) {
+        return new Promise((resolve, reject) => {
+            this.audioQueue.enqueue(async () => {
+                try {
+                    const result = await this._processAudio(media, message);
+                    resolve(result);
+                } catch (error) {
+                    reject(error);
                 }
-            );
+            });
+        });
+    }
 
-            if (!buffer?.length) {
-                console.error('❌ Buffer vazio após download');
-                throw new Error('Download do áudio falhou');
+    async _processAudio(media, message) {
+        try {
+            const audioBuffer = await downloadMediaMessage(message, 'buffer');
+            const tempDir = os.tmpdir();
+            const tempInputPath = path.join(tempDir, `${crypto.randomBytes(16).toString('hex')}.ogg`);
+            const tempOutputPath = path.join(tempDir, `${crypto.randomBytes(16).toString('hex')}.wav`);
+
+            fs.writeFileSync(tempInputPath, audioBuffer);
+
+            await new Promise((resolve, reject) => {
+                ffmpeg(tempInputPath)
+                    .audioCodec('pcm_s16le')
+                    .format('wav')
+                    .on('end', () => resolve())
+                    .on('error', (err) => {
+                        console.error('❌ Erro ao converter áudio:', err);
+                        reject(new Error(`Erro ao converter áudio: ${err.message}`));
+                    })
+                    .save(tempOutputPath);
+            });
+
+            const audioFile = fs.readFileSync(tempOutputPath);
+            const formData = new FormData();
+            formData.append('file', audioFile, 'audio.wav');
+
+            const response = await axios.post(GROQ_CONFIG.audioUrl, formData, {
+                headers: {
+                    ...formData.getHeaders(),
+                    'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`
+                },
+                timeout: 30000
+            });
+
+            fs.unlinkSync(tempInputPath);
+            fs.unlinkSync(tempOutputPath);
+
+            if (response.status !== 200) {
+                console.error('❌ Erro na API Groq:', response.status, response.data);
+                throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
             }
 
-            console.log('✅ Áudio baixado e descriptografado:', {
-                tamanhoBuffer: buffer.length,
-                primeirosBytes: buffer.slice(0, 16).toString('hex')
-            });
-
-            // Comprime o áudio antes da conversão
-            console.log('🔄 Comprimindo áudio...');
-            const compressedBuffer = await this.compressAudio(buffer);
-
-            console.log('✅ Áudio comprimido:', {
-                tamanhoOriginal: buffer.length,
-                tamanhoComprimido: compressedBuffer.length,
-                reducao: ((buffer.length - compressedBuffer.length) / buffer.length * 100).toFixed(2) + '%'
-            });
-
-            // Converte o áudio comprimido para MP3
-            console.log('🔄 Convertendo áudio para MP3...');
-            const convertedBuffer = await this.convertAudio(compressedBuffer);
-
-            console.log('✅ Áudio convertido:', {
-                tamanhoComprimido: compressedBuffer.length,
-                tamanhoConvertido: convertedBuffer.length
-            });
-
-            // Prepara o FormData com o áudio convertido
-            const formData = new FormData();
-            formData.append('file', Buffer.from(convertedBuffer), {
-                filename: 'audio.mp3',
-                contentType: 'audio/mpeg'
-            });
-            formData.append('model', GROQ_CONFIG.models.audio);
-            formData.append('language', GROQ_CONFIG.audioConfig.language);
-            formData.append('response_format', GROQ_CONFIG.audioConfig.response_format);
-            formData.append('temperature', String(GROQ_CONFIG.audioConfig.temperature));
-
-            // Log do FormData antes de enviar
-            console.log('[Audio] Enviando FormData:', {
-                model: GROQ_CONFIG.models.audio,
-                language: GROQ_CONFIG.audioConfig.language,
-                response_format: GROQ_CONFIG.audioConfig.response_format,
-                temperature: GROQ_CONFIG.audioConfig.temperature,
-                fileSize: convertedBuffer.length
-            });
-
-            // Transcreve o áudio usando GroqServices
-            const transcription = await this.groqServices.transcribeAudio(formData);
-            
-            console.log('✅ Áudio transcrito com sucesso:', {
-                length: transcription.length,
-                preview: transcription.substring(0, 100)
-            });
-
-            return transcription;
+            return response.data.text;
 
         } catch (error) {
-            console.error('❌ Erro ao processar áudio:', {
-                message: error.message,
-                stack: error.stack,
-                messageData: JSON.stringify(messageData, null, 2)
-            });
+            console.error('❌ Erro geral no processamento de áudio:', error);
             throw error;
         }
     }
