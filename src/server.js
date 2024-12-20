@@ -19,7 +19,11 @@ const { RATE_LIMIT_CONFIG } = require('./config/settings');
 
 // Inicializa o app
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8080;
+
+// Variáveis de estado
+let isReady = false;
+let initError = null;
 
 // Serviços
 const groqServices = new GroqServices();
@@ -27,20 +31,28 @@ const webhookService = new WebhookService();
 const whatsappService = new WhatsAppService();
 const aiServices = new AIServices(groqServices);
 
-// Aguarda o cliente do WhatsApp estar pronto
 let audioService;
 let imageService;
 
-Promise.all([
-    whatsappService.getClient(),
-    aiServices.initWhatsApp()
-]).then(([client]) => {
-    audioService = new AudioService(groqServices, client);
-    imageService = new ImageService(groqServices, client);
-    console.log('✅ Serviços inicializados com sucesso');
-}).catch(error => {
-    console.error('❌ Erro ao inicializar serviços:', error);
-});
+// Função de inicialização
+async function initializeServices() {
+    try {
+        const [client] = await Promise.all([
+            whatsappService.getClient(),
+            aiServices.initWhatsApp()
+        ]);
+
+        audioService = new AudioService(groqServices, client);
+        imageService = new ImageService(groqServices, client);
+        
+        console.log('✅ Serviços inicializados com sucesso');
+        isReady = true;
+    } catch (error) {
+        console.error('❌ Erro ao inicializar serviços:', error);
+        initError = error;
+        throw error;
+    }
+}
 
 // Middlewares
 app.use(helmet());
@@ -53,9 +65,22 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const limiter = rateLimit(RATE_LIMIT_CONFIG);
 app.use(limiter);
 
-// Rotas
+// Healthcheck
 app.get('/', (req, res) => {
-    res.json({ status: 'ok' });
+    if (isReady) {
+        res.json({ status: 'ok', ready: true });
+    } else if (initError) {
+        res.status(500).json({ 
+            status: 'error', 
+            ready: false, 
+            error: initError.message 
+        });
+    } else {
+        res.status(503).json({ 
+            status: 'initializing', 
+            ready: false 
+        });
+    }
 });
 
 // Webhook para mensagens
@@ -139,7 +164,24 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     res.sendStatus(200);
 });
 
-// Inicia o servidor
-app.listen(port, () => {
-    console.log(`🚀 Servidor rodando na porta ${port}`);
-});
+// Função para iniciar o servidor
+async function startServer() {
+    try {
+        await initializeServices();
+        
+        app.listen(port, () => {
+            console.log(`🚀 Servidor rodando na porta ${port}`);
+        });
+    } catch (error) {
+        console.error('❌ Erro fatal ao iniciar servidor:', error);
+        process.exit(1);
+    }
+}
+
+// Exporta para uso em testes
+module.exports = { app, startServer };
+
+// Se executado diretamente, inicia o servidor
+if (require.main === module) {
+    startServer();
+}
