@@ -111,6 +111,52 @@ class RedisStore {
             throw error;
         }
     }
+
+    /**
+     * Adiciona um valor ao final de uma lista
+     * @param {string} key - Chave da lista
+     * @param {string} value - Valor a ser adicionado
+     * @returns {Promise<number>} Novo tamanho da lista
+     */
+    async rpush(key, value) {
+        try {
+            return await this.client.rpush(key, value);
+        } catch (error) {
+            console.error('[Redis] Erro ao adicionar à lista:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Recupera um intervalo de elementos de uma lista
+     * @param {string} key - Chave da lista
+     * @param {number} start - Índice inicial
+     * @param {number} stop - Índice final (-1 para todos)
+     * @returns {Promise<string[]>} Lista de valores
+     */
+    async lrange(key, start, stop) {
+        try {
+            return await this.client.lrange(key, start, stop);
+        } catch (error) {
+            console.error('[Redis] Erro ao recuperar lista:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Define um tempo de expiração para uma chave
+     * @param {string} key - Chave para definir expiração
+     * @param {number} seconds - Tempo em segundos
+     * @returns {Promise<boolean>} true se definido com sucesso
+     */
+    async expire(key, seconds) {
+        try {
+            return await this.client.expire(key, seconds);
+        } catch (error) {
+            console.error('[Redis] Erro ao definir expiração:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = { RedisStore };

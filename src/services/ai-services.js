@@ -4,6 +4,8 @@ const { RedisStore } = require('../store/redis-store');
 const { OpenAIService } = require('./openai-service');
 const { TrackingService } = require('./tracking-service');
 const businessHours = require('./business-hours');
+const { OrderValidationService } = require('./order-validation-service');
+const { NuvemshopService } = require('./nuvemshop-service');
 
 class AIServices {
     constructor(groqServices) {
@@ -17,6 +19,9 @@ class AIServices {
         this.trackingService = new TrackingService();
         this.whatsappReady = false;  
         this.initWhatsApp();
+        this.orderValidation = new OrderValidationService();
+        this.nuvemshop = new NuvemshopService();
+        this.CONVERSATION_EXPIRY = 60 * 24 * 60 * 60; // 60 dias em segundos
     }
 
     async initWhatsApp() {
@@ -307,6 +312,113 @@ class AIServices {
     }
 
     /**
+     * Armazena uma mensagem no histórico de conversas
+     * @param {string} from - Número do WhatsApp
+     * @param {string} role - Papel (user/assistant)
+     * @param {string} content - Conteúdo da mensagem
+     * @private
+     */
+    async _storeMessage(from, role, content) {
+        try {
+            const timestamp = Date.now();
+            const messageKey = `conversation:${from}:${timestamp}`;
+            const message = {
+                role,
+                content,
+                timestamp,
+                phoneNumber: from
+            };
+
+            // Armazena a mensagem individual como JSON string
+            await this.redisStore.set(messageKey, JSON.stringify(message), this.CONVERSATION_EXPIRY);
+
+            // Adiciona à lista de mensagens do usuário
+            const userMessagesKey = `user_messages:${from}`;
+            await this.redisStore.rpush(userMessagesKey, messageKey);
+            await this.redisStore.expire(userMessagesKey, this.CONVERSATION_EXPIRY);
+
+            // Adiciona à lista global de mensagens
+            const globalMessagesKey = 'all_conversations';
+            await this.redisStore.rpush(globalMessagesKey, messageKey);
+            await this.redisStore.expire(globalMessagesKey, this.CONVERSATION_EXPIRY);
+
+            console.log('[Conversation] Mensagem armazenada:', {
+                from,
+                role,
+                timestamp,
+                contentLength: content?.length,
+                messageKey
+            });
+        } catch (error) {
+            console.error('[Conversation] Erro ao armazenar mensagem:', error);
+            // Não propaga o erro para não interromper o fluxo principal
+        }
+    }
+
+    /**
+     * Recupera o histórico de conversas de um usuário
+     * @param {string} from - Número do WhatsApp
+     * @returns {Promise<Array>} Lista de mensagens
+     */
+    async getUserConversationHistory(from) {
+        try {
+            const userMessagesKey = `user_messages:${from}`;
+            const messageKeys = await this.redisStore.lrange(userMessagesKey, 0, -1);
+            
+            const messages = [];
+            for (const key of messageKeys) {
+                const messageJson = await this.redisStore.get(key);
+                if (messageJson) {
+                    messages.push(JSON.parse(messageJson));
+                }
+            }
+
+            return messages.sort((a, b) => a.timestamp - b.timestamp);
+        } catch (error) {
+            console.error('[Conversation] Erro ao recuperar histórico:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Recupera todas as conversas para fine-tuning
+     * @returns {Promise<Array>} Lista de todas as conversas
+     */
+    async getAllConversationsForFineTuning() {
+        try {
+            const globalMessagesKey = 'all_conversations';
+            const messageKeys = await this.redisStore.lrange(globalMessagesKey, 0, -1);
+            
+            const messages = [];
+            for (const key of messageKeys) {
+                const messageJson = await this.redisStore.get(key);
+                if (messageJson) {
+                    messages.push(JSON.parse(messageJson));
+                }
+            }
+
+            // Agrupa mensagens por número de telefone
+            const conversationsByUser = messages.reduce((acc, msg) => {
+                if (!acc[msg.phoneNumber]) {
+                    acc[msg.phoneNumber] = [];
+                }
+                acc[msg.phoneNumber].push(msg);
+                return acc;
+            }, {});
+
+            // Ordena mensagens de cada usuário por timestamp
+            Object.values(conversationsByUser).forEach(userMessages => {
+                userMessages.sort((a, b) => a.timestamp - b.timestamp);
+            });
+
+            return conversationsByUser;
+        } catch (error) {
+            console.error('[Conversation] Erro ao recuperar todas as conversas:', error);
+            return {};
+        }
+    }
+
+    /**
      * Processa uma mensagem de texto usando o OpenAI Assistant
      * @param {string} text - Texto da mensagem
      * @param {Object} options - Opções adicionais
@@ -388,6 +500,63 @@ class AIServices {
                 }
             }
 
+            // Verifica se é uma consulta de pedido
+            const orderMatch = text.match(/pedido\s+(\d+)/i);
+            if (orderMatch) {
+                const orderNumber = orderMatch[1];
+                
+                // Valida se o pedido existe
+                const order = await this.orderValidation.validateOrderNumber(orderNumber);
+                if (!order) {
+                    await this.orderValidation.incrementAttempts(from);
+                    return `❌ Desculpe, não encontrei nenhum pedido com o número ${orderNumber}.
+Por favor, verifique o número e tente novamente.`;
+                }
+
+                // Solicita CPF para validação
+                await this.redisStore.set(`pending_order_${from}`, orderNumber);
+                return `Para sua segurança, preciso confirmar sua identidade.
+Por favor, me informe os últimos 4 dígitos do seu CPF.`;
+            }
+
+            // Verifica se está aguardando CPF para validação de pedido
+            const pendingOrder = await this.redisStore.get(`pending_order_${from}`);
+            if (pendingOrder) {
+                // Extrai os 4 últimos dígitos do CPF
+                const cpfMatch = text.match(/\b\d{4}\b/);
+                if (!cpfMatch) {
+                    return `Por favor, me informe apenas os últimos 4 dígitos do seu CPF.`;
+                }
+
+                const lastFourCPF = cpfMatch[0];
+                const isValid = await this.orderValidation.validateCPF(pendingOrder, lastFourCPF);
+
+                if (!isValid) {
+                    await this.orderValidation.incrementAttempts(from);
+                    await this.redisStore.del(`pending_order_${from}`);
+                    return `❌ Desculpe, os dados informados não conferem.
+Por favor, verifique e tente novamente.`;
+                }
+
+                // CPF válido, retorna informações do pedido
+                const order = await this.orderValidation.validateOrderNumber(pendingOrder);
+                const safeOrderInfo = this.orderValidation.formatSafeOrderInfo(order);
+                const message = this.orderValidation.formatOrderMessage(safeOrderInfo);
+
+                // Limpa o pedido pendente e reseta tentativas
+                await this.redisStore.del(`pending_order_${from}`);
+                await this.orderValidation.resetAttempts(from);
+
+                return message;
+            }
+
+            // Verifica se o usuário está bloqueado
+            const isBlocked = await this.orderValidation.checkAttempts(from);
+            if (isBlocked) {
+                return `⚠️ Por segurança, suas tentativas de consulta foram bloqueadas por 30 minutos. 
+Por favor, tente novamente mais tarde.`;
+            }
+
             // Se for uma solicitação de atendimento financeiro e estiver fora do horário comercial
             if (await this.isFinancialIssue(text) && !businessHours) {
                 const response = 'Nosso atendimento financeiro funciona de Segunda a Sexta, das 8h às 18h. Por favor, retorne durante nosso horário comercial para que possamos te ajudar da melhor forma possível! 🕒';
@@ -433,21 +602,29 @@ class AIServices {
                 preview: response?.substring(0, 100)
             });
 
-            // Envia a resposta
+            // Armazena a mensagem do usuário
+            await this._storeMessage(from, 'user', text);
+
+            // Armazena a resposta do assistente
             if (response) {
+                await this._storeMessage(from, 'assistant', response);
                 await this.whatsappService.sendText(from, response);
                 console.log('[AI] Mensagem enviada:', {
                     para: from,
                     resposta: response
                 });
             } else {
-                await this.whatsappService.sendText(from, 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.');
+                const errorMessage = 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.';
+                await this._storeMessage(from, 'assistant', errorMessage);
+                await this.whatsappService.sendText(from, errorMessage);
             }
 
             return response;
         } catch (error) {
             console.error('[AI] Erro ao processar mensagem:', error);
-            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
+            const errorMessage = "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
+            await this._storeMessage(from, 'assistant', errorMessage);
+            return errorMessage;
         }
     }
 
@@ -571,6 +748,322 @@ class AIServices {
             console.error('[AI] Erro ao verificar questão financeira:', error);
             return false;
         }
+    }
+
+    /**
+     * Processa perguntas sobre produtos
+     * @param {string} text - Texto da pergunta
+     * @returns {Promise<string>} Resposta formatada
+     */
+    async processProductQuery(text) {
+        try {
+            // Verifica se é uma busca por produtos
+            if (this.isProductSearch(text)) {
+                const searchTerm = this.extractSearchTerm(text);
+                const filters = this.extractFilters(text);
+                const products = await this.nuvemshop.searchProducts(searchTerm, filters);
+                return this.nuvemshop.formatProductsResponse(products);
+            }
+
+            // Verifica se é uma busca por categoria
+            if (this.isCategorySearch(text)) {
+                const category = this.extractCategory(text);
+                const filters = this.extractFilters(text);
+                const products = await this.nuvemshop.getProductsByCategory(category, filters);
+                return this.nuvemshop.formatProductsResponse(products);
+            }
+
+            // Verifica se é uma pergunta sobre um produto específico
+            if (this.isProductDetails(text)) {
+                const productId = await this.getProductIdFromContext(text);
+                if (productId) {
+                    const product = await this.nuvemshop.getProduct(productId);
+                    return this.formatProductDetails(product);
+                }
+            }
+
+            // Verifica se é uma pergunta sobre tamanhos
+            if (this.isSizeQuestion(text)) {
+                return this.handleSizeQuestion(text);
+            }
+
+            return null; // Não é uma pergunta sobre produtos
+        } catch (error) {
+            console.error('[AI] Erro ao processar pergunta sobre produtos:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Verifica se é uma busca por produtos
+     * @param {string} text - Texto para analisar
+     * @returns {boolean} Se é uma busca por produtos
+     */
+    isProductSearch(text) {
+        const searchPatterns = [
+            /(?:procuro|busco|quero|tem|existe|vendem?|comercializam?)\s+(.+)/i,
+            /(?:onde|como)\s+(?:encontro|acho|compro)\s+(.+)/i,
+            /(?:qual|quais|que)\s+(?:calçado|tênis|sapato|sandália|bota)\s+(.+)/i,
+            /mostrar?(?:\s+os)?\s+(?:calçados?|tênis|sapatos|sandálias|botas)\s+(.+)/i
+        ];
+
+        return searchPatterns.some(pattern => pattern.test(text));
+    }
+
+    /**
+     * Extrai o termo de busca do texto
+     * @param {string} text - Texto para extrair
+     * @returns {string} Termo de busca
+     */
+    extractSearchTerm(text) {
+        const searchPatterns = [
+            /(?:procuro|busco|quero|tem|existe|vendem?|comercializam?)\s+(.+)/i,
+            /(?:onde|como)\s+(?:encontro|acho|compro)\s+(.+)/i,
+            /(?:qual|quais|que)\s+(?:calçado|tênis|sapato|sandália|bota)\s+(.+)/i,
+            /mostrar?(?:\s+os)?\s+(?:calçados?|tênis|sapatos|sandálias|botas)\s+(.+)/i
+        ];
+
+        for (const pattern of searchPatterns) {
+            const match = text.match(pattern);
+            if (match && match[1]) {
+                return match[1].trim();
+            }
+        }
+
+        return text.trim();
+    }
+
+    /**
+     * Extrai filtros do texto
+     * @param {string} text - Texto para extrair
+     * @returns {Object} Filtros encontrados
+     */
+    extractFilters(text) {
+        const filters = {};
+
+        // Extrai tamanho
+        const sizeMatch = text.match(/(?:tamanho|número|tam\.?|nº)\s*(\d{2})/i);
+        if (sizeMatch) {
+            filters.tamanho = sizeMatch[1];
+        }
+
+        // Extrai cor
+        const colorMatch = text.match(/(?:cor|na cor)\s+(\w+)/i);
+        if (colorMatch) {
+            filters.cor = colorMatch[1];
+        }
+
+        // Extrai faixa de preço
+        const priceMatch = text.match(/(?:até|menos de|máximo)\s*R?\$?\s*(\d+)/i);
+        if (priceMatch) {
+            filters.preco_max = parseInt(priceMatch[1]);
+        }
+
+        const minPriceMatch = text.match(/(?:acima de|mais de|mínimo)\s*R?\$?\s*(\d+)/i);
+        if (minPriceMatch) {
+            filters.preco_min = parseInt(minPriceMatch[1]);
+        }
+
+        return filters;
+    }
+
+    /**
+     * Verifica se é uma busca por categoria
+     * @param {string} text - Texto para analisar
+     * @returns {boolean} Se é uma busca por categoria
+     */
+    isCategorySearch(text) {
+        const categoryPatterns = [
+            /(?:produtos|calçados)\s+da\s+categoria\s+(.+)/i,
+            /(?:mostrar?|ver|listar?)\s+(?:categoria|departamento)\s+(.+)/i,
+            /(?:o\s+que\s+tem\s+(?:em|na|no)\s+(?:categoria|departamento)\s+(.+))/i,
+            /(?:quero|procuro)\s+(?:ver|olhar)\s+(?:os|as)\s+(.+)/i
+        ];
+
+        return categoryPatterns.some(pattern => pattern.test(text));
+    }
+
+    /**
+     * Extrai a categoria do texto
+     * @param {string} text - Texto para extrair
+     * @returns {string} Nome da categoria
+     */
+    extractCategory(text) {
+        const categoryPatterns = [
+            /(?:produtos|calçados)\s+da\s+categoria\s+(.+)/i,
+            /(?:mostrar?|ver|listar?)\s+(?:categoria|departamento)\s+(.+)/i,
+            /(?:o\s+que\s+tem\s+(?:em|na|no)\s+(?:categoria|departamento)\s+(.+))/i,
+            /(?:quero|procuro)\s+(?:ver|olhar)\s+(?:os|as)\s+(.+)/i
+        ];
+
+        for (const pattern of categoryPatterns) {
+            const match = text.match(pattern);
+            if (match && match[1]) {
+                return match[1].trim();
+            }
+        }
+
+        return text.trim();
+    }
+
+    /**
+     * Verifica se é uma pergunta sobre tamanhos
+     * @param {string} text - Texto para analisar
+     * @returns {boolean} Se é uma pergunta sobre tamanhos
+     */
+    isSizeQuestion(text) {
+        const sizePatterns = [
+            /qual(?:is)?\s+(?:o|os)\s+tamanho/i,
+            /tem\s+(?:número|tamanho)/i,
+            /(?:vem|disponível)\s+em\s+que\s+(?:número|tamanho)/i,
+            /tabela\s+de\s+(?:tamanho|medida)/i
+        ];
+
+        return sizePatterns.some(pattern => pattern.test(text));
+    }
+
+    /**
+     * Processa perguntas sobre tamanhos
+     * @param {string} text - Texto da pergunta
+     * @returns {string} Resposta formatada
+     */
+    handleSizeQuestion(text) {
+        // Se perguntou sobre tabela de medidas
+        if (text.match(/tabela\s+de\s+(?:tamanho|medida)/i)) {
+            return this.formatSizeGuide();
+        }
+
+        // Se perguntou sobre tamanhos disponíveis de um produto específico
+        const productMatch = text.match(/(?:número|tamanho)\s+do\s+(?:calçado|produto)\s+(\d+)/i);
+        if (productMatch) {
+            return this.getProductSizes(productMatch[1]);
+        }
+
+        // Resposta genérica sobre tamanhos
+        return `Nossos calçados estão disponíveis nos seguintes tamanhos:\n\n` +
+               `👨 *Masculino:* ${SHOE_SIZES.adulto.masculino.join(', ')}\n` +
+               `👩 *Feminino:* ${SHOE_SIZES.adulto.feminino.join(', ')}\n` +
+               `👦 *Infantil Masculino:* ${SHOE_SIZES.infantil.menino.join(', ')}\n` +
+               `👧 *Infantil Feminino:* ${SHOE_SIZES.infantil.menina.join(', ')}\n\n` +
+               `_Para saber os tamanhos disponíveis de um produto específico, me envie o número dele._`;
+    }
+
+    /**
+     * Formata o guia de tamanhos
+     * @returns {string} Guia de tamanhos formatado
+     */
+    formatSizeGuide() {
+        return `📏 *Guia de Tamanhos*\n\n` +
+               `Para encontrar seu tamanho ideal:\n\n` +
+               `1️⃣ Meça seu pé do calcanhar até o dedo mais longo\n` +
+               `2️⃣ Compare com nossa tabela de medidas\n` +
+               `3️⃣ Em caso de dúvida, opte pelo tamanho maior\n\n` +
+               `*Dica:* Faça a medição no final do dia, quando os pés estão naturalmente mais inchados.\n\n` +
+               `_Para medidas específicas de um modelo, me envie o número do produto._`;
+    }
+
+    /**
+     * Obtém os tamanhos disponíveis de um produto
+     * @param {string} productId - ID do produto
+     * @returns {Promise<string>} Tamanhos disponíveis formatados
+     */
+    async getProductSizes(productId) {
+        try {
+            const product = await this.nuvemshop.getProduct(productId);
+            if (!product) {
+                return "Desculpe, não encontrei o produto solicitado.";
+            }
+
+            const tamanhos = [...new Set(product.variants
+                .filter(v => v.stock > 0)
+                .map(v => v.tamanho)
+                .filter(Boolean)
+            )].sort();
+
+            if (tamanhos.length === 0) {
+                return `Desculpe, o produto ${product.name} está indisponível no momento.`;
+            }
+
+            return `📏 *Tamanhos disponíveis para ${product.name}:*\n\n` +
+                   `${tamanhos.join(', ')}\n\n` +
+                   `_Para mais informações sobre um tamanho específico, me informe qual você deseja._`;
+        } catch (error) {
+            console.error('[AI] Erro ao buscar tamanhos do produto:', error);
+            return "Desculpe, ocorreu um erro ao buscar os tamanhos disponíveis.";
+        }
+    }
+
+    /**
+     * Verifica se é uma pergunta sobre detalhes de produto
+     * @param {string} text - Texto para analisar
+     * @returns {boolean} Se é uma pergunta sobre detalhes
+     */
+    isProductDetails(text) {
+        const detailsPatterns = [
+            /(?:detalhes|informações|especificações)\s+do\s+produto\s+(\d+)/i,
+            /(?:mais|saber)\s+sobre\s+(?:o\s+)?produto\s+(\d+)/i,
+            /^(\d+)$/i // Apenas o número do produto
+        ];
+
+        return detailsPatterns.some(pattern => pattern.test(text));
+    }
+
+    /**
+     * Obtém o ID do produto do contexto
+     * @param {string} text - Texto para extrair
+     * @returns {Promise<number|null>} ID do produto ou null
+     */
+    async getProductIdFromContext(text) {
+        // Tenta extrair o ID diretamente do texto
+        const match = text.match(/(\d+)/);
+        if (match) {
+            return parseInt(match[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Formata detalhes do produto para resposta
+     * @param {Object} product - Produto para formatar
+     * @returns {string} Mensagem formatada
+     */
+    formatProductDetails(product) {
+        if (!product) {
+            return "Desculpe, não encontrei o produto solicitado.";
+        }
+
+        let message = `🏷️ *${product.name}*\n\n`;
+        
+        if (product.description) {
+            message += `📝 *Descrição:*\n${product.description}\n\n`;
+        }
+
+        message += `💰 *Preço:* ${product.price}\n`;
+        
+        if (product.promotional_price) {
+            message += `🏷️ *Preço Promocional:* ${product.promotional_price}\n`;
+        }
+
+        message += `📦 *Estoque:* ${product.stock} unidades\n\n`;
+
+        if (product.variants && product.variants.length > 0) {
+            message += "*Variações Disponíveis:*\n";
+            product.variants.forEach(variant => {
+                message += `▫️ ${variant.name}: ${variant.price} (${variant.stock} em estoque)\n`;
+            });
+            message += "\n";
+        }
+
+        if (product.categories && product.categories.length > 0) {
+            message += `📑 *Categorias:* ${product.categories.join(', ')}\n\n`;
+        }
+
+        if (product.images && product.images.length > 0) {
+            message += "_Este produto possui imagens disponíveis. Deseja visualizá-las?_";
+        }
+
+        return message;
     }
 }
 

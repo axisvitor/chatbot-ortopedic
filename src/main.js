@@ -1,12 +1,19 @@
 require('dotenv').config();
 const { AIServices } = require('./services/ai-services');
 const { WhatsAppService } = require('./services/whatsapp-service');
+const { GroqServices } = require('./services/groq-services');
+const { MediaManagerService } = require('./services/media-manager-service');
 const { BUSINESS_HOURS } = require('./config/settings');
 
 class ChatbotController {
     constructor() {
-        this.aiServices = new AIServices();
+        this.groqServices = new GroqServices();
+        this.aiServices = new AIServices(this.groqServices);
         this.whatsappService = new WhatsAppService();
+        this.mediaManager = new MediaManagerService(
+            this.aiServices.audioService,
+            this.aiServices.imageService
+        );
     }
 
     /**
@@ -21,8 +28,15 @@ class ChatbotController {
                 from: message.from,
                 hasText: !!message.text,
                 hasImage: !!message.imageMessage,
-                hasAudio: !!message.audioMessage
+                hasAudio: !!message.audioMessage,
+                timestamp: new Date().toISOString()
             });
+
+            // Validação inicial da mensagem
+            if (!message || !message.type) {
+                console.error('❌ Mensagem inválida:', message);
+                return "Desculpe, ocorreu um erro ao processar sua mensagem. Formato inválido.";
+            }
 
             let response = '';
 
@@ -46,8 +60,14 @@ class ChatbotController {
                     if (await this.aiServices.isFinancialIssue(message.text)) {
                         return this.handleFinancialIssue(message);
                     }
+
+                    // Tenta processar como consulta de produtos primeiro
+                    const productResponse = await this.aiServices.processProductQuery(message.text);
+                    if (productResponse) {
+                        return productResponse;
+                    }
                     
-                    // Processa com OpenAI
+                    // Se não for consulta de produtos, processa com OpenAI
                     response = await this.aiServices.processMessage(message.text);
                     break;
 
@@ -90,7 +110,25 @@ class ChatbotController {
             return response;
 
         } catch (error) {
-            console.error('❌ Erro ao processar mensagem:', error);
+            // Log detalhado do erro
+            console.error('❌ Erro ao processar mensagem:', {
+                error: error.message,
+                stack: error.stack,
+                messageType: message?.type,
+                from: message?.from,
+                timestamp: new Date().toISOString()
+            });
+
+            // Respostas específicas para diferentes tipos de erro
+            if (error.code === 'MEDIA_ERROR') {
+                return "Desculpe, houve um problema ao processar sua mídia. Por favor, tente enviar novamente ou use outro formato.";
+            } else if (error.code === 'TIMEOUT_ERROR') {
+                return "O processamento demorou mais que o esperado. Por favor, tente novamente.";
+            } else if (error.code === 'AI_SERVICE_ERROR') {
+                return "Nosso serviço de IA está temporariamente indisponível. Por favor, tente novamente em alguns instantes.";
+            }
+
+            // Resposta genérica para outros erros
             return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.";
         }
     }
@@ -103,7 +141,7 @@ class ChatbotController {
     handleHumanSupportRequest(message) {
         // Verifica horário comercial
         if (!this.isBusinessHours()) {
-            return BUSINESS_HOURS.autoReply.humanSupportNeeded;
+            return BUSINESS_HOURS.messages.outOfHours;
         }
 
         // Encaminha para atendimento humano
@@ -119,7 +157,7 @@ class ChatbotController {
     handleFinancialIssue(message) {
         // Verifica horário comercial
         if (!this.isBusinessHours()) {
-            return BUSINESS_HOURS.autoReply.financialDepartment;
+            return BUSINESS_HOURS.messages.outOfHours;
         }
 
         // Encaminha para setor financeiro
@@ -158,4 +196,5 @@ module.exports = { ChatbotController };
 // Se executado diretamente, inicia o servidor
 if (require.main === module) {
     const server = require('./server');
+    server.start();
 }

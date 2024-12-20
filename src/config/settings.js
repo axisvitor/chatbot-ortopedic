@@ -107,11 +107,76 @@ const BUSINESS_HOURS = {
     }
 };
 
+// Media Processing Configuration
+const MEDIA_CONFIG = {
+    audio: {
+        maxDuration: 300, // 5 minutos
+        maxSize: 10 * 1024 * 1024, // 10MB
+        allowedTypes: ['audio/ogg', 'audio/mpeg', 'audio/mp4'],
+        compression: {
+            codec: 'libmp3lame',
+            bitrate: '64k',
+            channels: 1,
+            sampleRate: 16000
+        },
+        cache: {
+            ttl: 7 * 24 * 60 * 60, // 7 dias
+            prefix: 'audio_cache:'
+        }
+    },
+    image: {
+        maxSize: 5 * 1024 * 1024, // 5MB
+        maxDimension: 2048, // pixels
+        allowedTypes: ['image/jpeg', 'image/png'],
+        compression: {
+            quality: 80,
+            progressive: true
+        },
+        cache: {
+            ttl: 7 * 24 * 60 * 60, // 7 dias
+            prefix: 'image_cache:'
+        },
+        security: {
+            signatures: {
+                'ffd8ffe0': 'image/jpeg', // JPEG
+                '89504e47': 'image/png'   // PNG
+            },
+            maxValidationAttempts: 3
+        }
+    },
+    metrics: {
+        enabled: true,
+        retention: 30 * 24 * 60 * 60, // 30 dias
+        prefix: 'media_metrics:'
+    }
+};
+
+// Nuvemshop Configuration
+const NUVEMSHOP_CONFIG = {
+    accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN'),
+    userId: validateEnvVar('NUVEMSHOP_USER_ID'),
+    scope: validateEnvVar('NUVEMSHOP_SCOPE').split(','),
+    cache: {
+        ttl: 3600, // 1 hora em segundos (genérico)
+        productsTtl: 3600, // 1 hora para produtos
+        ordersTtl: 300, // 5 minutos para pedidos
+        categoriesTtl: 86400, // 24 horas para categorias
+        prefix: 'nuvemshop:'
+    },
+    api: {
+        url: validateEnvVar('NUVEMSHOP_API_URL'),
+        timeout: 30000, // 30 segundos
+        retryAttempts: 3
+    }
+};
+
 module.exports = {
     OPENAI_CONFIG,
     GROQ_CONFIG,
     REDIS_CONFIG,
     WHATSAPP_CONFIG,
     TRACKING_CONFIG,
-    BUSINESS_HOURS
+    BUSINESS_HOURS,
+    MEDIA_CONFIG,
+    NUVEMSHOP_CONFIG
 };

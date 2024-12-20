@@ -139,4 +139,4 @@ class BusinessHoursService {
     }
 }
 
-module.exports = new BusinessHoursService();
+module.exports = { BusinessHoursService };

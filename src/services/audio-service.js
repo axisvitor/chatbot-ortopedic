@@ -68,6 +68,52 @@ class AudioService {
     }
 
     /**
+     * Comprime áudio para reduzir tamanho
+     * @param {Buffer} buffer - Buffer do áudio
+     * @returns {Promise<Buffer>} Buffer do áudio comprimido
+     */
+    async compressAudio(buffer) {
+        const tempDir = os.tmpdir();
+        const inputPath = path.join(tempDir, `input-${Date.now()}.ogg`);
+        const outputPath = path.join(tempDir, `compressed-${Date.now()}.mp3`);
+
+        try {
+            // Salva o buffer em arquivo temporário
+            await fs.promises.writeFile(inputPath, buffer);
+
+            // Comprime usando ffmpeg
+            await new Promise((resolve, reject) => {
+                ffmpeg(inputPath)
+                    .toFormat('mp3')
+                    .audioCodec('libmp3lame')
+                    .audioBitrate('64k')
+                    .audioChannels(1)
+                    .audioFrequency(16000)
+                    .on('error', (err) => {
+                        console.error('❌ Erro ao comprimir áudio:', err);
+                        reject(err);
+                    })
+                    .on('end', resolve)
+                    .save(outputPath);
+            });
+
+            // Lê o arquivo comprimido
+            const compressedBuffer = await fs.promises.readFile(outputPath);
+
+            // Limpa arquivos temporários
+            await Promise.all([
+                fs.promises.unlink(inputPath).catch(() => {}),
+                fs.promises.unlink(outputPath).catch(() => {})
+            ]);
+
+            return compressedBuffer;
+        } catch (error) {
+            console.error('❌ Erro ao comprimir áudio:', error);
+            throw new Error(`Falha ao comprimir áudio: ${error.message}`);
+        }
+    }
+
+    /**
      * Processa um áudio do WhatsApp
      * @param {Object} messageData - Dados da mensagem do WhatsApp
      * @returns {Promise<string>} Texto transcrito
@@ -114,12 +160,22 @@ class AudioService {
                 primeirosBytes: buffer.slice(0, 16).toString('hex')
             });
 
-            // Converte o áudio para MP3
+            // Comprime o áudio antes da conversão
+            console.log('🔄 Comprimindo áudio...');
+            const compressedBuffer = await this.compressAudio(buffer);
+
+            console.log('✅ Áudio comprimido:', {
+                tamanhoOriginal: buffer.length,
+                tamanhoComprimido: compressedBuffer.length,
+                reducao: ((buffer.length - compressedBuffer.length) / buffer.length * 100).toFixed(2) + '%'
+            });
+
+            // Converte o áudio comprimido para MP3
             console.log('🔄 Convertendo áudio para MP3...');
-            const convertedBuffer = await this.convertAudio(buffer);
+            const convertedBuffer = await this.convertAudio(compressedBuffer);
 
             console.log('✅ Áudio convertido:', {
-                tamanhoOriginal: buffer.length,
+                tamanhoComprimido: compressedBuffer.length,
                 tamanhoConvertido: convertedBuffer.length
             });
 

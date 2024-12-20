@@ -1,26 +1,6 @@
-# Chatbot Ortopédico com IA
+# Chatbot Ortopédico
 
-Um chatbot inteligente para atendimento de clientes de uma loja de calçados ortopédicos, com recursos de rastreamento de pedidos e processamento de pagamentos.
-
-## Funcionalidades
-
-- 🤖 Atendimento automatizado usando OpenAI GPT-4
-- 🎤 Transcrição de áudio usando Groq
-- 🖼️ Análise de imagens para comprovantes de pagamento
-- 📦 Rastreamento de pedidos integrado com 17TRACK
-- 💬 Integração com WhatsApp API
-- 🕒 Controle de horário comercial
-- 💾 Cache com Redis para melhor performance
-
-## Tecnologias
-
-- Node.js 20+
-- Express.js
-- OpenAI API (GPT-4)
-- Groq API (Whisper e Vision)
-- Redis
-- WhatsApp API
-- 17TRACK API
+Chatbot inteligente para atendimento de clientes de loja de calçados ortopédicos.
 
 ## Estrutura do Projeto
 
@@ -31,9 +11,11 @@ src/
 ├── services/
 │   ├── ai-services.js       # Serviços de IA (OpenAI)
 │   ├── audio-service.js     # Processamento de áudio
+│   ├── business-hours.js    # Controle de horário comercial
 │   ├── groq-services.js     # Serviços Groq (áudio e imagem)
 │   ├── image-service.js     # Processamento de imagens
-│   ├── redis-store.js       # Cache Redis
+│   ├── nuvemshop-service.js # Integração com Nuvemshop
+│   ├── redis-store.js       # Cache Redis e histórico
 │   ├── tracking.js          # Serviço de rastreamento
 │   ├── webhook-service.js   # Processamento de webhooks
 │   └── whatsapp.js         # Serviço do WhatsApp
@@ -68,6 +50,11 @@ src/
    WAPI_TOKEN=seu_token
    WAPI_CONNECTION_KEY=sua_chave
 
+   # Nuvemshop
+   NUVEMSHOP_ACCESS_TOKEN=seu_token
+   NUVEMSHOP_API_URL=sua_url
+   NUVEMSHOP_STORE_ID=seu_id
+
    # Outros
    NODE_ENV=production
    PORT=8080
@@ -96,15 +83,26 @@ O servidor estará rodando na porta especificada no .env (padrão: 8080).
 - ✅ Áudio: Transcrito pelo Groq Whisper e processado pelo Assistant
 - ✅ Imagens: Analisadas pelo Groq Vision e processadas pelo Assistant
 
+### Integração com E-commerce
+- ✅ Consulta de produtos
+- ✅ Verificação de estoque
+- ✅ Consulta de pedidos
+- ✅ Validação segura de identidade
+
+### Armazenamento e Cache
+- ✅ Cache de contexto
+- ✅ Histórico de conversas (60 dias)
+- ✅ Validação de identidade
+
 ### Validações
-- Formato e tamanho de arquivos
-- Horário comercial
-- Cache de contexto
+- ✅ Formato e tamanho de arquivos
+- ✅ Horário comercial
+- ✅ Segurança de dados
 
 ### Logs e Monitoramento
-- Logs detalhados de cada etapa
-- Tratamento de erros específicos
-- Métricas de uso
+- ✅ Logs detalhados de cada etapa
+- ✅ Tratamento de erros específicos
+- ✅ Métricas de uso
 
 ## Licença
 
