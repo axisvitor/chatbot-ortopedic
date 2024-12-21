@@ -177,6 +177,59 @@ class WhatsAppService {
     async delay() {
         return new Promise(resolve => setTimeout(resolve, WHATSAPP_CONFIG.messageDelay));
     }
+
+    async forwardToFinancial(message, orderId = null) {
+        try {
+            const financialNotification = {
+                type: 'financial_forward',
+                priority: 'alta',
+                status: 'pendente',
+                data: {
+                    pedido: {
+                        numero: orderId,
+                        data: new Date().toISOString(),
+                        origem: 'internacional'
+                    },
+                    cliente: {
+                        telefone: message.from,
+                        mensagem_original: message.body
+                    },
+                    atendimento: {
+                        protocolo: `FIN-${new Date().getTime()}`,
+                        data_encaminhamento: new Date().toISOString(),
+                        canal: 'whatsapp'
+                    }
+                }
+            };
+
+            // Envia para o número do departamento financeiro
+            const mensagemFinanceiro = `🔔 *Nova Notificação - Pedido Internacional*\n\n` +
+                `📦 *Pedido:* #${orderId}\n` +
+                `🕒 *Data:* ${new Date().toLocaleString('pt-BR')}\n` +
+                `📱 *Cliente:* ${message.from}\n` +
+                `🔑 *Protocolo:* ${financialNotification.data.atendimento.protocolo}\n\n` +
+                `💬 *Mensagem do Cliente:*\n${message.body}\n\n` +
+                `⚠️ *Ação Necessária:* Verificar taxação e processar pagamento`;
+
+            // Envia para o número do departamento financeiro
+            const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
+            if (numeroFinanceiro) {
+                await this.sendText(numeroFinanceiro, mensagemFinanceiro);
+            }
+
+            // Registra no console para debug
+            console.log('📧 Notificação enviada ao financeiro:', {
+                protocolo: financialNotification.data.atendimento.protocolo,
+                pedido: orderId,
+                timestamp: new Date().toISOString()
+            });
+
+            return true;
+        } catch (error) {
+            console.error('❌ Erro ao encaminhar para financeiro:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = { WhatsAppService };

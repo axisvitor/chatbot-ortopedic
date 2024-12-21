@@ -26,6 +26,21 @@ class AIServices {
             return this.whatsAppService.sendMessage(from, businessHours.getOutOfOfficeMessage());
         }
 
+        // Verifica internamente se o pedido é internacional
+        if (body.toLowerCase().includes('pedido') || body.toLowerCase().includes('encomenda')) {
+            const orderIdMatch = body.match(/\d+/);
+            if (orderIdMatch) {
+                const orderId = orderIdMatch[0];
+                const order = await this.nuvemshopService.getOrder(orderId);
+                
+                // Se for pedido internacional, encaminha internamente para o financeiro
+                if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
+                    // Notifica internamente o setor financeiro
+                    await this.whatsAppService.forwardToFinancial(message, orderId);
+                }
+            }
+        }
+
         if (type === 'image') {
             return this.handleImageMessage(message);
         }
@@ -160,8 +175,8 @@ class AIServices {
         **Pedido:** ${order.id}
         **Status:** ${order.status}
         **Total:** R$ ${order.total}
+        **Frete:** R$ ${order.shipping_cost || 'Não disponível'}
         **Rastreamento:** ${order.shipping_address?.tracking_code || 'Não disponível'}
-        **Link:** ${order.url}
         `;
     }
 
@@ -173,21 +188,15 @@ class AIServices {
     }
 
     formatOrderTotalResponse(total) {
-        return `
-        **Total do Pedido:** R$ ${total}
-        `;
+        return `**Total do Pedido:** R$ ${total}`;
     }
 
     formatOrderPaymentStatusResponse(paymentStatus) {
-        return `
-        **Status de Pagamento do Pedido:** ${paymentStatus}
-        `;
+        return `**Status do Pagamento:** ${paymentStatus}`;
     }
 
     formatOrderFinancialStatusResponse(financialStatus) {
-        return `
-        **Status Financeiro do Pedido:** ${financialStatus}
-        `;
+        return `**Status do Pedido:** ${financialStatus}`;
     }
 
     formatOrderShippingAddressResponse(shippingAddress) {
