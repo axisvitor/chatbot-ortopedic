@@ -45,14 +45,9 @@ let imageService;
 // Função de inicialização
 async function initializeServices() {
     try {
-        const [client] = await Promise.all([
-            whatsappService.getClient(),
-            aiServices.initWhatsApp()
-        ]);
-
+        const client = await whatsappService.getClient();
         audioService = new AudioService(groqServices, client);
         imageService = new ImageService(groqServices, client);
-        
         console.log('✅ Serviços inicializados com sucesso');
         isReady = true;
     } catch (error) {
