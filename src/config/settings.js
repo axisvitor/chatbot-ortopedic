@@ -141,22 +141,63 @@ const NUVEMSHOP_CONFIG = {
     userId: validateEnvVar('NUVEMSHOP_USER_ID'),
     scope: validateEnvVar('NUVEMSHOP_SCOPE').split(','),
     cache: {
-        ttl: 3600, // 1 hora em segundos (genérico)
-        productsTtl: 3600, // 1 hora para produtos
-        ordersTtl: 300, // 5 minutos para pedidos
-        categoriesTtl: 86400, // 24 horas para categorias
-        prefix: 'nuvemshop:'
+        prefix: 'nuvemshop:',
+        ttl: {
+            default: 3600,        // 1 hora
+            products: 3600,       // 1 hora
+            categories: 86400,    // 24 horas
+            orders: {
+                recent: 300,      // 5 minutos para pedidos recentes
+                old: 3600,        // 1 hora para pedidos antigos
+                details: 1800     // 30 minutos para detalhes do pedido
+            },
+            customers: 1800,      // 30 minutos
+            inventory: 300,       // 5 minutos
+            shipping: 1800,       // 30 minutos
+            payments: 1800        // 30 minutos
+        },
+        invalidation: {
+            maxKeys: 1000,        // Máximo de chaves a serem invalidadas por vez
+            batchSize: 100        // Tamanho do lote para invalidação em massa
+        }
     },
     api: {
         url: validateEnvVar('NUVEMSHOP_API_URL'),
-        timeout: 30000, // 30 segundos
-        retryAttempts: 3
+        timeout: 30000,
+        retryAttempts: 3,
+        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
+    },
+    webhook: {
+        retryAttempts: 18, // Conforme documentação
+        retryDelays: [0, 300, 600, 900], // 0s, 5min, 10min, 15min
+        timeout: 10000, // 10 segundos conforme documentação
+        events: {
+            app: ['uninstalled', 'suspended', 'resumed'],
+            category: ['created', 'updated', 'deleted'],
+            order: [
+                'created', 'updated', 'paid', 'packed', 
+                'fulfilled', 'cancelled', 'custom_fields_updated', 
+                'edited', 'pending', 'voided'
+            ],
+            product: ['created', 'updated', 'deleted'],
+            productVariant: ['custom_fields_updated'],
+            domain: ['updated'],
+            orderCustomField: ['created', 'updated', 'deleted'],
+            productVariantCustomField: ['created', 'updated', 'deleted'],
+            store: ['redact'],
+            customers: ['redact', 'data_request']
+        }
+    },
+    rateLimit: {
+        bucketSize: 40, // Tamanho padrão do bucket
+        leakRate: 2,    // Taxa de vazamento (requests por segundo)
+        nextPlanMultiplier: 10, // Multiplicador para planos Next/Evolution
     }
 };
 
 const RATE_LIMIT_CONFIG = {
     windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // Limite de 100 requisições por janela
+    max: 100, // Limite de 100 requisiç��es por janela
     message: "Muitas requisições, por favor, tente novamente mais tarde."
 };
 

@@ -1,58 +1,282 @@
 const axios = require('axios');
-const { RedisStore } = require('../store/redis-store');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
+const { CacheService } = require('./cache-service');
 
 class NuvemshopService {
     constructor() {
-        this.redisStore = new RedisStore();
-        this.axios = axios.create({
-            baseURL: NUVEMSHOP_CONFIG.apiUrl,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authentication': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`
-            },
-            timeout: 30000
-        });
+        this.client = null;
+        this.cacheService = new CacheService();
+        this.initializeClient();
     }
 
-    async _makeRequest(method, url, data = null, attempt = 1) {
-        try {
-            const response = await this.axios({
-                method,
-                url,
-                data
-            });
+    initializeClient() {
+        this.client = axios.create({
+            baseURL: `${NUVEMSHOP_CONFIG.api.url}/v1/${NUVEMSHOP_CONFIG.userId}`,
+            headers: {
+                'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'Content-Type': 'application/json; charset=utf-8',
+                'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
+            },
+            timeout: NUVEMSHOP_CONFIG.api.timeout
+        });
 
-            if (response.status >= 200 && response.status < 300) {
-                return response.data;
-            } else {
-                console.error(`❌ Erro na API Nuvemshop (Tentativa ${attempt}):`, response.status, response.data);
-                throw new Error(`Erro na API Nuvemshop: ${response.status} - ${JSON.stringify(response.data)}`);
+        this.setupInterceptors();
+    }
+
+    setupInterceptors() {
+        this.client.interceptors.response.use(
+            response => response,
+            async error => {
+                if (error.response) {
+                    const { status, data } = error.response;
+                    
+                    switch (status) {
+                        case 400:
+                            console.error('[Nuvemshop] Erro de JSON inválido:', data);
+                            break;
+                        case 402:
+                            console.error('[Nuvemshop] Pagamento necessário. API inacessível.');
+                            break;
+                        case 415:
+                            console.error('[Nuvemshop] Content-Type inválido');
+                            break;
+                        case 422:
+                            console.error('[Nuvemshop] Campos inválidos:', data);
+                            break;
+                        case 429:
+                            console.error('[Nuvemshop] Limite de taxa excedido');
+                            const reset = error.response.headers['x-rate-limit-reset'];
+                            if (reset) {
+                                return new Promise(resolve => {
+                                    setTimeout(() => resolve(this.client(error.config)), reset);
+                                });
+                            }
+                            break;
+                        case 500:
+                        case 502:
+                        case 503:
+                        case 504:
+                            console.error('[Nuvemshop] Erro do servidor:', status);
+                            return this.retryRequest(error.config);
+                    }
+                }
+                return Promise.reject(error);
             }
+        );
+    }
+
+    /**
+     * Gera uma chave de cache única
+     * @param {string} prefix - Prefixo da chave
+     * @param {string|number} identifier - Identificador único
+     * @param {Object} params - Parâmetros adicionais
+     * @returns {string} Chave de cache
+     */
+    generateCacheKey(prefix, identifier = '', params = {}) {
+        const paramsString = Object.entries(params)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, value]) => `${key}=${value}`)
+            .join('&');
+
+        return `${NUVEMSHOP_CONFIG.cache.prefix}${prefix}:${identifier}${paramsString ? `:${paramsString}` : ''}`;
+    }
+
+    /**
+     * Obtém dados do cache ou da API
+     * @param {string} cacheKey - Chave do cache
+     * @param {Function} fetchFunction - Função para buscar dados da API
+     * @param {number} ttl - Tempo de vida do cache em segundos
+     * @returns {Promise<any>} Dados do cache ou da API
+     */
+    async getCachedData(cacheKey, fetchFunction, ttl) {
+        try {
+            // Tenta obter do cache
+            const cachedData = await this.cacheService.get(cacheKey);
+            if (cachedData) {
+                console.log('[Nuvemshop] Cache hit:', cacheKey);
+                return JSON.parse(cachedData);
+            }
+
+            // Se não estiver no cache, busca da API
+            console.log('[Nuvemshop] Cache miss:', cacheKey);
+            const data = await fetchFunction();
+            
+            // Armazena no cache
+            await this.cacheService.set(cacheKey, JSON.stringify(data), ttl);
+            
+            return data;
         } catch (error) {
-            console.error(`❌ Erro na requisição Nuvemshop (Tentativa ${attempt}):`, error.message);
-            if (error.response && error.response.status === 429) {
-                const retryAfter = parseInt(error.response.headers['retry-after'] || 1, 10);
-                console.warn(`⚠️ Rate limit atingido. Tentando novamente em ${retryAfter} segundos.`);
-                await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-                return this._makeRequest(method, url, data, attempt + 1);
-            }
-            if (attempt < 3) {
-                 const delay = 1000 * attempt;
-                console.warn(`⚠️ Tentando novamente em ${delay/1000} segundos.`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                return this._makeRequest(method, url, data, attempt + 1);
-            }
-            throw new Error(`Falha na requisição Nuvemshop após ${attempt} tentativas: ${error.message}`);
+            console.error('[Nuvemshop] Erro ao obter dados:', error);
+            throw error;
         }
     }
 
-    async getProduct(productId) {
-        return this._makeRequest('get', `/products/${productId}`);
+    /**
+     * Invalida cache por prefixo
+     * @param {string} prefix - Prefixo das chaves a serem invalidadas
+     */
+    async invalidateCache(prefix) {
+        try {
+            const pattern = `${NUVEMSHOP_CONFIG.cache.prefix}${prefix}:*`;
+            const keys = await this.cacheService.keys(pattern);
+            
+            if (keys.length > 0) {
+                await Promise.all(keys.map(key => this.cacheService.del(key)));
+                console.log(`[Nuvemshop] Cache invalidado: ${keys.length} chaves`);
+            }
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao invalidar cache:', error);
+        }
     }
 
+    /**
+     * Obtém produto por ID
+     * @param {number} productId - ID do produto
+     * @returns {Promise<Object>} Dados do produto
+     */
+    async getProduct(productId) {
+        const cacheKey = this.generateCacheKey('product', productId);
+        return this.getCachedData(
+            cacheKey,
+            async () => {
+                const response = await this.client.get(`/products/${productId}`);
+                return response.data;
+            },
+            NUVEMSHOP_CONFIG.cache.productsTtl
+        );
+    }
+
+    /**
+     * Obtém lista de produtos
+     * @param {Object} options - Opções de paginação e filtros
+     * @returns {Promise<Object>} Lista de produtos
+     */
+    async getProducts(options = {}) {
+        const cacheKey = this.generateCacheKey('products', 'list', options);
+        return this.getCachedData(
+            cacheKey,
+            async () => {
+                const params = {
+                    page: options.page || 1,
+                    per_page: Math.min(options.per_page || 50, 200),
+                    ...options
+                };
+
+                const response = await this.client.get('/products', { params });
+                
+                return {
+                    data: response.data,
+                    pagination: {
+                        total: parseInt(response.headers['x-total-count'] || 0),
+                        currentPage: params.page,
+                        perPage: params.per_page,
+                        links: this.parseLinkHeader(response.headers.link)
+                    }
+                };
+            },
+            NUVEMSHOP_CONFIG.cache.productsTtl
+        );
+    }
+
+    /**
+     * Obtém pedido por ID
+     * @param {number} orderId - ID do pedido
+     * @returns {Promise<Object>} Dados do pedido
+     */
     async getOrder(orderId) {
-        return this._makeRequest('get', `/orders/${orderId}`);
+        const cacheKey = this.generateCacheKey('order', orderId);
+        return this.getCachedData(
+            cacheKey,
+            async () => {
+                const response = await this.client.get(`/orders/${orderId}`);
+                return response.data;
+            },
+            NUVEMSHOP_CONFIG.cache.ordersTtl
+        );
+    }
+
+    /**
+     * Obtém lista de pedidos
+     * @param {Object} options - Opções de paginação e filtros
+     * @returns {Promise<Object>} Lista de pedidos
+     */
+    async getOrders(options = {}) {
+        const cacheKey = this.generateCacheKey('orders', 'list', options);
+        return this.getCachedData(
+            cacheKey,
+            async () => {
+                const params = {
+                    page: options.page || 1,
+                    per_page: Math.min(options.per_page || 50, 200),
+                    ...options
+                };
+
+                const response = await this.client.get('/orders', { params });
+                
+                return {
+                    data: response.data,
+                    pagination: {
+                        total: parseInt(response.headers['x-total-count'] || 0),
+                        currentPage: params.page,
+                        perPage: params.per_page,
+                        links: this.parseLinkHeader(response.headers.link)
+                    }
+                };
+            },
+            NUVEMSHOP_CONFIG.cache.ordersTtl
+        );
+    }
+
+    /**
+     * Atualiza um produto
+     * @param {number} productId - ID do produto
+     * @param {Object} data - Dados do produto
+     * @returns {Promise<Object>} Produto atualizado
+     */
+    async updateProduct(productId, data) {
+        try {
+            const response = await this.client.put(`/products/${productId}`, data);
+            await this.invalidateCache('product');
+            return response.data;
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao atualizar produto:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Atualiza um pedido
+     * @param {number} orderId - ID do pedido
+     * @param {Object} data - Dados do pedido
+     * @returns {Promise<Object>} Pedido atualizado
+     */
+    async updateOrder(orderId, data) {
+        try {
+            const response = await this.client.put(`/orders/${orderId}`, data);
+            await this.invalidateCache('order');
+            return response.data;
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao atualizar pedido:', error);
+            throw error;
+        }
+    }
+
+    async retryRequest(config, retryCount = 0) {
+        const maxRetries = NUVEMSHOP_CONFIG.api.retryAttempts;
+        const baseDelay = 1000; // 1 segundo
+
+        if (retryCount >= maxRetries) {
+            return Promise.reject(new Error('Número máximo de tentativas excedido'));
+        }
+
+        const delay = baseDelay * Math.pow(2, retryCount);
+        await new Promise(resolve => setTimeout(resolve, delay));
+
+        try {
+            return await this.client(config);
+        } catch (error) {
+            return this.retryRequest(config, retryCount + 1);
+        }
     }
 
     async getCustomer(customerId) {
@@ -154,6 +378,101 @@ class NuvemshopService {
             return null;
         }
         return order.subtotal;
+    }
+
+    /**
+     * Processa respostas com múltiplos idiomas
+     * @param {Object} data - Dados da resposta
+     * @param {string} mainLanguage - Idioma principal
+     * @returns {Object} Dados processados
+     */
+    processMultiLanguageResponse(data, mainLanguage = 'pt') {
+        if (!data) return data;
+
+        const processValue = (value) => {
+            if (typeof value === 'object' && value !== null) {
+                return value[mainLanguage] || Object.values(value)[0];
+            }
+            return value;
+        };
+
+        return Object.entries(data).reduce((acc, [key, value]) => {
+            acc[key] = processValue(value);
+            return acc;
+        }, {});
+    }
+
+    /**
+     * Processa dados multilíngues
+     * @param {Object} data - Dados a serem processados
+     * @param {string} mainLanguage - Idioma principal
+     * @returns {Object} Dados processados
+     */
+    processMultiLanguageData(data, mainLanguage = 'pt') {
+        if (!data) return data;
+
+        const processValue = (value) => {
+            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                // Se for um objeto de idiomas, retorna o valor do idioma principal ou o primeiro disponível
+                if (value[mainLanguage]) return value[mainLanguage];
+                return Object.values(value)[0];
+            }
+            return value;
+        };
+
+        const result = {};
+        for (const [key, value] of Object.entries(data)) {
+            if (Array.isArray(value)) {
+                result[key] = value.map(item => this.processMultiLanguageData(item, mainLanguage));
+            } else {
+                result[key] = processValue(value);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Prepara dados para envio com suporte a múltiplos idiomas
+     * @param {Object} data - Dados a serem enviados
+     * @param {Array} multiLanguageFields - Campos que suportam múltiplos idiomas
+     * @returns {Object} Dados preparados
+     */
+    prepareMultiLanguageData(data, multiLanguageFields = ['name', 'description']) {
+        const languages = ['pt', 'es']; // Adicione mais idiomas conforme necessário
+        const result = {};
+
+        for (const [key, value] of Object.entries(data)) {
+            if (multiLanguageFields.includes(key) && typeof value === 'string') {
+                // Se for um campo multilíngue e o valor for uma string,
+                // cria um objeto com o mesmo valor para todos os idiomas
+                result[key] = languages.reduce((acc, lang) => {
+                    acc[lang] = value;
+                    return acc;
+                }, {});
+            } else {
+                result[key] = value;
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Processa o header Link para paginação
+     * @param {string} linkHeader - Header Link da resposta
+     * @returns {Object} Links processados
+     */
+    parseLinkHeader(linkHeader) {
+        if (!linkHeader) return {};
+
+        return linkHeader.split(',').reduce((acc, link) => {
+            const match = link.match(/<(.+)>;\s*rel="(.+)"/);
+            if (match) {
+                acc[match[2]] = match[1];
+            }
+            return acc;
+        }, {});
     }
 }
 

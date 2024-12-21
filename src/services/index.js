@@ -13,6 +13,7 @@ const { NuvemshopService } = require('./nuvemshop-service');
 const { OrderValidationService } = require('./order-validation-service');
 const { OpenAIService } = require('./openai-service');
 const { WebhookService } = require('./webhook-service');
+const { CacheService } = require('./cache-service');
 
 // Exporta todos os serviços
 module.exports = {
@@ -30,5 +31,6 @@ module.exports = {
     NuvemshopService,
     OrderValidationService,
     OpenAIService,
-    WebhookService
+    WebhookService,
+    CacheService
 };

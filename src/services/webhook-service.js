@@ -1,4 +1,110 @@
+const crypto = require('crypto');
+const { NUVEMSHOP_CONFIG } = require('../config/settings');
+
 class WebhookService {
+    constructor() {
+        this.userAgent = 'API Loja Ortopedic (suporte@lojaortopedic.com.br)';
+    }
+
+    verifyNuvemshopWebhook(data, hmacHeader) {
+        try {
+            const calculatedHmac = crypto
+                .createHmac('sha256', NUVEMSHOP_CONFIG.accessToken)
+                .update(data)
+                .digest('hex');
+
+            return hmacHeader === calculatedHmac;
+        } catch (error) {
+            console.error('[Webhook] Erro ao verificar HMAC:', error);
+            return false;
+        }
+    }
+
+    handleNuvemshopWebhook(data, headers) {
+        try {
+            const hmacHeader = headers['x-linkedstore-hmac-sha256'];
+            
+            // Verifica a assinatura do webhook
+            if (!this.verifyNuvemshopWebhook(JSON.stringify(data), hmacHeader)) {
+                console.error('[Webhook] Assinatura HMAC inválida');
+                return null;
+            }
+
+            // Processa eventos específicos
+            switch (data.event) {
+                case 'order/created':
+                case 'order/updated':
+                case 'order/paid':
+                case 'order/cancelled':
+                    return this.handleOrderEvent(data);
+                
+                case 'product/created':
+                case 'product/updated':
+                case 'product/deleted':
+                    return this.handleProductEvent(data);
+                
+                case 'store/redact':
+                    return this.handleStoreDataDeletion(data);
+                
+                case 'customers/redact':
+                    return this.handleCustomerDataDeletion(data);
+                
+                case 'customers/data_request':
+                    return this.handleCustomerDataRequest(data);
+                
+                default:
+                    console.warn('[Webhook] Evento não tratado:', data.event);
+                    return null;
+            }
+        } catch (error) {
+            console.error('[Webhook] Erro ao processar webhook:', error);
+            return null;
+        }
+    }
+
+    handleOrderEvent(data) {
+        console.log(`[Webhook] Processando evento de pedido: ${data.event}`, {
+            orderId: data.id,
+            storeId: data.store_id
+        });
+        // Implementar lógica específica para eventos de pedido
+    }
+
+    handleProductEvent(data) {
+        console.log(`[Webhook] Processando evento de produto: ${data.event}`, {
+            productId: data.id,
+            storeId: data.store_id
+        });
+        // Implementar lógica específica para eventos de produto
+    }
+
+    handleStoreDataDeletion(data) {
+        console.log('[Webhook] Processando solicitação de exclusão de dados da loja', {
+            storeId: data.store_id
+        });
+        // Implementar lógica de exclusão de dados da loja
+    }
+
+    handleCustomerDataDeletion(data) {
+        console.log('[Webhook] Processando solicitação de exclusão de dados do cliente', {
+            storeId: data.store_id,
+            customerId: data.customer?.id,
+            orders: data.orders_to_redact
+        });
+        // Implementar lógica de exclusão de dados do cliente
+    }
+
+    handleCustomerDataRequest(data) {
+        console.log('[Webhook] Processando solicitação de dados do cliente', {
+            storeId: data.store_id,
+            customerId: data.customer?.id,
+            orders: data.orders_requested,
+            checkouts: data.checkouts_requested,
+            drafts: data.drafts_orders_requested
+        });
+        // Implementar lógica de relatório de dados do cliente
+    }
+
     extractMessageFromWebhook(webhookData) {
         try {
             console.log('[Webhook] Processando dados:', {
@@ -72,6 +178,29 @@ class WebhookService {
         if (message.documentMessage) return 'document';
         
         return 'unknown';
+    }
+
+    async registerWebhook(event, url) {
+        try {
+            const response = await fetch(`${NUVEMSHOP_CONFIG.api.url}/webhooks`, {
+                method: 'POST',
+                headers: {
+                    'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                    'Content-Type': 'application/json',
+                    'User-Agent': this.userAgent
+                },
+                body: JSON.stringify({ event, url })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Erro ao registrar webhook: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('[Webhook] Erro ao registrar webhook:', error);
+            throw error;
+        }
     }
 }
 
