@@ -183,7 +183,7 @@ class AIServices {
     formatOrderTrackingResponse(trackingCode) {
         return `
         **Rastreamento do Pedido:** ${trackingCode}
-        **Link:** https://www.link-para-rastreamento.com/${trackingCode}
+        **Link:** https://www.17track.net/${trackingCode}
         `;
     }
 
