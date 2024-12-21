@@ -12,7 +12,8 @@ npm-debug.log*
 
 # Diretório de arquivos temporários
 temp/
-tmp/
+*.ogg
+*.wav
 
 # Arquivos do sistema
 .DS_Store
