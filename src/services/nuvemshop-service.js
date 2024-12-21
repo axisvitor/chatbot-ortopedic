@@ -474,6 +474,76 @@ class NuvemshopService {
             return acc;
         }, {});
     }
+
+    /**
+     * Obtém pedido pelo número
+     * @param {string} orderNumber - Número do pedido
+     * @returns {Promise<Object|null>} Pedido ou null se não encontrado
+     */
+    async getOrderByNumber(orderNumber) {
+        try {
+            const response = await this.client.get(`/orders?q=${orderNumber}`);
+            const orders = response.data;
+            return orders.find(order => order.number === orderNumber) || null;
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao buscar pedido por número:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Traduz status do pedido
+     * @param {string} status - Status original
+     * @returns {string} Status traduzido
+     */
+    translateOrderStatus(status) {
+        const translations = {
+            'open': 'Em aberto',
+            'closed': 'Finalizado',
+            'cancelled': 'Cancelado',
+            'pending': 'Pendente',
+            'paid': 'Pago',
+            'unpaid': 'Não pago',
+            'authorized': 'Autorizado',
+            'refunded': 'Reembolsado',
+            'partially_refunded': 'Parcialmente reembolsado',
+            'voided': 'Anulado',
+            'shipped': 'Enviado',
+            'unshipped': 'Não enviado',
+            'partially_shipped': 'Parcialmente enviado',
+            'ready_for_pickup': 'Pronto para retirada',
+            'picked_up': 'Retirado',
+            'ready_for_shipping': 'Pronto para envio'
+        };
+
+        return translations[status?.toLowerCase()] || status;
+    }
+
+    /**
+     * Formata preço para exibição
+     * @param {number} price - Preço a ser formatado
+     * @returns {string} Preço formatado
+     */
+    formatPrice(price) {
+        return new Intl.NumberFormat('pt-BR', {
+            style: 'currency',
+            currency: 'BRL'
+        }).format(price);
+    }
+
+    /**
+     * Obtém idioma principal da loja
+     * @returns {Promise<string>} Código do idioma principal
+     */
+    async getMainLanguage() {
+        try {
+            const response = await this.client.get('/store');
+            return response.data.main_language || 'pt';
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao obter idioma principal:', error);
+            return 'pt';
+        }
+    }
 }
 
 module.exports = { NuvemshopService }; 
