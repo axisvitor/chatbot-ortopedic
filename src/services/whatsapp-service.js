@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { WHATSAPP_CONFIG } = require('../config/settings');
+const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 
 class WhatsAppService {
     constructor() {
@@ -233,9 +234,9 @@ class WhatsAppService {
     }
 
     /**
-     * Faz download de uma mídia do WhatsApp
+     * Faz download de uma mídia do WhatsApp usando Baileys
      * @param {Object} message - Mensagem contendo a mídia
-     * @returns {Promise<Buffer>} Buffer com o conteúdo da mídia
+     * @returns {Promise<Buffer>} Buffer com o conteúdo da mídia já descriptografado
      */
     async downloadMediaMessage(message) {
         try {
@@ -243,110 +244,49 @@ class WhatsAppService {
                 throw new Error('Objeto de mensagem inválido');
             }
 
-            const { messageId, mediaUrl, mediaId } = message;
-
-            if (!mediaUrl && !mediaId) {
-                console.error('❌ URL ou ID da mídia não fornecido:', {
-                    messageId,
-                    messageKeys: Object.keys(message),
-                    timestamp: new Date().toISOString()
-                });
-                throw new Error('URL ou ID da mídia não fornecido');
-            }
-
             console.log('📥 Baixando mídia:', {
-                messageId,
+                messageId: message.messageId,
                 tipo: message.type,
-                url: mediaUrl?.substring(0, 100),
-                mediaId,
                 timestamp: new Date().toISOString()
             });
 
-            // Primeiro tenta pelo ID da mídia (mais confiável)
-            if (mediaId) {
-                try {
-                    const mediaResponse = await this.client.get(
-                        `v1/media/${mediaId}/download`,
-                        { 
+            // Usa o Baileys para baixar e descriptografar a mídia
+            const buffer = await downloadMediaMessage(
+                message,
+                'buffer',
+                {},
+                {
+                    logger: console,
+                    reuploadRequest: async (media) => {
+                        const { mediaUrl } = media;
+                        // Baixa a mídia com o token de autorização
+                        const response = await axios.get(mediaUrl, {
                             responseType: 'arraybuffer',
                             headers: {
                                 'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
                             }
-                        }
-                    );
-
-                    if (mediaResponse.status === 200 && mediaResponse.data) {
-                        console.log('✅ Mídia baixada via ID:', {
-                            messageId,
-                            mediaId,
-                            tamanho: mediaResponse.data.length,
-                            timestamp: new Date().toISOString()
                         });
-                        return Buffer.from(mediaResponse.data);
-                    }
-                } catch (mediaError) {
-                    console.error('⚠️ Erro ao baixar mídia via ID:', {
-                        erro: mediaError.message,
-                        mediaId,
-                        timestamp: new Date().toISOString()
-                    });
-                    // Continua para tentar outros métodos
+                        return response.data;
+                    },
                 }
-            }
-
-            // Se não tem ID ou falhou, tenta pela URL
-            if (mediaUrl) {
-                try {
-                    const response = await axios.get(mediaUrl, {
-                        responseType: 'arraybuffer',
-                        headers: {
-                            'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
-                        },
-                        maxContentLength: Infinity,
-                        maxBodyLength: Infinity,
-                        timeout: 30000
-                    });
-
-                    if (response.status === 200 && response.data) {
-                        console.log('✅ Mídia baixada via URL:', {
-                            messageId,
-                            tamanho: response.data.length,
-                            timestamp: new Date().toISOString()
-                        });
-                        return Buffer.from(response.data);
-                    }
-                } catch (urlError) {
-                    console.error('⚠️ Erro no download via URL:', {
-                        erro: urlError.message,
-                        messageId,
-                        timestamp: new Date().toISOString()
-                    });
-                }
-            }
-
-            // Se ambos falharam, tenta o endpoint de download padrão
-            const apiResponse = await this.client.get(
-                `message/download-media?connectionKey=${this.connectionKey}&messageId=${messageId}`,
-                { responseType: 'arraybuffer' }
             );
 
-            if (apiResponse.status === 200 && apiResponse.data) {
-                console.log('✅ Mídia baixada via API padrão:', {
-                    messageId,
-                    tamanho: apiResponse.data.length,
-                    timestamp: new Date().toISOString()
-                });
-                return Buffer.from(apiResponse.data);
+            if (!buffer || buffer.length === 0) {
+                throw new Error('Download resultou em buffer vazio');
             }
 
-            throw new Error('Todos os métodos de download falharam');
+            console.log('✅ Mídia baixada com sucesso:', {
+                messageId: message.messageId,
+                tamanho: buffer.length,
+                timestamp: new Date().toISOString()
+            });
+
+            return buffer;
 
         } catch (error) {
             console.error('❌ Erro ao baixar mídia:', {
                 erro: error.message,
                 messageId: message?.messageId,
-                url: message?.mediaUrl?.substring(0, 100),
-                mediaId: message?.mediaId,
                 timestamp: new Date().toISOString()
             });
             throw error;

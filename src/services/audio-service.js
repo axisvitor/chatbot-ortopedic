@@ -8,6 +8,10 @@ const { Queue } = require('../utils/queue');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
+const crypto = require('crypto');
+const stream = require('stream');
+const { promisify } = require('util');
+const pipeline = promisify(stream.pipeline);
 
 class AudioService {
     constructor(groqServices, whatsappClient) {
@@ -60,95 +64,79 @@ class AudioService {
         let outputPath = null;
 
         try {
-            if (!message || !message.mediaUrl) {
-                throw new Error('Mensagem de áudio inválida ou sem URL');
+            if (!message) {
+                throw new Error('Mensagem inválida');
             }
 
-            const ffmpegAvailable = await this.init();
-            if (!ffmpegAvailable) {
-                return {
-                    error: true,
-                    message: 'Desculpe, o processamento de áudio está temporariamente indisponível. Por favor, envie sua mensagem em texto.'
-                };
-            }
-
-            console.log('🎵 Baixando áudio:', {
+            console.log('🎤 Processando áudio do WhatsApp:', {
                 messageId: message.messageId,
-                url: message.mediaUrl.substring(0, 100),
+                tipo: message.type,
                 timestamp: new Date().toISOString()
             });
 
-            const audioBuffer = await this.whatsappClient.downloadMediaMessage(message);
+            // Instancia o serviço do WhatsApp
+            const whatsappService = new WhatsAppService();
+            await whatsappService.init();
+
+            // Faz o download do áudio (já descriptografado pelo Baileys)
+            const audioBuffer = await whatsappService.downloadMediaMessage(message);
             
-            if (!audioBuffer || audioBuffer.length < 100) {
-                throw new Error('Download do áudio falhou ou arquivo muito pequeno');
+            if (!audioBuffer || audioBuffer.length === 0) {
+                throw new Error('Buffer de áudio vazio ou inválido');
             }
 
+            console.log('📦 Áudio baixado:', {
+                messageId: message.messageId,
+                tamanho: audioBuffer.length,
+                timestamp: new Date().toISOString()
+            });
+
+            // Cria diretório temporário se não existir
             const tmpDir = path.join(__dirname, '../../tmp');
             await fse.ensureDir(tmpDir);
 
-            // Tenta diferentes abordagens para processar o áudio
-            const attempts = [
-                { ext: '.opus', format: 'opus' },
-                { ext: '.ogg', format: 'ogg' },
-                { ext: '.webm', format: 'webm' }
-            ];
+            // Salva o áudio e prepara para conversão
+            inputPath = path.join(tmpDir, `${message.messageId}_input.ogg`);
+            outputPath = path.join(tmpDir, `${message.messageId}_output.wav`);
 
-            let success = false;
-            let error = null;
+            await fs.writeFile(inputPath, audioBuffer);
 
-            for (const attempt of attempts) {
-                try {
-                    inputPath = path.join(tmpDir, `${message.messageId}_input${attempt.ext}`);
-                    outputPath = path.join(tmpDir, `${message.messageId}_output.wav`);
+            console.log('🔄 Convertendo áudio:', {
+                messageId: message.messageId,
+                input: inputPath,
+                output: outputPath,
+                tamanhoInput: audioBuffer.length,
+                timestamp: new Date().toISOString()
+            });
 
-                    await fs.writeFile(inputPath, audioBuffer);
+            // Converte usando FFmpeg com auto-detecção de formato
+            await new Promise((resolve, reject) => {
+                ffmpeg()
+                    .input(inputPath)
+                    .outputOptions([
+                        '-ar 16000',
+                        '-ac 1',
+                        '-c:a pcm_s16le'
+                    ])
+                    .on('error', (err) => {
+                        console.error('❌ Erro FFmpeg:', {
+                            erro: err.message,
+                            comando: err.command,
+                            timestamp: new Date().toISOString()
+                        });
+                        reject(err);
+                    })
+                    .on('end', () => {
+                        console.log('✅ Conversão concluída');
+                        resolve();
+                    })
+                    .save(outputPath);
+            });
 
-                    console.log('🔄 Convertendo áudio:', {
-                        messageId: message.messageId,
-                        input: inputPath,
-                        output: outputPath,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    // Deixa o FFmpeg detectar o formato automaticamente
-                    await new Promise((resolve, reject) => {
-                        ffmpeg()
-                            .input(inputPath)
-                            .outputOptions([
-                                '-ar 16000',
-                                '-ac 1',
-                                '-c:a pcm_s16le'
-                            ])
-                            .on('error', reject)
-                            .on('end', resolve)
-                            .save(outputPath);
-                    });
-
-                    // Verifica se o arquivo de saída é válido
-                    const outputStats = await fs.stat(outputPath);
-                    if (!outputStats || outputStats.size < 100) {
-                        throw new Error('Arquivo de saída inválido após conversão');
-                    }
-
-                    success = true;
-                    break;
-                } catch (attemptError) {
-                    error = attemptError;
-                    console.log(`⚠️ Tentativa com ${attempt.format} falhou:`, attemptError.message);
-                    
-                    // Limpa arquivos desta tentativa
-                    try {
-                        if (fse.existsSync(inputPath)) await fs.unlink(inputPath);
-                        if (fse.existsSync(outputPath)) await fs.unlink(outputPath);
-                    } catch (cleanupError) {
-                        console.error('⚠️ Erro ao limpar arquivos temporários:', cleanupError);
-                    }
-                }
-            }
-
-            if (!success) {
-                throw error || new Error('Todas as tentativas de conversão falharam');
+            // Verifica se o arquivo de saída é válido
+            const outputStats = await fs.stat(outputPath);
+            if (!outputStats || outputStats.size < 100) {
+                throw new Error('Arquivo de saída inválido após conversão');
             }
 
             console.log('🎯 Transcrevendo áudio:', {
