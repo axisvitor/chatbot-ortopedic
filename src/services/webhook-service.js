@@ -435,15 +435,11 @@ class WebhookService {
                 return null;
             }
 
-            // Extrai dados básicos
+            // Mantém o objeto original do Baileys e apenas adiciona campos auxiliares
             const messageData = {
+                ...webhookData.body, // Mantém toda a estrutura original
                 type: this.getMessageType(webhookData.body),
                 from: webhookData.body.key.remoteJid.replace('@s.whatsapp.net', ''),
-                messageId: webhookData.body.key.id,
-                timestamp: webhookData.body.messageTimestamp,
-                pushName: webhookData.body.pushName,
-                device: webhookData.body.device,
-                isGroup: webhookData.body.isGroup || false,
                 text: webhookData.body.message?.conversation || 
                       webhookData.body.message?.extendedTextMessage?.text ||
                       webhookData.body.text || 
@@ -453,44 +449,47 @@ class WebhookService {
             console.log('📝 [Webhook] Dados básicos extraídos:', {
                 tipo: messageData.type,
                 de: messageData.from,
-                messageId: messageData.messageId,
+                messageId: messageData.key?.id,
                 texto: messageData.text,
-                timestamp: new Date(messageData.timestamp * 1000).toISOString()
+                timestamp: new Date(messageData.messageTimestamp * 1000).toISOString()
             });
 
-            // Adiciona dados da mídia se presente
+            // Logs detalhados de mídia se presente
             const message = webhookData.body.message;
             if (message.imageMessage) {
-                messageData.imageMessage = message.imageMessage;
                 console.log('🖼️ [Webhook] Imagem detectada:', {
                     mimetype: message.imageMessage.mimetype,
-                    caption: message.imageMessage.caption?.substring(0, 100)
+                    caption: message.imageMessage.caption?.substring(0, 100),
+                    mediaKey: !!message.imageMessage.mediaKey,
+                    url: !!message.imageMessage.url
                 });
             }
             if (message.audioMessage) {
-                messageData.audioMessage = message.audioMessage;
                 console.log('🎵 [Webhook] Áudio detectado:', {
                     seconds: message.audioMessage.seconds,
-                    mimetype: message.audioMessage.mimetype
+                    mimetype: message.audioMessage.mimetype,
+                    mediaKey: !!message.audioMessage.mediaKey,
+                    url: !!message.audioMessage.url
                 });
             }
             if (message.documentMessage) {
-                messageData.documentMessage = message.documentMessage;
                 console.log('📄 [Webhook] Documento detectado:', {
                     filename: message.documentMessage.fileName,
-                    mimetype: message.documentMessage.mimetype
+                    mimetype: message.documentMessage.mimetype,
+                    mediaKey: !!message.documentMessage.mediaKey,
+                    url: !!message.documentMessage.url
                 });
             }
 
             console.log('✅ [Webhook] Mensagem processada:', {
                 tipo: messageData.type,
                 de: messageData.from,
-                messageId: messageData.messageId,
+                messageId: messageData.key?.id,
                 temTexto: !!messageData.text,
                 textoPreview: messageData.text?.substring(0, 100),
-                temImagem: !!messageData.imageMessage,
-                temAudio: !!messageData.audioMessage,
-                temDocumento: !!messageData.documentMessage,
+                temImagem: !!messageData.message?.imageMessage,
+                temAudio: !!messageData.message?.audioMessage,
+                temDocumento: !!messageData.message?.documentMessage,
                 isGroup: messageData.isGroup,
                 timestamp: new Date().toISOString()
             });
