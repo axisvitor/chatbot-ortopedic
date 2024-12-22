@@ -115,7 +115,8 @@ const { WebhookService } = require('./services/webhook-service');
 const { WhatsAppService } = require('./services/whatsapp-service');
 const { AIServices } = require('./services/ai-services');
 const { AudioService } = require('./services/audio-service');
-const { ImageService } = require('./services/whatsapp-image-service');
+const { WhatsAppImageService } = require('./services/whatsapp-image-service');
+const ImageService = require('./services/image-service');
 const businessHours = require('./services/business-hours');
 
 console.log('✅ Módulos carregados');
@@ -140,6 +141,7 @@ let whatsappService;
 let aiServices;
 let audioService;
 let imageService;
+let whatsappImageService;
 
 // Função de inicialização
 async function initializeServices() {
@@ -180,13 +182,16 @@ async function initializeServices() {
             audioService = new AudioService(groqServices, whatsappService);
             console.log('✅ AudioService inicializado');
             
+            whatsappImageService = new WhatsAppImageService();
+            console.log('✅ WhatsAppImageService inicializado');
+
             imageService = new ImageService(groqServices, whatsappService);
             console.log('✅ ImageService inicializado');
             
             // Inicializa o AIServices passando todas as dependências
             aiServices = new AIServices(
                 whatsappService,
-                imageService,
+                whatsappImageService,
                 null, // redisStore
                 null, // openAIService
                 null, // trackingService
