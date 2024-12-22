@@ -16,6 +16,7 @@ class AudioService {
         this.ffmpegPath = process.env.FFMPEG_PATH || ffmpegStatic;
         this.initialized = false;
         this.hasOpusSupport = false;
+        this.opusDetectionAttempts = 0;
         
         // Configura o fluent-ffmpeg para usar o caminho correto
         ffmpeg.setFfmpegPath(this.ffmpegPath);
@@ -28,9 +29,13 @@ class AudioService {
             // Tenta executar ffmpeg -version
             const { stdout } = await execAsync(`"${this.ffmpegPath}" -version`);
             
-            // Verifica suporte a OPUS
+            // Verifica suporte a OPUS de forma mais robusta
             const { stdout: formats } = await execAsync(`"${this.ffmpegPath}" -formats`);
-            this.hasOpusSupport = formats.toLowerCase().includes('opus');
+            const { stdout: codecs } = await execAsync(`"${this.ffmpegPath}" -codecs`);
+            
+            // Verifica tanto o formato quanto o codec
+            this.hasOpusSupport = formats.toLowerCase().includes('opus') && 
+                                codecs.toLowerCase().includes('opus');
             
             this.initialized = true;
             console.log('✅ FFmpeg disponível:', {
@@ -82,66 +87,71 @@ class AudioService {
             const tmpDir = path.join(__dirname, '../../tmp');
             await fse.ensureDir(tmpDir);
 
-            // Define extensões com base no suporte a OPUS
-            const inputExt = this.hasOpusSupport ? '.opus' : '.ogg';
-            inputPath = path.join(tmpDir, `${message.messageId}_input${inputExt}`);
-            outputPath = path.join(tmpDir, `${message.messageId}_output.wav`);
+            // Tenta diferentes abordagens para processar o áudio
+            const attempts = [
+                { ext: '.opus', format: 'opus' },
+                { ext: '.ogg', format: 'ogg' },
+                { ext: '.webm', format: 'webm' }
+            ];
 
-            await fs.writeFile(inputPath, audioBuffer);
+            let success = false;
+            let error = null;
 
-            console.log('🔄 Convertendo áudio:', {
-                messageId: message.messageId,
-                input: inputPath,
-                output: outputPath,
-                opusSupport: this.hasOpusSupport,
-                timestamp: new Date().toISOString()
-            });
+            for (const attempt of attempts) {
+                try {
+                    inputPath = path.join(tmpDir, `${message.messageId}_input${attempt.ext}`);
+                    outputPath = path.join(tmpDir, `${message.messageId}_output.wav`);
 
-            // Configura o FFmpeg com base no suporte a OPUS
-            const ffmpegCommand = ffmpeg().input(inputPath);
+                    await fs.writeFile(inputPath, audioBuffer);
 
-            if (this.hasOpusSupport) {
-                ffmpegCommand.inputOptions(['-f opus']);
-            } else {
-                // Tenta como OGG primeiro
-                ffmpegCommand.inputOptions(['-f ogg']);
+                    console.log('🔄 Tentando converter áudio:', {
+                        messageId: message.messageId,
+                        input: inputPath,
+                        format: attempt.format,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    await new Promise((resolve, reject) => {
+                        ffmpeg()
+                            .input(inputPath)
+                            .inputOptions([`-f ${attempt.format}`])
+                            .outputOptions([
+                                '-ar 16000',
+                                '-ac 1',
+                                '-c:a pcm_s16le'
+                            ])
+                            .on('error', reject)
+                            .on('end', resolve)
+                            .save(outputPath);
+                    });
+
+                    // Verifica se o arquivo de saída é válido
+                    const outputStats = await fs.stat(outputPath);
+                    if (outputStats && outputStats.size >= 100) {
+                        success = true;
+                        break;
+                    }
+                } catch (attemptError) {
+                    error = attemptError;
+                    console.log(`⚠️ Tentativa com ${attempt.format} falhou:`, attemptError.message);
+                    
+                    // Limpa arquivos desta tentativa
+                    try {
+                        if (fse.existsSync(inputPath)) await fs.unlink(inputPath);
+                        if (fse.existsSync(outputPath)) await fs.unlink(outputPath);
+                    } catch (cleanupError) {
+                        console.error('⚠️ Erro ao limpar arquivos temporários:', cleanupError);
+                    }
+                }
             }
 
-            // Configurações comuns de saída
-            ffmpegCommand.outputOptions([
-                '-ar 16000',
-                '-ac 1',
-                '-c:a pcm_s16le'
-            ]);
-
-            // Processa o áudio
-            await new Promise((resolve, reject) => {
-                ffmpegCommand
-                    .on('error', (err) => {
-                        console.error('❌ Erro na conversão do áudio:', {
-                            erro: err.message,
-                            comando: err.command,
-                            timestamp: new Date().toISOString()
-                        });
-                        reject(err);
-                    })
-                    .on('end', () => {
-                        console.log('✅ Conversão concluída');
-                        resolve();
-                    })
-                    .save(outputPath);
-            });
-
-            // Verifica se o arquivo de saída existe e tem tamanho adequado
-            const outputStats = await fs.stat(outputPath);
-            if (!outputStats || outputStats.size < 100) {
-                throw new Error('Conversão do áudio falhou - arquivo de saída inválido');
+            if (!success) {
+                throw error || new Error('Todas as tentativas de conversão falharam');
             }
 
             console.log('🎯 Transcrevendo áudio:', {
                 messageId: message.messageId,
                 arquivo: outputPath,
-                tamanho: outputStats.size,
                 timestamp: new Date().toISOString()
             });
 
@@ -153,10 +163,7 @@ class AudioService {
                 if (fse.existsSync(inputPath)) await fs.unlink(inputPath);
                 if (fse.existsSync(outputPath)) await fs.unlink(outputPath);
             } catch (cleanupError) {
-                console.error('⚠️ Erro ao limpar arquivos temporários:', {
-                    erro: cleanupError.message,
-                    timestamp: new Date().toISOString()
-                });
+                console.error('⚠️ Erro ao limpar arquivos temporários:', cleanupError);
             }
 
             if (!transcription) {
