@@ -172,7 +172,7 @@ class AIServices {
             // Se a resposta for um objeto, tenta extrair a mensagem
             let messageText = response;
             if (typeof response === 'object' && response !== null) {
-                // Se for uma resposta da API, não enviar o objeto JSON
+                // Se for uma resposta da API, não enviar novamente
                 if (response.success !== undefined && response.messageId) {
                     return response;
                 }
