@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { AIServices } = require('./services/ai-services');
+const AIServices = require('./services/ai-services');
 const { WhatsAppService } = require('./services/whatsapp-service');
 const { GroqServices } = require('./services/groq-services');
 const { MediaManagerService } = require('./services/media-manager-service');

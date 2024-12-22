@@ -7,7 +7,7 @@ const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { GroqServices } = require('./groq-services');
-const { AudioService } = require('./audio-service');
+const AudioService = require('./audio-service');
 
 class AIServices {
     constructor(whatsAppService, whatsAppImageService, redisStore, openAIService, trackingService, orderValidationService, nuvemshopService) {
@@ -635,4 +635,5 @@ class AIServices {
     }
 }
 
-module.exports = { AIServices };
+// Exporta a classe AIServices
+module.exports = AIServices;

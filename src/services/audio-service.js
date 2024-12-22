@@ -1,6 +1,7 @@
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegStatic = require('ffmpeg-static');
 const fs = require('fs').promises;
+const fse = require('fs-extra');  // Para operações síncronas
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { Queue } = require('../utils/queue');
@@ -14,6 +15,8 @@ class AudioService {
         this.whatsappClient = whatsappClient;
         this.ffmpegPath = process.env.FFMPEG_PATH || ffmpegStatic;
         this.initialized = false;
+        
+        // Configura o fluent-ffmpeg para usar o caminho correto
         ffmpeg.setFfmpegPath(this.ffmpegPath);
     }
 
@@ -21,11 +24,12 @@ class AudioService {
         if (this.initialized) return true;
 
         try {
-            const { execSync } = require('child_process');
-            execSync(`"${this.ffmpegPath}" -version`);
+            // Tenta executar ffmpeg -version usando o caminho do ffmpeg-static
+            const { stdout } = await execAsync(`"${this.ffmpegPath}" -version`);
             this.initialized = true;
             console.log('✅ FFmpeg disponível:', {
                 path: this.ffmpegPath,
+                version: stdout.split('\n')[0],
                 timestamp: new Date().toISOString()
             });
             return true;
@@ -69,9 +73,9 @@ class AudioService {
             }
 
             const tmpDir = path.join(__dirname, '../../tmp');
-            await fs.mkdir(tmpDir, { recursive: true });
+            await fse.ensureDir(tmpDir);
 
-            inputPath = path.join(tmpDir, `${message.messageId}_input.ogg`);
+            inputPath = path.join(tmpDir, `${message.messageId}_input.opus`);  // Mudando para .opus
             outputPath = path.join(tmpDir, `${message.messageId}_output.wav`);
 
             await fs.writeFile(inputPath, audioBuffer);
@@ -83,10 +87,13 @@ class AudioService {
                 timestamp: new Date().toISOString()
             });
 
-            // Usa fluent-ffmpeg para converter
+            // Usa fluent-ffmpeg para converter com configurações específicas para opus
             await new Promise((resolve, reject) => {
                 ffmpeg()
                     .input(inputPath)
+                    .inputOptions([
+                        '-f opus'  // Força o formato de entrada como opus
+                    ])
                     .outputOptions([
                         '-ar 16000',
                         '-ac 1',
@@ -103,13 +110,16 @@ class AudioService {
                     .save(outputPath);
             });
 
-            if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size < 100) {
-                throw new Error('Conversão do áudio falhou');
+            // Verifica se o arquivo de saída existe e tem tamanho adequado
+            const outputStats = await fs.stat(outputPath);
+            if (!outputStats || outputStats.size < 100) {
+                throw new Error('Conversão do áudio falhou - arquivo de saída inválido');
             }
 
             console.log('🎯 Transcrevendo áudio:', {
                 messageId: message.messageId,
                 arquivo: outputPath,
+                tamanho: outputStats.size,
                 timestamp: new Date().toISOString()
             });
 
@@ -118,8 +128,8 @@ class AudioService {
 
             // Limpa os arquivos temporários
             try {
-                await fs.unlink(inputPath);
-                await fs.unlink(outputPath);
+                if (fse.existsSync(inputPath)) await fs.unlink(inputPath);
+                if (fse.existsSync(outputPath)) await fs.unlink(outputPath);
             } catch (cleanupError) {
                 console.error('⚠️ Erro ao limpar arquivos temporários:', {
                     erro: cleanupError.message,
@@ -149,13 +159,11 @@ class AudioService {
             });
 
             // Limpa arquivos temporários em caso de erro
-            if (inputPath || outputPath) {
-                try {
-                    if (inputPath && fs.existsSync(inputPath)) await fs.unlink(inputPath);
-                    if (outputPath && fs.existsSync(outputPath)) await fs.unlink(outputPath);
-                } catch (cleanupError) {
-                    console.error('⚠️ Erro ao limpar arquivos temporários:', cleanupError);
-                }
+            try {
+                if (inputPath && fse.existsSync(inputPath)) await fs.unlink(inputPath);
+                if (outputPath && fse.existsSync(outputPath)) await fs.unlink(outputPath);
+            } catch (cleanupError) {
+                console.error('⚠️ Erro ao limpar arquivos temporários:', cleanupError);
             }
 
             return {
@@ -166,4 +174,5 @@ class AudioService {
     }
 }
 
-module.exports = { AudioService };
+// Exporta a classe AudioService
+module.exports = AudioService;

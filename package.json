@@ -28,6 +28,7 @@
     "ffmpeg-static": "^5.2.0",
     "fluent-ffmpeg": "^2.1.2",
     "form-data": "^4.0.0",
+    "fs-extra": "^11.2.0",
     "groq-sdk": "^0.3.0",
     "helmet": "^7.1.0",
     "ioredis": "^5.3.2",
