@@ -368,28 +368,68 @@ class AIServices {
     }
 
     async handleAudioMessage(message) {
-        const { from } = message;
         try {
-            console.log('🎤 Iniciando processamento de áudio...', {
-                messageId: message.messageId,
-                from: from,
+            // Validação completa da mensagem
+            if (!message) {
+                throw new Error('Objeto de mensagem inválido');
+            }
+
+            const { from, type, messageId } = message;
+
+            // Log detalhado da mensagem recebida
+            console.log('🎤 Mensagem de áudio recebida:', {
+                messageId,
+                from,
+                type,
+                hasMediaUrl: !!message.mediaUrl,
+                hasAudioMessage: !!message.audioMessage,
                 timestamp: new Date().toISOString()
             });
 
-            // Verifica se temos a URL da mídia
-            if (!message.mediaUrl) {
-                throw new Error('URL da mídia não encontrada na mensagem de áudio');
+            // Tenta obter a URL do áudio de diferentes propriedades possíveis
+            const mediaUrl = message.mediaUrl || 
+                           (message.audioMessage && message.audioMessage.url) ||
+                           (message.audio && message.audio.url);
+
+            if (!mediaUrl) {
+                console.error('❌ URL do áudio não encontrada:', {
+                    messageId,
+                    from,
+                    messageKeys: Object.keys(message),
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error('URL do áudio não encontrada na mensagem');
             }
+
+            // Processa o áudio com a URL encontrada
+            const audioMessage = {
+                ...message,
+                mediaUrl,
+                messageId: messageId || `audio_${Date.now()}`
+            };
+
+            console.log('🎯 Processando áudio:', {
+                messageId: audioMessage.messageId,
+                mediaUrl: mediaUrl.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
 
             // Processa o áudio e obtém a transcrição
-            const audioText = await this.audioService.processWhatsAppAudio(message);
+            const audioText = await this.audioService.processWhatsAppAudio(audioMessage);
             
-            if (!audioText) {
-                throw new Error('Não foi possível transcrever o áudio');
+            if (!audioText || typeof audioText !== 'string') {
+                console.error('❌ Transcrição inválida:', {
+                    messageId,
+                    transcriptionType: typeof audioText,
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error('Transcrição do áudio inválida');
             }
 
-            console.log('📝 Áudio processado:', {
-                texto: audioText.substring(0, 100),
+            console.log('📝 Áudio transcrito:', {
+                messageId,
+                transcriptionLength: audioText.length,
+                preview: audioText.substring(0, 100),
                 timestamp: new Date().toISOString()
             });
 
@@ -399,17 +439,41 @@ class AIServices {
                 text: audioText
             });
 
-            // Envia resposta ao usuário
-            return await this.sendResponse(from, `🎵 *Mensagem de voz:*\n${audioText}\n\n${response}`);
+            if (!response) {
+                throw new Error('Resposta do OpenAI inválida');
+            }
+
+            // Formata e envia a resposta
+            const formattedResponse = `🎵 *Mensagem de voz:*\n${audioText}\n\n${response}`;
+            
+            console.log('📤 Enviando resposta:', {
+                messageId,
+                from,
+                responseLength: formattedResponse.length,
+                preview: formattedResponse.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+
+            return await this.sendResponse(from, formattedResponse);
 
         } catch (error) {
+            // Log detalhado do erro
             console.error('❌ Erro ao processar áudio:', {
                 erro: error.message,
                 stack: error.stack,
+                messageId: message?.messageId,
+                from: message?.from,
                 timestamp: new Date().toISOString()
             });
             
-            await this.sendResponse(from, 'Desculpe, não consegui processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.');
+            // Envia mensagem de erro amigável
+            if (message && message.from) {
+                await this.sendResponse(
+                    message.from, 
+                    'Desculpe, não consegui processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.'
+                );
+            }
+            
             return null;
         }
     }
