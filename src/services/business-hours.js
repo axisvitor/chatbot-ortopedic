@@ -13,7 +13,17 @@ class BusinessHoursService {
     }
 
     getDayOfWeek() {
-        return this.getCurrentTime().format('dddd');
+        const dayMap = {
+            'domingo': 'sunday',
+            'segunda-feira': 'monday',
+            'terça-feira': 'tuesday',
+            'quarta-feira': 'wednesday',
+            'quinta-feira': 'thursday',
+            'sexta-feira': 'friday',
+            'sábado': 'saturday'
+        };
+        const ptDay = this.getCurrentTime().format('dddd');
+        return dayMap[ptDay] || ptDay;
     }
 
     isHoliday() {

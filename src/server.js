@@ -31,24 +31,40 @@ console.log(`📝 Porta configurada: ${port}`);
 let isReady = false;
 let initError = null;
 
-// Serviços
-console.log('🔄 Iniciando serviços...');
-
-const groqServices = new GroqServices();
-const webhookService = new WebhookService();
-const whatsappService = new WhatsAppService();
-const aiServices = new AIServices(groqServices);
-
+// Declaração dos serviços
+let groqServices;
+let webhookService;
+let whatsappService;
+let aiServices;
 let audioService;
 let imageService;
 
 // Função de inicialização
 async function initializeServices() {
     try {
+        console.log('🔄 Iniciando serviços...');
+        
+        groqServices = new GroqServices();
+        console.log('✅ GroqServices inicializado');
+        
+        webhookService = new WebhookService();
+        console.log('✅ WebhookService inicializado');
+        
+        whatsappService = new WhatsAppService();
+        await whatsappService.init();
+        console.log('✅ WhatsAppService inicializado');
+        
+        aiServices = new AIServices(whatsappService);
+        console.log('✅ AIServices inicializado');
+        
         const client = await whatsappService.getClient();
         audioService = new AudioService(groqServices, client);
+        console.log('✅ AudioService inicializado');
+        
         imageService = new ImageService(groqServices, client);
-        console.log('✅ Serviços inicializados com sucesso');
+        console.log('✅ ImageService inicializado');
+        
+        console.log('✅ Todos os serviços inicializados com sucesso');
         isReady = true;
     } catch (error) {
         console.error('❌ Erro ao inicializar serviços:', error);
