@@ -74,43 +74,52 @@ class AIServices {
                 return this.handleAudioMessage(message);
             }
 
-            const redisKey = `chat:${message.from}`;
-            console.log('🔄 Buscando histórico do chat no Redis:', redisKey);
-            let chatHistory = await this.redisStore.get(redisKey) || [];
-
+            // Busca histórico do chat no Redis
+            const chatKey = `chat:${message.from}`;
+            console.log('🔄 Buscando histórico do chat no Redis:', chatKey);
+            const chatHistory = await this.redisStore.get(chatKey);
             console.log('💭 Histórico do chat recuperado:', {
-                numeroMensagens: chatHistory.length,
-                ultimaMensagem: chatHistory[chatHistory.length - 1]?.content?.substring(0, 100)
+                numeroMensagens: chatHistory?.messages?.length || 0,
+                ultimaMensagem: chatHistory?.messages?.[0]?.content
             });
 
-            const userMessage = { role: 'user', content: message.text };
-            chatHistory.push(userMessage);
-
+            // Gera resposta com IA
             console.log('🤔 Gerando resposta com IA...');
-            const aiResponse = await this.openAIService.generateResponse(chatHistory);
-            console.log('✅ Resposta da IA gerada:', aiResponse?.substring(0, 100));
-
-            const aiMessage = { role: 'assistant', content: aiResponse };
-            chatHistory.push(aiMessage);
-
-            console.log('💾 Salvando histórico atualizado no Redis...');
-            await this.redisStore.set(redisKey, chatHistory);
+            
+            // Cria um novo thread ou usa o existente
+            const threadId = chatHistory?.threadId || (await this.openAIService.createThread()).id;
+            
+            // Adiciona a mensagem ao thread
+            await this.openAIService.addMessage(threadId, {
+                role: 'user',
+                content: message.text || 'Mensagem sem texto'
+            });
+            
+            // Executa o assistant
+            const run = await this.openAIService.runAssistant(threadId);
+            
+            // Aguarda a resposta
+            const response = await this.openAIService.waitForResponse(threadId, run.id);
+            
+            // Salva o histórico atualizado
+            await this.redisStore.set(chatKey, {
+                threadId,
+                lastUpdate: new Date().toISOString()
+            });
 
             console.log('📤 Enviando resposta final...');
-            await this.whatsAppService.sendText(message.from, aiResponse);
-            return aiResponse;
+            await this.whatsAppService.sendText(message.from, response);
+            return response;
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
                 erro: error.message,
                 stack: error.stack,
                 timestamp: new Date().toISOString()
             });
-            if (message && message.from) {
-                const errorMessage = 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
-                await this.whatsAppService.sendText(message.from, errorMessage);
-                return errorMessage;
-            }
-            return null;
+
+            const errorMessage = 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
+            await this.whatsAppService.sendText(message.from, errorMessage);
+            return errorMessage;
         }
     }
 

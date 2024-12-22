@@ -79,43 +79,36 @@ class OpenAIService {
     }
 
     /**
-     * Aguarda a conclusão de um run e retorna a resposta
-     * @param {string} threadId - ID do thread
+     * Aguarda a resposta do assistant
+     * @param {string} threadId - ID da thread
      * @param {string} runId - ID do run
-     * @param {number} timeout - Timeout em ms (padrão: 30s)
      * @returns {Promise<string>} Resposta do assistant
      */
-    async waitForRun(threadId, runId, timeout = 30000) {
-        const startTime = Date.now();
-        
-        while (true) {
-            const status = await this.checkRunStatus(threadId, runId);
-            
-            if (status.status === 'completed') {
-                const messages = await this.listMessages(threadId);
-                const assistantMessages = messages.data.filter(msg => 
-                    msg.role === 'assistant' && 
-                    msg.run_id === runId
-                );
-                
-                if (assistantMessages.length > 0) {
-                    return assistantMessages[0].content[0].text.value;
+    async waitForResponse(threadId, runId) {
+        try {
+            // Aguarda até o run completar
+            let run;
+            do {
+                run = await this.client.beta.threads.runs.retrieve(threadId, runId);
+                if (run.status === 'failed') {
+                    throw new Error('Run falhou: ' + run.last_error?.message);
                 }
-                return null;
-            }
-            
-            if (status.status === 'failed' || status.status === 'cancelled') {
-                throw new Error(`Run ${status.status}: ${status.last_error?.message || 'Unknown error'}`);
-            }
-            
-            if (Date.now() - startTime > timeout) {
-                throw new Error('Timeout waiting for assistant response');
-            }
-            
-            // Aguarda 1 segundo antes de verificar novamente
-            await new Promise(resolve => setTimeout(resolve, 1000));
+                if (run.status !== 'completed') {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            } while (run.status !== 'completed');
+
+            // Busca as mensagens após o run completar
+            const messages = await this.client.beta.threads.messages.list(threadId);
+            const lastMessage = messages.data[0];
+
+            // Retorna o conteúdo da última mensagem
+            return lastMessage.content[0].text.value;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao aguardar resposta:', error);
+            throw error;
         }
     }
 }
 
-module.exports = { OpenAIService };
+module.exports = OpenAIService;
