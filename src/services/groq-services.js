@@ -101,7 +101,11 @@ class GroqServices {
             formData.append('response_format', GROQ_CONFIG.audioConfig.response_format);
             formData.append('temperature', GROQ_CONFIG.audioConfig.temperature);
 
-            console.log(' Enviando áudio para transcrição:', {
+            // URL correta da API Groq
+            const transcriptionUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+
+            console.log('🎯 Enviando áudio para transcrição:', {
+                url: transcriptionUrl,
                 tamanho: audioBuffer.length,
                 modelo: GROQ_CONFIG.models.audio,
                 idioma: GROQ_CONFIG.audioConfig.language,
@@ -109,7 +113,7 @@ class GroqServices {
                 timestamp: new Date().toISOString()
             });
 
-            const response = await this.axios.post(GROQ_CONFIG.audioUrl, formData, {
+            const response = await this.axios.post(transcriptionUrl, formData, {
                 headers: {
                     ...formData.getHeaders(),
                     'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`
@@ -118,12 +122,12 @@ class GroqServices {
             });
 
             if (response.status !== 200) {
-                console.error(` Erro na API Groq (Tentativa ${attempt}):`, response.status, response.data);
+                console.error(`❌ Erro na API Groq (Tentativa ${attempt}):`, response.status, response.data);
                 throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
             }
 
             // Log da resposta completa para debug
-            console.log(' Resposta da API Groq:', {
+            console.log('🔍 Resposta da API Groq:', {
                 status: response.status,
                 headers: response.headers,
                 data: JSON.stringify(response.data, null, 2),
@@ -140,7 +144,7 @@ class GroqServices {
                 } else if (response.data.transcription && typeof response.data.transcription === 'string') {
                     transcription = response.data.transcription;
                 } else {
-                    console.error(' Formato de resposta inesperado:', {
+                    console.error('❌ Formato de resposta inesperado:', {
                         data: response.data,
                         tipo: typeof response.data,
                         timestamp: new Date().toISOString()
@@ -148,7 +152,7 @@ class GroqServices {
                     throw new Error('Formato de resposta inesperado da API Groq');
                 }
             } else {
-                console.error(' Tipo de resposta inesperado:', {
+                console.error('❌ Tipo de resposta inesperado:', {
                     tipo: typeof response.data,
                     valor: response.data,
                     timestamp: new Date().toISOString()
@@ -160,7 +164,7 @@ class GroqServices {
                 throw new Error('Transcrição vazia ou nula');
             }
 
-            console.log(' Áudio transcrito com sucesso:', {
+            console.log('✅ Áudio transcrito com sucesso:', {
                 tamanho: transcription.length,
                 preview: transcription.substring(0, 100),
                 tentativa: attempt,
@@ -169,14 +173,14 @@ class GroqServices {
 
             return transcription;
         } catch (error) {
-            console.error(` Erro ao transcrever áudio (Tentativa ${attempt}):`, {
+            console.error(`❌ Erro ao transcrever áudio (Tentativa ${attempt}):`, {
                 erro: error.message,
                 stack: error.stack,
                 tentativa: attempt,
                 timestamp: new Date().toISOString()
             });
             if (attempt < 3) {
-                console.log(` Tentando novamente (${attempt + 1}/3)...`);
+                console.log(`🔄 Tentando novamente (${attempt + 1}/3)...`);
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                 return this.transcribeAudio(audioBuffer, attempt + 1);
             }
