@@ -135,9 +135,9 @@ class AIServices {
                 return null;
             }
 
-            // Envia a resposta e retorna
-            const result = await this.sendResponse(from, response);
-            return result;
+            // Envia a resposta
+            await this.sendResponse(from, response);
+            return null;
 
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
