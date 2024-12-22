@@ -6,6 +6,8 @@ const { TrackingService } = require('./tracking-service');
 const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
 const { NuvemshopService } = require('./nuvemshop-service');
+const { GroqServices } = require('./groq-services');
+const AudioService = require('./audio-service');
 
 class AIServices {
     constructor(whatsAppService, whatsAppImageService, redisStore, openAIService, trackingService, orderValidationService, nuvemshopService) {
@@ -17,6 +19,8 @@ class AIServices {
         this.orderValidationService = orderValidationService || new OrderValidationService();
         this.nuvemshopService = nuvemshopService || new NuvemshopService();
         this.businessHours = new BusinessHoursService();
+        this.groqServices = new GroqServices();
+        this.audioService = new AudioService(this.groqServices, this.whatsAppService);
     }
 
     async handleMessage(message) {
@@ -366,12 +370,30 @@ class AIServices {
     async handleAudioMessage(message) {
         const { from } = message;
         try {
-            const response = await this.whatsAppService.processAudio(message);
-            return await this.handleResponse(message, response);
+            console.log('🎤 Iniciando processamento de áudio...');
+            
+            // Processa o áudio e obtém a transcrição
+            const transcription = await this.audioService.processWhatsAppAudio(message);
+            
+            console.log('📝 Áudio transcrito:', transcription);
+
+            if (!transcription) {
+                throw new Error('Não foi possível transcrever o áudio');
+            }
+
+            // Gera resposta baseada na transcrição
+            const response = await this.openAIService.generateResponse({
+                ...message,
+                text: transcription
+            });
+
+            // Envia resposta ao usuário
+            await this.sendResponse(from, `🎵 *Transcrição do áudio:*\n${transcription}\n\n${response}`);
+
         } catch (error) {
             console.error('❌ Erro ao processar áudio:', error);
-            const errorMessage = 'Não foi possível processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.';
-            return await this.handleResponse(message, errorMessage);
+            const errorMessage = 'Desculpe, não consegui processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.';
+            await this.sendResponse(from, errorMessage);
         }
     }
 }
