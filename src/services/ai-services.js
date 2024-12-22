@@ -443,8 +443,11 @@ class AIServices {
             // Processa o áudio com a URL encontrada
             const audioMessage = {
                 ...message,
-                mediaUrl,
-                messageId: messageId || `audio_${Date.now()}`
+                messageId: messageId || `audio_${Date.now()}`,
+                audioMessage: {
+                    url: mediaUrl,
+                    mimetype: 'audio/ogg; codecs=opus'
+                }
             };
 
             console.log('🎯 Processando áudio:', {
