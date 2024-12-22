@@ -177,13 +177,28 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
 // Função para iniciar o servidor
 async function startServer() {
     try {
+        console.log('🚀 Iniciando servidor...');
+        
+        // Aguarda a inicialização dos serviços
         await initializeServices();
         
-        app.listen(port, () => {
-            console.log(`🚀 Servidor rodando na porta ${port}`);
-        });
+        // Inicia o servidor HTTP apenas se os serviços foram inicializados com sucesso
+        if (isReady) {
+            app.listen(port, () => {
+                console.log(`🚀 Servidor rodando na porta ${port}`);
+            });
+        } else {
+            throw new Error('Serviços não foram inicializados corretamente');
+        }
     } catch (error) {
-        console.error('❌ Erro fatal ao iniciar servidor:', error);
+        console.error('❌ Erro fatal ao iniciar servidor:', {
+            erro: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString()
+        });
+        
+        // Aguarda 5 segundos antes de tentar reiniciar
+        await new Promise(resolve => setTimeout(resolve, 5000));
         process.exit(1);
     }
 }
@@ -194,4 +209,35 @@ module.exports = { app, startServer };
 // Se executado diretamente, inicia o servidor
 if (require.main === module) {
     startServer();
+}
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Erro não capturado:', {
+        erro: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+    });
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Promise rejeitada não tratada:', {
+        razao: reason,
+        timestamp: new Date().toISOString()
+    });
+});
+
+const requiredEnvVars = [
+    'WAPI_URL',
+    'WAPI_TOKEN',
+    'WAPI_CONNECTION_KEY',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'REDIS_PASSWORD'
+];
+
+for (const envVar of requiredEnvVars) {
+    if (!process.env[envVar]) {
+        console.error(`❌ Variável de ambiente ${envVar} não definida`);
+        process.exit(1);
+    }
 }

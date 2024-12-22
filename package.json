@@ -4,7 +4,7 @@
   "description": "Chatbot para ortopedia",
   "main": "src/server.js",
   "scripts": {
-    "start": "node --no-warnings src/server.js",
+    "start": "node src/server.js",
     "dev": "nodemon --no-warnings src/server.js"
   },
   "keywords": [
