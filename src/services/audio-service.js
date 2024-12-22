@@ -1,7 +1,7 @@
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegStatic = require('ffmpeg-static');
 const fs = require('fs').promises;
-const fse = require('fs-extra');  // Para operações síncronas
+const fse = require('fs-extra');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { Queue } = require('../utils/queue');
@@ -15,6 +15,7 @@ class AudioService {
         this.whatsappClient = whatsappClient;
         this.ffmpegPath = process.env.FFMPEG_PATH || ffmpegStatic;
         this.initialized = false;
+        this.hasOpusSupport = false;
         
         // Configura o fluent-ffmpeg para usar o caminho correto
         ffmpeg.setFfmpegPath(this.ffmpegPath);
@@ -24,12 +25,18 @@ class AudioService {
         if (this.initialized) return true;
 
         try {
-            // Tenta executar ffmpeg -version usando o caminho do ffmpeg-static
+            // Tenta executar ffmpeg -version
             const { stdout } = await execAsync(`"${this.ffmpegPath}" -version`);
+            
+            // Verifica suporte a OPUS
+            const { stdout: formats } = await execAsync(`"${this.ffmpegPath}" -formats`);
+            this.hasOpusSupport = formats.toLowerCase().includes('opus');
+            
             this.initialized = true;
             console.log('✅ FFmpeg disponível:', {
                 path: this.ffmpegPath,
                 version: stdout.split('\n')[0],
+                opusSupport: this.hasOpusSupport,
                 timestamp: new Date().toISOString()
             });
             return true;
@@ -75,7 +82,9 @@ class AudioService {
             const tmpDir = path.join(__dirname, '../../tmp');
             await fse.ensureDir(tmpDir);
 
-            inputPath = path.join(tmpDir, `${message.messageId}_input.opus`);  // Mudando para .opus
+            // Define extensões com base no suporte a OPUS
+            const inputExt = this.hasOpusSupport ? '.opus' : '.ogg';
+            inputPath = path.join(tmpDir, `${message.messageId}_input${inputExt}`);
             outputPath = path.join(tmpDir, `${message.messageId}_output.wav`);
 
             await fs.writeFile(inputPath, audioBuffer);
@@ -84,23 +93,36 @@ class AudioService {
                 messageId: message.messageId,
                 input: inputPath,
                 output: outputPath,
+                opusSupport: this.hasOpusSupport,
                 timestamp: new Date().toISOString()
             });
 
-            // Usa fluent-ffmpeg para converter com configurações específicas para opus
+            // Configura o FFmpeg com base no suporte a OPUS
+            const ffmpegCommand = ffmpeg().input(inputPath);
+
+            if (this.hasOpusSupport) {
+                ffmpegCommand.inputOptions(['-f opus']);
+            } else {
+                // Tenta como OGG primeiro
+                ffmpegCommand.inputOptions(['-f ogg']);
+            }
+
+            // Configurações comuns de saída
+            ffmpegCommand.outputOptions([
+                '-ar 16000',
+                '-ac 1',
+                '-c:a pcm_s16le'
+            ]);
+
+            // Processa o áudio
             await new Promise((resolve, reject) => {
-                ffmpeg()
-                    .input(inputPath)
-                    .inputOptions([
-                        '-f opus'  // Força o formato de entrada como opus
-                    ])
-                    .outputOptions([
-                        '-ar 16000',
-                        '-ac 1',
-                        '-c:a pcm_s16le'
-                    ])
+                ffmpegCommand
                     .on('error', (err) => {
-                        console.error('❌ Erro na conversão do áudio:', err);
+                        console.error('❌ Erro na conversão do áudio:', {
+                            erro: err.message,
+                            comando: err.command,
+                            timestamp: new Date().toISOString()
+                        });
                         reject(err);
                     })
                     .on('end', () => {
