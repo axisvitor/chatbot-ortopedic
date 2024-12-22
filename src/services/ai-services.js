@@ -172,7 +172,11 @@ class AIServices {
             // Se a resposta for um objeto, tenta extrair a mensagem
             let messageText = response;
             if (typeof response === 'object' && response !== null) {
-                messageText = response.message || response.text || JSON.stringify(response);
+                // Se for uma resposta da API, não enviar o objeto JSON
+                if (response.success !== undefined && response.messageId) {
+                    return response;
+                }
+                messageText = response.message || response.text || response.content || 'Erro: Resposta inválida';
             }
 
             // Garante que a mensagem é uma string
@@ -184,18 +188,19 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            // Envia a mensagem e retorna o resultado
+            // Envia a mensagem via WhatsApp
             const result = await this.whatsAppService.sendText(to, messageText);
             
             if (!result) {
-                throw new Error('Resposta do WhatsApp inválida');
+                throw new Error('Erro ao enviar mensagem');
             }
 
-            return {
-                success: true,
-                messageId: result.messageId
-            };
+            console.log('✅ Resposta enviada:', {
+                resultado: result,
+                timestamp: new Date().toISOString()
+            });
 
+            return result;
         } catch (error) {
             console.error('❌ Erro ao enviar resposta:', {
                 para: to,
