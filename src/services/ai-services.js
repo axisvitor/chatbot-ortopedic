@@ -33,13 +33,18 @@ class AIServices {
                 return null;
             }
 
-            const isBusinessHours = this.businessHours.isWithinBusinessHours();
-
-            if (!isBusinessHours) {
-                console.log('⏰ Fora do horário comercial');
-                const outOfHoursMessage = this.businessHours.getOutOfHoursMessage();
-                await this.whatsAppService.sendText(message.from, outOfHoursMessage);
-                return outOfHoursMessage;
+            // Verifica se é uma solicitação de atendimento humano
+            if (message.text?.toLowerCase().includes('atendente') || 
+                message.text?.toLowerCase().includes('humano') || 
+                message.text?.toLowerCase().includes('pessoa')) {
+                
+                const isBusinessHours = this.businessHours.isWithinBusinessHours();
+                if (!isBusinessHours) {
+                    console.log('⏰ Fora do horário comercial para atendimento humano');
+                    const outOfHoursMessage = this.businessHours.getOutOfHoursMessage();
+                    await this.whatsAppService.sendText(message.from, outOfHoursMessage);
+                    return outOfHoursMessage;
+                }
             }
 
             // Verifica internamente se o pedido é internacional
@@ -92,7 +97,8 @@ class AIServices {
             await this.redisStore.set(redisKey, chatHistory);
 
             console.log('📤 Enviando resposta final...');
-            return this.whatsAppService.sendText(message.from, aiResponse);
+            await this.whatsAppService.sendText(message.from, aiResponse);
+            return aiResponse;
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
                 erro: error.message,
@@ -100,7 +106,9 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
             if (message && message.from) {
-                return this.whatsAppService.sendText(message.from, 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.');
+                const errorMessage = 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
+                await this.whatsAppService.sendText(message.from, errorMessage);
+                return errorMessage;
             }
             return null;
         }
@@ -166,10 +174,13 @@ class AIServices {
         const { from } = message;
         try {
             const response = await this.whatsAppImageService.processImage(message);
-            return this.whatsAppService.sendText(from, response);
+            await this.whatsAppService.sendText(from, response);
+            return response;
         } catch (error) {
             console.error('❌ Erro ao processar imagem:', error);
-            return this.whatsAppService.sendText(from, 'Não foi possível processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.');
+            const errorMessage = 'Não foi possível processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.';
+            await this.whatsAppService.sendText(from, errorMessage);
+            return errorMessage;
         }
     }
 
@@ -177,10 +188,13 @@ class AIServices {
         const { from } = message;
         try {
             const response = await this.whatsAppService.processAudio(message);
-            return this.whatsAppService.sendText(from, response);
+            await this.whatsAppService.sendText(from, response);
+            return response;
         } catch (error) {
             console.error('❌ Erro ao processar áudio:', error);
-            return this.whatsAppService.sendText(from, 'Não foi possível processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.');
+            const errorMessage = 'Não foi possível processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.';
+            await this.whatsAppService.sendText(from, errorMessage);
+            return errorMessage;
         }
     }
 }
