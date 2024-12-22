@@ -78,28 +78,24 @@ const TRACKING_CONFIG = {
 // Business Hours Configuration
 const BUSINESS_HOURS = {
     timezone: 'America/Sao_Paulo',
-    weekdays: {
-        start: '09:00',
-        end: '18:00'
+    schedule: {
+        segunda: { start: '09:00', end: '18:00' },
+        terca: { start: '09:00', end: '18:00' },
+        quarta: { start: '09:00', end: '18:00' },
+        quinta: { start: '09:00', end: '18:00' },
+        sexta: { start: '09:00', end: '18:00' },
+        sabado: { start: null, end: null },
+        domingo: { start: null, end: null }
     },
-    weekend: {
-        start: '10:00',
-        end: '14:00'
-    },
-    holidays: [
-        '2024-01-01', // Ano Novo
-        '2024-02-12', // Carnaval
-        '2024-02-13', // Carnaval
-        '2024-03-29', // Sexta-feira Santa
-        '2024-04-21', // Tiradentes
-        '2024-05-01', // Dia do Trabalho
-        '2024-06-20', // Corpus Christi
-        '2024-09-07', // Independência
-        '2024-10-12', // Nossa Senhora Aparecida
-        '2024-11-02', // Finados
-        '2024-11-15', // Proclamação da República
-        '2024-12-25'  // Natal
-    ]
+    holidays: [],
+    messages: {
+        outOfHours: "Nosso horário de atendimento é de segunda a sexta, das 9h às 18h. Por favor, envie sua mensagem durante o horário comercial.",
+        holiday: "Hoje é feriado. Por favor, envie sua mensagem em um dia útil.",
+        weekend: "Não há atendimento aos finais de semana. Retornaremos na {NEXT_DAY}.",
+        outsideHours: "Nosso horário de atendimento é das {START_TIME} às {END_TIME}. Por favor, envie sua mensagem durante o horário comercial.",
+        humanSupport: "Um atendente irá ajudá-lo em breve.",
+        financialDepartment: "Sua mensagem foi encaminhada para o departamento financeiro. Em breve entraremos em contato."
+    }
 };
 
 // Media Processing Configuration
