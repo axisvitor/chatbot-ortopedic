@@ -4,7 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const redis = require('redis');
+const { createClient } = require('redis');
 
 // Lista de variáveis de ambiente requeridas
 const requiredEnvVars = [
@@ -16,35 +16,67 @@ const requiredEnvVars = [
     'REDIS_PASSWORD'
 ];
 
-// Conecta ao Redis
-const redisClient = redis.createClient({
-    host: process.env.REDIS_HOST,
-    port: process.env.REDIS_PORT,
+// Configuração do cliente Redis
+const redisClient = createClient({
+    socket: {
+        host: process.env.REDIS_HOST,
+        port: process.env.REDIS_PORT
+    },
     password: process.env.REDIS_PASSWORD
 });
 
+redisClient.on('error', (err) => {
+    console.error('❌ Erro no Redis:', {
+        erro: err.message,
+        stack: err.stack,
+        timestamp: new Date().toISOString()
+    });
+});
+
+redisClient.on('connect', () => {
+    console.log('✅ Redis conectado com sucesso');
+});
+
+redisClient.on('reconnecting', () => {
+    console.log('🔄 Redis reconectando...');
+});
+
+// Conecta ao Redis
+(async () => {
+    try {
+        await redisClient.connect();
+    } catch (error) {
+        console.error('❌ Erro ao conectar ao Redis:', error);
+    }
+})();
+
 const redisStore = {
     get: async (key) => {
-        return new Promise((resolve, reject) => {
-            redisClient.get(key, (err, value) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(value);
-                }
+        try {
+            return await redisClient.get(key);
+        } catch (error) {
+            console.error('❌ Erro ao obter valor do Redis:', {
+                key,
+                erro: error.message,
+                timestamp: new Date().toISOString()
             });
-        });
+            return null;
+        }
     },
     set: async (key, value, ttl) => {
-        return new Promise((resolve, reject) => {
-            redisClient.set(key, value, 'EX', ttl, (err, reply) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(reply);
-                }
+        try {
+            const result = await redisClient.set(key, value, {
+                EX: ttl
             });
-        });
+            return result;
+        } catch (error) {
+            console.error('❌ Erro ao definir valor no Redis:', {
+                key,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+        }
     }
 };
 
@@ -246,19 +278,28 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
         }
 
         // Verifica se a mensagem já foi processada
-        const messageKey = `processed_msg:${message.messageId}`;
-        const isProcessed = await redisStore.get(messageKey);
-        
-        if (isProcessed) {
-            console.log('⚠️ Mensagem já processada:', {
+        try {
+            const messageKey = `processed_msg:${message.messageId}`;
+            const isProcessed = await redisStore.get(messageKey);
+            
+            if (isProcessed) {
+                console.log('⚠️ Mensagem já processada:', {
+                    messageId: message.messageId,
+                    timestamp: new Date().toISOString()
+                });
+                return res.sendStatus(200);
+            }
+
+            // Marca a mensagem como processada com TTL de 1 hora
+            await redisStore.set(messageKey, 'true', 3600);
+        } catch (error) {
+            console.error('⚠️ Erro ao verificar duplicidade da mensagem:', {
                 messageId: message.messageId,
+                erro: error.message,
                 timestamp: new Date().toISOString()
             });
-            return res.sendStatus(200);
+            // Continua o processamento mesmo com erro no Redis
         }
-
-        // Marca a mensagem como processada com TTL de 1 hora
-        await redisStore.set(messageKey, 'true', 3600);
 
         console.log('📝 Mensagem extraída com sucesso:', {
             tipo: message.type,
