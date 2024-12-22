@@ -258,14 +258,10 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
         console.log('📥 Webhook recebido:', {
             headers: req.headers,
+            tipo: req.body?.type,
+            messageId: req.body?.body?.key?.id,
+            fromMe: req.body?.body?.key?.fromMe,
             timestamp: new Date().toISOString()
-        });
-
-        console.log('🔍 Estrutura completa do webhook:', {
-            event: req.body?.event,
-            messageId: req.body?.messageId,
-            body: req.body?.body,
-            raw: JSON.stringify(req.body, null, 2)
         });
 
         const webhookData = req.body;
@@ -273,6 +269,12 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
         // Verifica se é uma mensagem válida
         if (!webhookData || !webhookData.body) {
             console.log('⚠️ Webhook sem body:', webhookData);
+            return res.sendStatus(200);
+        }
+
+        // Verifica se a mensagem é do próprio bot
+        if (webhookData.body.key?.fromMe === true) {
+            console.log('⚠️ Ignorando mensagem do próprio bot');
             return res.sendStatus(200);
         }
 
@@ -285,29 +287,20 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // Verifica se a mensagem já foi processada
-        try {
-            const messageKey = `processed_msg:${message.messageId}`;
-            const isProcessed = await redisStore.get(messageKey);
-            
-            if (isProcessed) {
-                console.log('⚠️ Mensagem já processada:', {
-                    messageId: message.messageId,
-                    timestamp: new Date().toISOString()
-                });
-                return res.sendStatus(200);
-            }
-
-            // Marca a mensagem como processada com TTL de 1 hora
-            await redisStore.set(messageKey, 'true', 3600);
-        } catch (error) {
-            console.error('⚠️ Erro ao verificar duplicidade da mensagem:', {
+        // Verifica se já processamos esta mensagem (usando Redis)
+        const messageKey = `processed_msg:${message.messageId}`;
+        const isProcessed = await redisStore.get(messageKey);
+        
+        if (isProcessed) {
+            console.log('⚠️ Mensagem já processada anteriormente:', {
                 messageId: message.messageId,
-                erro: error.message,
                 timestamp: new Date().toISOString()
             });
-            // Continua o processamento mesmo com erro no Redis
+            return res.sendStatus(200);
         }
+
+        // Marca a mensagem como processada antes de continuar
+        await redisStore.set(messageKey, 'true', 3600);
 
         console.log('📝 Mensagem extraída com sucesso:', {
             tipo: message.type,

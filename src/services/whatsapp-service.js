@@ -105,15 +105,25 @@ class WhatsAppService {
     /**
      * Envia uma mensagem de texto
      */
-    async sendText(to, message) {
+    async sendText(to, text) {
         try {
-            if (!to || !message) {
-                console.error('[WhatsApp] Parâmetros inválidos:', { to, message });
+            // Gera um ID único para a mensagem
+            const messageId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            console.log('📤 Enviando mensagem:', {
+                para: to,
+                texto: text.substring(0, 100),
+                messageId,
+                timestamp: new Date().toISOString()
+            });
+
+            if (!to || !text) {
+                console.error('[WhatsApp] Parâmetros inválidos:', { to, text });
                 return null;
             }
 
             // Garante que a mensagem é uma string
-            const messageText = String(message);
+            const messageText = String(text);
 
             // Garante que o cliente está inicializado
             const client = await this.getClient();
@@ -161,7 +171,7 @@ class WhatsAppService {
             if (error.code === 'ECONNREFUSED' || error.response?.status === 403) {
                 console.log('[WhatsApp] Tentando reinicializar o cliente...');
                 await this.init();
-                return this.sendText(to, messageText); // Tenta enviar novamente
+                return this.sendText(to, text); // Tenta enviar novamente
             }
 
             throw error;

@@ -25,6 +25,7 @@ class AIServices {
                 tipo: message.type,
                 de: message.from,
                 corpo: message.text?.substring(0, 100),
+                messageId: message.messageId,
                 timestamp: new Date().toISOString()
             });
 
@@ -32,6 +33,21 @@ class AIServices {
                 console.error('❌ Mensagem inválida:', message);
                 return null;
             }
+
+            // Verifica se a mensagem já foi processada
+            const processKey = `ai_processed:${message.messageId}`;
+            const wasProcessed = await this.redisStore.get(processKey);
+            
+            if (wasProcessed) {
+                console.log('⚠️ Mensagem já processada pelo AI:', {
+                    messageId: message.messageId,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+
+            // Marca a mensagem como processada antes de continuar
+            await this.redisStore.set(processKey, 'true', 3600);
 
             // Verifica se é um comando especial
             if (message.text?.toLowerCase() === '#resetid') {
