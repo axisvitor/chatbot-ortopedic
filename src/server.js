@@ -5,6 +5,43 @@ const morgan = require('morgan');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 
+// Lista de variáveis de ambiente requeridas
+const requiredEnvVars = [
+    'WAPI_URL',
+    'WAPI_TOKEN',
+    'WAPI_CONNECTION_KEY',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'REDIS_PASSWORD'
+];
+
+// Tratamento de erros não capturados
+process.on('uncaughtException', (error) => {
+    console.error('❌ Erro não capturado:', {
+        erro: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+    });
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Promise rejeitada não tratada:', {
+        razao: reason,
+        timestamp: new Date().toISOString()
+    });
+});
+
+process.on('SIGTERM', async () => {
+    console.log('🛑 Recebido sinal SIGTERM, encerrando graciosamente...');
+    try {
+        if (whatsappService) await whatsappService.close();
+        process.exit(0);
+    } catch (error) {
+        console.error('❌ Erro ao encerrar servidor:', error);
+        process.exit(1);
+    }
+});
+
 console.log('🚀 Iniciando servidor...');
 
 // Serviços
@@ -41,42 +78,61 @@ let imageService;
 
 // Função de inicialização
 async function initializeServices() {
-    try {
-        console.log('🔄 Iniciando serviços...');
-        
-        // Inicializa o WhatsAppService primeiro
-        whatsappService = new WhatsAppService();
-        await whatsappService.init();
-        const client = await whatsappService.getClient();
-        if (!client) {
-            throw new Error('WhatsAppService não inicializou corretamente');
-        }
-        console.log('✅ WhatsAppService inicializado');
+    return new Promise(async (resolve, reject) => {
+        // Timeout de 30 segundos para inicialização
+        const timeout = setTimeout(() => {
+            const error = new Error('Timeout ao inicializar serviços');
+            console.error('❌ ', error);
+            reject(error);
+        }, 30000);
 
-        // Inicializa os outros serviços
-        groqServices = new GroqServices();
-        console.log('✅ GroqServices inicializado');
-        
-        webhookService = new WebhookService();
-        console.log('✅ WebhookService inicializado');
-        
-        audioService = new AudioService(groqServices, client);
-        console.log('✅ AudioService inicializado');
-        
-        imageService = new ImageService(groqServices, client);
-        console.log('✅ ImageService inicializado');
-        
-        // Inicializa o AIServices por último
-        aiServices = new AIServices(whatsappService);
-        console.log('✅ AIServices inicializado');
-        
-        console.log('✅ Todos os serviços inicializados com sucesso');
-        isReady = true;
-    } catch (error) {
-        console.error('❌ Erro ao inicializar serviços:', error);
-        initError = error;
-        throw error;
-    }
+        try {
+            console.log('🔄 Iniciando serviços...');
+            
+            // Verifica variáveis de ambiente
+            for (const envVar of requiredEnvVars) {
+                if (!process.env[envVar]) {
+                    throw new Error(`Variável de ambiente ${envVar} não definida`);
+                }
+            }
+            
+            // Inicializa o WhatsAppService primeiro
+            whatsappService = new WhatsAppService();
+            await whatsappService.init();
+            const client = await whatsappService.getClient();
+            if (!client) {
+                throw new Error('WhatsAppService não inicializou corretamente');
+            }
+            console.log('✅ WhatsAppService inicializado');
+
+            // Inicializa os outros serviços
+            groqServices = new GroqServices();
+            console.log('✅ GroqServices inicializado');
+            
+            webhookService = new WebhookService();
+            console.log('✅ WebhookService inicializado');
+            
+            audioService = new AudioService(groqServices, client);
+            console.log('✅ AudioService inicializado');
+            
+            imageService = new ImageService(groqServices, client);
+            console.log('✅ ImageService inicializado');
+            
+            // Inicializa o AIServices por último
+            aiServices = new AIServices(whatsappService);
+            console.log('✅ AIServices inicializado');
+            
+            console.log('✅ Todos os serviços inicializados com sucesso');
+            isReady = true;
+            clearTimeout(timeout);
+            resolve();
+        } catch (error) {
+            console.error('❌ Erro ao inicializar serviços:', error);
+            initError = error;
+            clearTimeout(timeout);
+            reject(error);
+        }
+    });
 }
 
 // Middlewares
@@ -90,12 +146,37 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const limiter = rateLimit(RATE_LIMIT_CONFIG);
 app.use(limiter);
 
-// Healthcheck
+// Healthcheck mais detalhado
 app.get('/', (req, res) => {
-    if (isReady) {
-        res.json({ status: 'ok' });
-    } else {
-        res.status(503).json({ status: 'error', message: 'Serviço não está pronto', error: initError });
+    try {
+        const status = {
+            status: isReady ? 'ok' : 'initializing',
+            timestamp: new Date().toISOString(),
+            services: {
+                whatsapp: whatsappService ? 'initialized' : 'pending',
+                groq: groqServices ? 'initialized' : 'pending',
+                webhook: webhookService ? 'initialized' : 'pending',
+                ai: aiServices ? 'initialized' : 'pending',
+                audio: audioService ? 'initialized' : 'pending',
+                image: imageService ? 'initialized' : 'pending'
+            },
+            error: initError ? {
+                message: initError.message,
+                stack: initError.stack
+            } : null
+        };
+
+        if (isReady) {
+            res.json(status);
+        } else {
+            res.status(503).json(status);
+        }
+    } catch (error) {
+        res.status(500).json({
+            status: 'error',
+            message: error.message,
+            timestamp: new Date().toISOString()
+        });
     }
 });
 
@@ -175,32 +256,47 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
 });
 
 // Função para iniciar o servidor
-async function startServer() {
-    try {
-        console.log('🚀 Iniciando servidor...');
-        
-        // Aguarda a inicialização dos serviços
-        await initializeServices();
-        
-        // Inicia o servidor HTTP apenas se os serviços foram inicializados com sucesso
-        if (isReady) {
-            app.listen(port, () => {
-                console.log(`🚀 Servidor rodando na porta ${port}`);
+async function startServer(maxRetries = 3) {
+    let retryCount = 0;
+
+    async function attemptStart() {
+        try {
+            console.log(`🚀 Tentativa ${retryCount + 1} de ${maxRetries} de iniciar o servidor...`);
+            
+            // Aguarda a inicialização dos serviços
+            await initializeServices();
+            
+            // Inicia o servidor HTTP apenas se os serviços foram inicializados com sucesso
+            if (isReady) {
+                app.listen(port, () => {
+                    console.log(`🚀 Servidor rodando na porta ${port}`);
+                });
+                return true;
+            } else {
+                throw new Error('Serviços não foram inicializados corretamente');
+            }
+        } catch (error) {
+            console.error('❌ Erro ao iniciar servidor:', {
+                tentativa: retryCount + 1,
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
             });
-        } else {
-            throw new Error('Serviços não foram inicializados corretamente');
+
+            retryCount++;
+            
+            if (retryCount < maxRetries) {
+                console.log(`⏳ Aguardando 5 segundos antes da próxima tentativa...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                return attemptStart();
+            } else {
+                console.error('❌ Número máximo de tentativas excedido');
+                process.exit(1);
+            }
         }
-    } catch (error) {
-        console.error('❌ Erro fatal ao iniciar servidor:', {
-            erro: error.message,
-            stack: error.stack,
-            timestamp: new Date().toISOString()
-        });
-        
-        // Aguarda 5 segundos antes de tentar reiniciar
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        process.exit(1);
     }
+
+    return attemptStart();
 }
 
 // Exporta para uso em testes
@@ -209,35 +305,4 @@ module.exports = { app, startServer };
 // Se executado diretamente, inicia o servidor
 if (require.main === module) {
     startServer();
-}
-
-process.on('uncaughtException', (error) => {
-    console.error('❌ Erro não capturado:', {
-        erro: error.message,
-        stack: error.stack,
-        timestamp: new Date().toISOString()
-    });
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Promise rejeitada não tratada:', {
-        razao: reason,
-        timestamp: new Date().toISOString()
-    });
-});
-
-const requiredEnvVars = [
-    'WAPI_URL',
-    'WAPI_TOKEN',
-    'WAPI_CONNECTION_KEY',
-    'REDIS_HOST',
-    'REDIS_PORT',
-    'REDIS_PASSWORD'
-];
-
-for (const envVar of requiredEnvVars) {
-    if (!process.env[envVar]) {
-        console.error(`❌ Variável de ambiente ${envVar} não definida`);
-        process.exit(1);
-    }
 }

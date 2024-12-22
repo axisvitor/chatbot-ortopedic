@@ -291,6 +291,21 @@ class WhatsAppService {
             throw error;
         }
     }
+
+    async close() {
+        try {
+            if (this.client) {
+                console.log('[WhatsApp] Encerrando conexão...');
+                // Limpa qualquer estado pendente
+                this.client = null;
+                this.connectionKey = null;
+                this.retryCount = 0;
+            }
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao encerrar conexão:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = { WhatsAppService };
