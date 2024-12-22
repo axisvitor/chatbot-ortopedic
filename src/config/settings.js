@@ -76,7 +76,7 @@ const TRACKING_CONFIG = {
 };
 
 // Business Hours Configuration
-const BUSINESS_HOURS = {
+const BUSINESS_HOURS_CONFIG = {
     timezone: 'America/Sao_Paulo',
     schedule: {
         segunda: { start: '09:00', end: '18:00' },
@@ -238,15 +238,28 @@ const LOGGING_CONFIG = {
     }
 };
 
+// FFmpeg Configuration
+const FFMPEG_CONFIG = {
+    path: process.env.FFMPEG_PATH || './node_modules/ffmpeg-static/ffmpeg',
+    options: {
+        audioFormat: 'wav',
+        sampleRate: 16000,
+        channels: 1,
+        codec: 'pcm_s16le'
+    }
+};
+
 module.exports = {
     OPENAI_CONFIG,
     GROQ_CONFIG,
     REDIS_CONFIG,
     WHATSAPP_CONFIG,
-    TRACKING_CONFIG,
-    BUSINESS_HOURS,
-    MEDIA_CONFIG,
     NUVEMSHOP_CONFIG,
+    FFMPEG_CONFIG,
+    BUSINESS_HOURS_CONFIG,
+    TRACKING_CONFIG,
+    MEDIA_CONFIG,
     RATE_LIMIT_CONFIG,
-    LOGGING_CONFIG
+    LOGGING_CONFIG,
+    validateEnvVar
 };

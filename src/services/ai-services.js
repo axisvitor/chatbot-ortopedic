@@ -48,7 +48,7 @@ class AIServices {
                     messageId: message.messageId,
                     timestamp: new Date().toISOString()
                 });
-                return;
+                return null;
             }
 
             // Marca a mensagem como processada antes de continuar
@@ -57,8 +57,7 @@ class AIServices {
             // Verifica se é um comando especial
             if (message.text?.toLowerCase() === '#resetid') {
                 const response = await this.handleResetCommand(message);
-                await this.sendResponse(from, response);
-                return;
+                return await this.sendResponse(from, response);
             }
 
             // Verifica se é uma solicitação de atendimento humano
@@ -70,8 +69,7 @@ class AIServices {
                 if (!isBusinessHours) {
                     console.log('⏰ Fora do horário comercial para atendimento humano');
                     const response = this.businessHours.getOutOfHoursMessage();
-                    await this.sendResponse(from, response);
-                    return;
+                    return await this.sendResponse(from, response);
                 }
             }
 
@@ -88,7 +86,7 @@ class AIServices {
                     if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
                         console.log('🌍 Pedido internacional detectado:', orderId);
                         await this.whatsAppService.forwardToFinancial(message, orderId);
-                        return;
+                        return null;
                     }
                 }
             }
@@ -137,8 +135,9 @@ class AIServices {
                 return null;
             }
 
-            // Envia a resposta
-            return await this.sendResponse(from, response);
+            // Envia a resposta e retorna
+            const result = await this.sendResponse(from, response);
+            return result;
 
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
@@ -149,7 +148,7 @@ class AIServices {
 
             // Tenta enviar mensagem de erro
             if (message && message.from) {
-                await this.sendResponse(
+                return await this.sendResponse(
                     message.from,
                     'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
                 );
@@ -170,12 +169,6 @@ class AIServices {
                 return null;
             }
 
-            console.log('📤 Enviando resposta final...', {
-                para: to,
-                resposta: typeof response === 'string' ? response.substring(0, 100) : 'Objeto de resposta',
-                timestamp: new Date().toISOString()
-            });
-
             // Se a resposta for um objeto, tenta extrair a mensagem
             let messageText = response;
             if (typeof response === 'object' && response !== null) {
@@ -185,13 +178,23 @@ class AIServices {
             // Garante que a mensagem é uma string
             messageText = String(messageText);
 
-            const result = await this.whatsAppService.sendText(to, messageText);
+            console.log('📤 Enviando resposta:', {
+                para: to,
+                preview: messageText.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
 
+            // Envia a mensagem e retorna o resultado
+            const result = await this.whatsAppService.sendText(to, messageText);
+            
             if (!result) {
                 throw new Error('Resposta do WhatsApp inválida');
             }
 
-            return result;
+            return {
+                success: true,
+                messageId: result.messageId
+            };
 
         } catch (error) {
             console.error('❌ Erro ao enviar resposta:', {
@@ -254,22 +257,131 @@ class AIServices {
     }
 
     async handleImageMessage(message) {
-        const { from } = message;
         try {
-            const response = await this.whatsAppImageService.processImage(message);
-            return await this.handleResponse(message, response);
+            if (!message) {
+                throw new Error('Mensagem inválida');
+            }
+
+            const { from, type, messageId } = message;
+
+            // Log detalhado da mensagem recebida
+            console.log('🖼️ Mensagem de imagem recebida:', {
+                messageId,
+                from,
+                type,
+                hasMediaUrl: !!message.mediaUrl,
+                hasImageMessage: !!message.imageMessage,
+                timestamp: new Date().toISOString()
+            });
+
+            // Tenta obter a URL da imagem de diferentes propriedades
+            const mediaUrl = message.mediaUrl || 
+                           (message.imageMessage && message.imageMessage.url) ||
+                           (message.image && message.image.url);
+
+            if (!mediaUrl) {
+                console.error('❌ URL da imagem não encontrada:', {
+                    messageId,
+                    from,
+                    messageKeys: Object.keys(message),
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error('URL da imagem não encontrada na mensagem');
+            }
+
+            // Processa a imagem com a URL encontrada
+            const imageMessage = {
+                ...message,
+                mediaUrl,
+                messageId: messageId || `image_${Date.now()}`
+            };
+
+            console.log('🎯 Processando imagem:', {
+                messageId: imageMessage.messageId,
+                mediaUrl: mediaUrl.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+
+            // Baixa e processa a imagem
+            const { buffer, metadata } = await this.whatsAppImageService.downloadImage(mediaUrl, imageMessage);
+
+            // Valida o buffer da imagem
+            if (!buffer || buffer.length < 100) {
+                throw new Error('Buffer da imagem inválido ou muito pequeno');
+            }
+
+            console.log('✅ Imagem baixada:', {
+                messageId,
+                tamanho: buffer.length,
+                tipo: metadata.mimetype,
+                dimensoes: metadata.dimensions,
+                timestamp: new Date().toISOString()
+            });
+
+            // Analisa a imagem com o Groq
+            const imageAnalysis = await this.groqServices.processImage(buffer);
+
+            if (!imageAnalysis) {
+                throw new Error('Análise da imagem falhou');
+            }
+
+            console.log('🔍 Análise da imagem:', {
+                messageId,
+                tamanhoAnalise: imageAnalysis.length,
+                preview: imageAnalysis.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+
+            // Gera resposta baseada na análise
+            const prompt = `Analise esta imagem e forneça uma resposta detalhada e profissional:\n${imageAnalysis}`;
+            
+            const response = await this.openAIService.generateResponse({
+                ...message,
+                text: prompt
+            });
+
+            if (!response) {
+                throw new Error('Resposta do OpenAI inválida');
+            }
+
+            // Formata e envia a resposta
+            const formattedResponse = `🖼️ *Análise da imagem:*\n\n${response}`;
+            
+            console.log('📤 Enviando resposta:', {
+                messageId,
+                from,
+                responseLength: formattedResponse.length,
+                preview: formattedResponse.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+
+            return await this.sendResponse(from, formattedResponse);
+
         } catch (error) {
-            console.error('❌ Erro ao processar imagem:', error);
-            const errorMessage = 'Não foi possível processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.';
-            return await this.handleResponse(message, errorMessage);
+            console.error('❌ Erro ao processar imagem:', {
+                erro: error.message,
+                stack: error.stack,
+                messageId: message?.messageId,
+                from: message?.from,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Envia mensagem de erro amigável
+            if (message && message.from) {
+                await this.sendResponse(
+                    message.from,
+                    'Desculpe, não consegui processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.'
+                );
+            }
+            
+            return null;
         }
     }
 
     async handleAudioMessage(message) {
         try {
-            // Validação completa da mensagem
             if (!message) {
-                throw new Error('Objeto de mensagem inválido');
+                throw new Error('Mensagem inválida');
             }
 
             const { from, type, messageId } = message;
@@ -284,7 +396,7 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            // Tenta obter a URL do áudio de diferentes propriedades possíveis
+            // Tenta obter a URL do áudio de diferentes propriedades
             const mediaUrl = message.mediaUrl || 
                            (message.audioMessage && message.audioMessage.url) ||
                            (message.audio && message.audio.url);
@@ -297,6 +409,21 @@ class AIServices {
                     timestamp: new Date().toISOString()
                 });
                 throw new Error('URL do áudio não encontrada na mensagem');
+            }
+
+            // Verifica se o FFmpeg está disponível antes de prosseguir
+            const ffmpegAvailable = await this.audioService.init();
+            if (!ffmpegAvailable) {
+                console.error('❌ FFmpeg não disponível:', {
+                    messageId,
+                    from,
+                    timestamp: new Date().toISOString()
+                });
+                return await this.sendResponse(
+                    from,
+                    'Desculpe, o sistema está temporariamente indisponível para processar mensagens de voz. ' +
+                    'Por favor, envie sua mensagem como texto.'
+                );
             }
 
             // Processa o áudio com a URL encontrada
@@ -355,7 +482,6 @@ class AIServices {
             return await this.sendResponse(from, formattedResponse);
 
         } catch (error) {
-            // Log detalhado do erro
             console.error('❌ Erro ao processar áudio:', {
                 erro: error.message,
                 stack: error.stack,
@@ -363,15 +489,16 @@ class AIServices {
                 from: message?.from,
                 timestamp: new Date().toISOString()
             });
-            
+
             // Envia mensagem de erro amigável
             if (message && message.from) {
-                await this.sendResponse(
-                    message.from, 
-                    'Desculpe, não consegui processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.'
+                return await this.sendResponse(
+                    message.from,
+                    'Desculpe, não consegui processar seu áudio. ' + 
+                    'Por favor, tente novamente ou envie uma mensagem de texto.'
                 );
             }
-            
+
             return null;
         }
     }
