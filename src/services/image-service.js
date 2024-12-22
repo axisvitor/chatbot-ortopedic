@@ -207,4 +207,5 @@ class ImageService {
     }
 }
 
-module.exports = ImageService;
+// Exporta a classe ImageService da mesma forma que os outros serviços
+module.exports = { ImageService };

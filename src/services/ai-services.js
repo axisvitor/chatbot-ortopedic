@@ -635,5 +635,5 @@ class AIServices {
     }
 }
 
-// Exporta a classe AIServices
-module.exports = AIServices;
+// Exporta a classe AIServices da mesma forma que os outros serviços
+module.exports = { AIServices };
