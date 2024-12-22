@@ -157,6 +157,33 @@ class RedisStore {
             throw error;
         }
     }
+
+    /**
+     * Deleta chaves por padrão
+     * @param {string} pattern - Padrão para deletar
+     * @returns {Promise<boolean>} true se deletado com sucesso
+     */
+    async deletePattern(pattern) {
+        try {
+            const keys = await this.client.keys(pattern);
+            if (keys.length > 0) {
+                await this.client.del(keys);
+                console.log('🗑️ Chaves deletadas:', {
+                    pattern,
+                    quantidade: keys.length,
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao deletar chaves:', {
+                pattern,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            return false;
+        }
+    }
 }
 
 module.exports = { RedisStore };

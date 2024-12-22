@@ -183,8 +183,16 @@ async function initializeServices() {
             imageService = new ImageService(groqServices, client);
             console.log('✅ ImageService inicializado');
             
-            // Inicializa o AIServices por último
-            aiServices = new AIServices(whatsappService);
+            // Inicializa o AIServices passando a instância do WhatsAppService
+            aiServices = new AIServices(
+                whatsappService, 
+                null, // whatsAppImageService
+                null, // redisStore
+                null, // openAIService
+                null, // trackingService
+                null, // orderValidationService
+                null  // nuvemshopService
+            );
             console.log('✅ AIServices inicializado');
             
             console.log('✅ Todos os serviços inicializados com sucesso');

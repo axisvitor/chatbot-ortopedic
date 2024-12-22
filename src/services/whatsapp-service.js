@@ -7,7 +7,6 @@ class WhatsAppService {
         this.connectionKey = null;
         this.retryCount = 0;
         this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
-        this.init();
     }
 
     async init() {

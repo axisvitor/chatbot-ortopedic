@@ -33,6 +33,46 @@ class AIServices {
                 return null;
             }
 
+            // Verifica se é um comando especial
+            if (message.text?.toLowerCase() === '#resetid') {
+                try {
+                    // Pega o threadId atual
+                    const threadKey = `thread:${message.from}`;
+                    const currentThreadId = await this.redisStore.get(threadKey);
+                    
+                    // Se existir um thread antigo, tenta deletá-lo
+                    if (currentThreadId) {
+                        await this.openAIService.deleteThread(currentThreadId);
+                    }
+                    
+                    // Cria um novo thread
+                    const newThread = await this.openAIService.createThread();
+                    
+                    // Salva o novo threadId no Redis
+                    await this.redisStore.set(threadKey, newThread.id);
+                    
+                    // Limpa outras chaves relacionadas ao usuário
+                    const userPrefix = `user:${message.from}:*`;
+                    await this.redisStore.deletePattern(userPrefix);
+                    
+                    console.log('🔄 Histórico resetado com sucesso:', {
+                        usuario: message.from,
+                        threadAntigo: currentThreadId,
+                        novoThreadId: newThread.id,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    return '✅ Histórico de mensagens resetado com sucesso!\n\nVocê pode começar uma nova conversa agora. Use este comando sempre que quiser começar do zero.';
+                } catch (error) {
+                    console.error('❌ Erro ao resetar histórico:', {
+                        usuario: message.from,
+                        erro: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                    return '❌ Desculpe, ocorreu um erro ao resetar o histórico. Por favor, tente novamente em alguns instantes.';
+                }
+            }
+
             // Verifica se é uma solicitação de atendimento humano
             if (message.text?.toLowerCase().includes('atendente') || 
                 message.text?.toLowerCase().includes('humano') || 

@@ -109,6 +109,26 @@ class OpenAIService {
             throw error;
         }
     }
+
+    /**
+     * Deleta um thread existente
+     * @param {string} threadId - ID do thread a ser deletado
+     * @returns {Promise<boolean>} Sucesso da operação
+     */
+    async deleteThread(threadId) {
+        try {
+            if (!threadId) return false;
+            await this.client.beta.threads.del(threadId);
+            return true;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao deletar thread:', {
+                threadId,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            return false;
+        }
+    }
 }
 
 module.exports = { OpenAIService };
