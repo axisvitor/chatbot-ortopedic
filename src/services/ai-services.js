@@ -37,7 +37,9 @@ class AIServices {
 
             if (!isBusinessHours) {
                 console.log('⏰ Fora do horário comercial');
-                return this.whatsAppService.sendText(message.from, this.businessHours.getOutOfHoursMessage());
+                const outOfHoursMessage = this.businessHours.getOutOfHoursMessage();
+                await this.whatsAppService.sendText(message.from, outOfHoursMessage);
+                return outOfHoursMessage;
             }
 
             // Verifica internamente se o pedido é internacional

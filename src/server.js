@@ -234,8 +234,13 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             });
 
             // Envia a resposta
-            console.log('📨 Tentando enviar resposta via WhatsApp...');
-            const sendResult = await whatsappService.sendText(message.from, response);
+            console.log('📨 Tentando enviar resposta via WhatsApp...', {
+                para: message.from,
+                resposta: typeof response === 'string' ? response.substring(0, 100) : JSON.stringify(response).substring(0, 100)
+            });
+
+            const responseText = typeof response === 'string' ? response : JSON.stringify(response);
+            const sendResult = await whatsappService.sendText(message.from, responseText);
             console.log('✅ Resposta enviada:', {
                 resultado: sendResult,
                 timestamp: new Date().toISOString()
