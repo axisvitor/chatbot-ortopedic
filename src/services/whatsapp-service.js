@@ -89,27 +89,41 @@ class WhatsAppService {
      */
     async sendText(to, message) {
         try {
-            console.log('[WhatsApp] Enviando mensagem:', {
-                to,
-                messagePreview: message.substring(0, 100),
-                connectionKey: this.connectionKey
+            console.log('[WhatsApp] Iniciando envio de mensagem:', {
+                para: to,
+                previewMensagem: message.substring(0, 100),
+                chaveConexao: this.connectionKey,
+                timestamp: new Date().toISOString(),
+                headers: {
+                    'Authorization': 'Bearer ****' + WHATSAPP_CONFIG.token.slice(-4),
+                    'Content-Type': 'application/json'
+                }
             });
 
             const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
+            console.log('[WhatsApp] Endpoint:', endpoint);
+
             const response = await this.client.post(endpoint, {
                 phoneNumber: to,
                 text: message
             });
 
-            console.log('[WhatsApp] Mensagem enviada com sucesso:', {
+            console.log('[WhatsApp] Resposta do servidor:', {
+                status: response.status,
                 messageId: response.data.messageId,
-                error: response.data.error
+                error: response.data.error,
+                timestamp: new Date().toISOString()
             });
 
             await this.delay();
             return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar mensagem:', error.message);
+            console.error('[WhatsApp] Erro ao enviar mensagem:', {
+                erro: error.message,
+                status: error.response?.status,
+                data: error.response?.data,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }

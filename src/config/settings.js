@@ -201,6 +201,36 @@ const RATE_LIMIT_CONFIG = {
     message: "Muitas requisições, por favor, tente novamente mais tarde."
 };
 
+// Logging Configuration
+const LOGGING_CONFIG = {
+    enabled: true,
+    level: 'debug',
+    format: {
+        timestamp: true,
+        colorize: true,
+        json: false
+    },
+    webhook: {
+        request: true,
+        response: true,
+        headers: true
+    },
+    whatsapp: {
+        requests: true,
+        responses: true,
+        errors: true
+    },
+    ai: {
+        requests: true,
+        responses: true,
+        timing: true
+    },
+    redis: {
+        operations: true,
+        errors: true
+    }
+};
+
 module.exports = {
     OPENAI_CONFIG,
     GROQ_CONFIG,
@@ -210,5 +240,6 @@ module.exports = {
     BUSINESS_HOURS,
     MEDIA_CONFIG,
     NUVEMSHOP_CONFIG,
-    RATE_LIMIT_CONFIG
+    RATE_LIMIT_CONFIG,
+    LOGGING_CONFIG
 };

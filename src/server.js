@@ -80,76 +80,73 @@ app.get('/', (req, res) => {
 // Webhook para receber mensagens do WhatsApp
 app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
-        const message = req.body;
+        console.log('📥 Webhook recebido:', {
+            headers: req.headers,
+            timestamp: new Date().toISOString()
+        });
 
-        if (!message || !message.type) {
-            console.error('❌ Mensagem inválida:', message);
+        console.log('🔍 Estrutura completa do webhook:', {
+            event: req.body?.event,
+            messageId: req.body?.messageId,
+            body: req.body?.body,
+            raw: JSON.stringify(req.body, null, 2)
+        });
+
+        const webhookData = req.body;
+
+        // Verifica se é uma mensagem válida
+        if (!webhookData || !webhookData.body) {
+            console.log('⚠️ Webhook sem body:', webhookData);
             return res.sendStatus(200);
         }
 
-        let response = null;
-
-        // Processa mensagens de texto
-        if (message.type === 'text' && message.text) {
-            response = await aiServices.processMessage(message.text, {
-                from: message.from,
-                messageId: message.messageId,
-                businessHours: businessHours.isWithinBusinessHours()
-            });
+        // Extrai a mensagem usando o WebhookService
+        console.log('🔄 Tentando extrair mensagem do webhook...');
+        const message = webhookService.extractMessageFromWebhook(webhookData);
+        
+        if (!message) {
+            console.log('⚠️ Não foi possível extrair a mensagem do webhook');
+            return res.sendStatus(200);
         }
-        // Processa mensagens de áudio
-        else if (message.type === 'audio' && message.audioMessage) {
-            if (!audioService) {
-                console.error('❌ AudioService não está pronto');
-                return res.sendStatus(200);
-            }
 
-            try {
-                const transcription = await audioService.processWhatsAppAudio({
-                    audioMessage: message.audioMessage
-                });
+        console.log('📝 Mensagem extraída com sucesso:', {
+            tipo: message.type,
+            de: message.from,
+            texto: message.text?.substring(0, 100),
+            temAudio: !!message.audioMessage,
+            temImagem: !!message.imageMessage,
+            messageId: message.messageId,
+            timestamp: new Date().toISOString()
+        });
 
-                console.log('✅ Áudio transcrito com sucesso:', {
-                    length: transcription?.length,
-                    preview: transcription?.substring(0, 100)
-                });
-
-                response = await aiServices.processMessage(transcription, {
-                    from: message.from,
-                    messageId: message.messageId,
-                    isAudioTranscription: true,
-                    businessHours: businessHours.isWithinBusinessHours()
-                });
-            } catch (error) {
-                console.error('❌ Erro ao processar áudio:', error);
-                response = 'Desculpe, não consegui processar seu áudio. Por favor, tente enviar uma mensagem de texto.';
-            }
-        }
-        // Processa mensagens de imagem
-        else if (message.type === 'image' && message.imageMessage) {
-            try {
-                response = await imageService.processWhatsAppImage({
-                    imageMessage: message.imageMessage,
-                    caption: message.caption,
-                    from: message.from,
-                    messageId: message.messageId,
-                    businessHours: businessHours.isWithinBusinessHours()
-                });
-            } catch (error) {
-                console.error('❌ Erro ao processar imagem:', error);
-                response = 'Desculpe, não consegui processar sua imagem. Por favor, tente enviar uma mensagem de texto.';
-            }
-        }
+        // Processa a mensagem
+        console.log('🤖 Iniciando processamento da mensagem...');
+        const response = await aiServices.handleMessage(message);
 
         if (response) {
-            console.log('📤 Enviando resposta:', {
+            console.log('📤 Resposta gerada com sucesso:', {
                 para: message.from,
-                resposta: response
+                resposta: typeof response === 'string' ? response.substring(0, 100) : 'Objeto de resposta',
+                timestamp: new Date().toISOString()
             });
+
+            // Envia a resposta
+            console.log('📨 Tentando enviar resposta via WhatsApp...');
+            const sendResult = await whatsappService.sendText(message.from, response);
+            console.log('✅ Resposta enviada:', {
+                resultado: sendResult,
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            console.log('⚠️ Nenhuma resposta gerada');
         }
 
     } catch (error) {
-        console.error('❌ Erro no webhook:', error);
+        console.error('❌ Erro no webhook:', {
+            erro: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString()
+        });
     }
 
     res.sendStatus(200);

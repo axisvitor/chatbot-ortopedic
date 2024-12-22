@@ -305,7 +305,7 @@ class WebhookService {
 
             await this.redisStore.set(searchKey, JSON.stringify(searchData));
 
-            console.log('[Webhook] Índice de busca atualizado:', {
+            console.log('[Webhook] ��ndice de busca atualizado:', {
                 productId: product.id,
                 name: product.name
             });
@@ -411,15 +411,21 @@ class WebhookService {
 
     extractMessageFromWebhook(webhookData) {
         try {
-            console.log('[Webhook] Processando dados:', {
-                type: webhookData?.type,
-                hasBody: !!webhookData?.body,
-                hasMessage: !!webhookData?.body?.message
+            console.log('🔍 [Webhook] Dados recebidos:', {
+                tipo: webhookData?.type,
+                temBody: !!webhookData?.body,
+                temMensagem: !!webhookData?.body?.message,
+                headers: webhookData?.headers,
+                timestamp: new Date().toISOString()
             });
 
             // Validações básicas
             if (!webhookData?.body?.key?.remoteJid || !webhookData?.body?.message) {
-                console.log('[Webhook] Dados inválidos:', webhookData);
+                console.log('⚠️ [Webhook] Dados inválidos:', {
+                    temRemoteJid: !!webhookData?.body?.key?.remoteJid,
+                    temMessage: !!webhookData?.body?.message,
+                    raw: JSON.stringify(webhookData, null, 2)
+                });
                 return null;
             }
 
@@ -434,6 +440,13 @@ class WebhookService {
                 isGroup: webhookData.body.isGroup || false
             };
 
+            console.log('📝 [Webhook] Dados básicos extraídos:', {
+                tipo: messageData.type,
+                de: messageData.from,
+                messageId: messageData.messageId,
+                timestamp: new Date(messageData.timestamp * 1000).toISOString()
+            });
+
             // Extrai texto da mensagem
             const message = webhookData.body.message;
             messageData.text = message.conversation || 
@@ -445,29 +458,46 @@ class WebhookService {
             // Adiciona dados da mídia se presente
             if (message.imageMessage) {
                 messageData.imageMessage = message.imageMessage;
+                console.log('🖼️ [Webhook] Imagem detectada:', {
+                    mimetype: message.imageMessage.mimetype,
+                    caption: message.imageMessage.caption?.substring(0, 100)
+                });
             }
             if (message.audioMessage) {
                 messageData.audioMessage = message.audioMessage;
+                console.log('🎵 [Webhook] Áudio detectado:', {
+                    seconds: message.audioMessage.seconds,
+                    mimetype: message.audioMessage.mimetype
+                });
             }
             if (message.documentMessage) {
                 messageData.documentMessage = message.documentMessage;
+                console.log('📄 [Webhook] Documento detectado:', {
+                    filename: message.documentMessage.fileName,
+                    mimetype: message.documentMessage.mimetype
+                });
             }
 
-            console.log('[Webhook] Mensagem extraída:', {
-                type: messageData.type,
-                from: messageData.from,
+            console.log('✅ [Webhook] Mensagem processada:', {
+                tipo: messageData.type,
+                de: messageData.from,
                 messageId: messageData.messageId,
-                hasText: !!messageData.text,
-                textPreview: messageData.text?.substring(0, 100),
-                hasImage: !!messageData.imageMessage,
-                hasAudio: !!messageData.audioMessage,
-                hasDocument: !!messageData.documentMessage,
-                isGroup: messageData.isGroup
+                temTexto: !!messageData.text,
+                textoPreview: messageData.text?.substring(0, 100),
+                temImagem: !!messageData.imageMessage,
+                temAudio: !!messageData.audioMessage,
+                temDocumento: !!messageData.documentMessage,
+                isGroup: messageData.isGroup,
+                timestamp: new Date().toISOString()
             });
 
             return messageData;
         } catch (error) {
-            console.error('[Webhook] Erro ao extrair mensagem:', error);
+            console.error('❌ [Webhook] Erro ao extrair mensagem:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
             return null;
         }
     }
