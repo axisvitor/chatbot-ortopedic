@@ -57,7 +57,8 @@ class AIServices {
             // Verifica se é um comando especial
             if (message.text?.toLowerCase() === '#resetid') {
                 const response = await this.handleResetCommand(message);
-                return await this.sendResponse(from, response);
+                await this.sendResponse(from, response);
+                return null;
             }
 
             // Verifica se é uma solicitação de atendimento humano
@@ -69,7 +70,8 @@ class AIServices {
                 if (!isBusinessHours) {
                     console.log('⏰ Fora do horário comercial para atendimento humano');
                     const response = this.businessHours.getOutOfHoursMessage();
-                    return await this.sendResponse(from, response);
+                    await this.sendResponse(from, response);
+                    return null;
                 }
             }
 
@@ -135,6 +137,12 @@ class AIServices {
                 return null;
             }
 
+            // Se a resposta for um objeto de erro, envia apenas a mensagem
+            if (typeof response === 'object' && response.error) {
+                await this.sendResponse(from, response.message);
+                return null;
+            }
+
             // Envia a resposta
             await this.sendResponse(from, response);
             return null;
@@ -148,12 +156,12 @@ class AIServices {
 
             // Tenta enviar mensagem de erro
             if (message && message.from) {
-                return await this.sendResponse(
+                await this.sendResponse(
                     message.from,
                     'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
                 );
             }
-
+            
             return null;
         }
     }
@@ -424,11 +432,12 @@ class AIServices {
                     from,
                     timestamp: new Date().toISOString()
                 });
-                return await this.sendResponse(
+                await this.sendResponse(
                     from,
                     'Desculpe, o sistema está temporariamente indisponível para processar mensagens de voz. ' +
                     'Por favor, envie sua mensagem como texto.'
                 );
+                return null;
             }
 
             // Processa o áudio com a URL encontrada
@@ -445,28 +454,39 @@ class AIServices {
             });
 
             // Processa o áudio e obtém a transcrição
-            const audioText = await this.audioService.processWhatsAppAudio(audioMessage);
+            const result = await this.audioService.processWhatsAppAudio(audioMessage);
             
-            if (!audioText || typeof audioText !== 'string') {
+            // Se houver erro no processamento
+            if (result.error) {
+                await this.sendResponse(from, result.message);
+                return null;
+            }
+
+            // Se não houver transcrição
+            if (!result || typeof result !== 'string') {
                 console.error('❌ Transcrição inválida:', {
                     messageId,
-                    transcriptionType: typeof audioText,
+                    transcriptionType: typeof result,
                     timestamp: new Date().toISOString()
                 });
-                throw new Error('Transcrição do áudio inválida');
+                await this.sendResponse(
+                    from,
+                    'Desculpe, não consegui entender o áudio. Por favor, tente novamente ou envie sua mensagem como texto.'
+                );
+                return null;
             }
 
             console.log('📝 Áudio transcrito:', {
                 messageId,
-                transcriptionLength: audioText.length,
-                preview: audioText.substring(0, 100),
+                transcriptionLength: result.length,
+                preview: result.substring(0, 100),
                 timestamp: new Date().toISOString()
             });
 
             // Gera resposta baseada na transcrição
             const response = await this.openAIService.generateResponse({
                 ...message,
-                text: audioText
+                text: result
             });
 
             if (!response) {
@@ -474,7 +494,7 @@ class AIServices {
             }
 
             // Formata e envia a resposta
-            const formattedResponse = `🎵 *Mensagem de voz:*\n${audioText}\n\n${response}`;
+            const formattedResponse = `🎵 *Mensagem de voz:*\n${result}\n\n${response}`;
             
             console.log('📤 Enviando resposta:', {
                 messageId,
@@ -484,7 +504,8 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            return await this.sendResponse(from, formattedResponse);
+            await this.sendResponse(from, formattedResponse);
+            return null;
 
         } catch (error) {
             console.error('❌ Erro ao processar áudio:', {
@@ -497,13 +518,12 @@ class AIServices {
 
             // Envia mensagem de erro amigável
             if (message && message.from) {
-                return await this.sendResponse(
+                await this.sendResponse(
                     message.from,
-                    'Desculpe, não consegui processar seu áudio. ' + 
-                    'Por favor, tente novamente ou envie uma mensagem de texto.'
+                    'Desculpe, não consegui processar sua mensagem de voz. Por favor, tente novamente ou envie uma mensagem de texto.'
                 );
             }
-
+            
             return null;
         }
     }
