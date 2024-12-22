@@ -49,7 +49,8 @@ const WHATSAPP_CONFIG = {
         image: 'message/send-image',
         document: 'message/send-document',
         audio: 'message/send-audio',
-        status: 'message/status'
+        status: 'message/send-text',
+        media: 'media/upload'
     },
     departments: {
         financial: {

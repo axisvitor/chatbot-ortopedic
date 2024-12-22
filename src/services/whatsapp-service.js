@@ -29,18 +29,9 @@ class WhatsAppService {
             this.client = await this.createClient();
             this.connectionKey = WHATSAPP_CONFIG.connectionKey;
             this.addInterceptor();
-            
-            // Testa a conexão
-            const testEndpoint = `${WHATSAPP_CONFIG.endpoints.status}?connectionKey=${this.connectionKey}`;
-            const testResponse = await this.client.get(testEndpoint);
-            
-            if (testResponse.status !== 200) {
-                throw new Error(`Erro ao testar conexão: ${testResponse.statusText}`);
-            }
 
             console.log('[WhatsApp] Cliente inicializado com sucesso:', { 
                 connectionKey: this.connectionKey,
-                status: testResponse.status,
                 timestamp: new Date().toISOString()
             });
 
