@@ -272,8 +272,10 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             return res.sendStatus(200);
         }
 
-        // Verifica se a mensagem é do próprio bot
-        if (webhookData.body.key?.fromMe === true) {
+        // Ignora mensagens do próprio bot
+        if (webhookData.body.key?.fromMe === true || webhookData.fromMe === true || 
+            (webhookData.body.message && typeof webhookData.body.message === 'string' && 
+             webhookData.body.message.startsWith('{"error":false,"messageId":'))) {
             console.log('⚠️ Ignorando mensagem do próprio bot');
             return res.sendStatus(200);
         }
