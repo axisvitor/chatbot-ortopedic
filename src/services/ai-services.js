@@ -78,14 +78,14 @@ class AIServices {
                         timestamp: new Date().toISOString()
                     });
                     
-                    return '✅ Histórico de mensagens resetado com sucesso!\n\nVocê pode começar uma nova conversa agora. Use este comando sempre que quiser começar do zero.';
+                    return await this.handleResponse(message, '✅ Histórico de mensagens resetado com sucesso!\n\nVocê pode começar uma nova conversa agora. Use este comando sempre que quiser começar do zero.');
                 } catch (error) {
                     console.error('❌ Erro ao resetar histórico:', {
                         usuario: message.from,
                         erro: error.message,
                         timestamp: new Date().toISOString()
                     });
-                    return '❌ Desculpe, ocorreu um erro ao resetar o histórico. Por favor, tente novamente em alguns instantes.';
+                    return await this.handleResponse(message, '❌ Desculpe, ocorreu um erro ao resetar o histórico. Por favor, tente novamente em alguns instantes.');
                 }
             }
 
@@ -98,8 +98,7 @@ class AIServices {
                 if (!isBusinessHours) {
                     console.log('⏰ Fora do horário comercial para atendimento humano');
                     const outOfHoursMessage = this.businessHours.getOutOfHoursMessage();
-                    await this.whatsAppService.sendText(message.from, outOfHoursMessage);
-                    return outOfHoursMessage;
+                    return await this.handleResponse(message, outOfHoursMessage);
                 }
             }
 
@@ -122,12 +121,12 @@ class AIServices {
 
             if (message.type === 'image') {
                 console.log('🖼️ Processando mensagem de imagem...');
-                return this.handleImageMessage(message);
+                return await this.handleImageMessage(message);
             }
 
             if (message.type === 'audio') {
                 console.log('🎵 Processando mensagem de áudio...');
-                return this.handleAudioMessage(message);
+                return await this.handleAudioMessage(message);
             }
 
             // Busca histórico do chat no Redis
@@ -164,8 +163,7 @@ class AIServices {
             });
 
             console.log('📤 Enviando resposta final...');
-            await this.whatsAppService.sendText(message.from, response);
-            return response;
+            return await this.handleResponse(message, response);
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
                 erro: error.message,
@@ -174,8 +172,48 @@ class AIServices {
             });
 
             const errorMessage = 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
-            await this.whatsAppService.sendText(message.from, errorMessage);
-            return errorMessage;
+            return await this.handleResponse(message, errorMessage);
+        }
+    }
+
+    async sendResponse(to, response) {
+        try {
+            console.log('📤 Enviando resposta final...', {
+                para: to,
+                resposta: response?.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+
+            const result = await this.whatsAppService.sendText(to, response);
+
+            console.log('✅ Resposta enviada:', {
+                resultado: result,
+                timestamp: new Date().toISOString()
+            });
+
+            return result;
+        } catch (error) {
+            console.error('❌ Erro ao enviar resposta:', {
+                para: to,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    async handleResponse(message, response) {
+        try {
+            if (!response) {
+                console.log('⚠️ Resposta vazia, não será enviada');
+                return null;
+            }
+
+            // Envia a resposta
+            return await this.sendResponse(message.from, response);
+        } catch (error) {
+            console.error('❌ Erro ao processar resposta:', error);
+            throw error;
         }
     }
 
@@ -239,13 +277,11 @@ class AIServices {
         const { from } = message;
         try {
             const response = await this.whatsAppImageService.processImage(message);
-            await this.whatsAppService.sendText(from, response);
-            return response;
+            return await this.handleResponse(message, response);
         } catch (error) {
             console.error('❌ Erro ao processar imagem:', error);
             const errorMessage = 'Não foi possível processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.';
-            await this.whatsAppService.sendText(from, errorMessage);
-            return errorMessage;
+            return await this.handleResponse(message, errorMessage);
         }
     }
 
@@ -253,13 +289,11 @@ class AIServices {
         const { from } = message;
         try {
             const response = await this.whatsAppService.processAudio(message);
-            await this.whatsAppService.sendText(from, response);
-            return response;
+            return await this.handleResponse(message, response);
         } catch (error) {
             console.error('❌ Erro ao processar áudio:', error);
             const errorMessage = 'Não foi possível processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.';
-            await this.whatsAppService.sendText(from, errorMessage);
-            return errorMessage;
+            return await this.handleResponse(message, errorMessage);
         }
     }
 }
