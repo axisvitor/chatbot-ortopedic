@@ -104,17 +104,17 @@ class AudioService {
 
                     await fs.writeFile(inputPath, audioBuffer);
 
-                    console.log('🔄 Tentando converter áudio:', {
+                    console.log('🔄 Convertendo áudio:', {
                         messageId: message.messageId,
                         input: inputPath,
-                        format: attempt.format,
+                        output: outputPath,
                         timestamp: new Date().toISOString()
                     });
 
+                    // Deixa o FFmpeg detectar o formato automaticamente
                     await new Promise((resolve, reject) => {
                         ffmpeg()
                             .input(inputPath)
-                            .inputOptions([`-f ${attempt.format}`])
                             .outputOptions([
                                 '-ar 16000',
                                 '-ac 1',
@@ -127,10 +127,12 @@ class AudioService {
 
                     // Verifica se o arquivo de saída é válido
                     const outputStats = await fs.stat(outputPath);
-                    if (outputStats && outputStats.size >= 100) {
-                        success = true;
-                        break;
+                    if (!outputStats || outputStats.size < 100) {
+                        throw new Error('Arquivo de saída inválido após conversão');
                     }
+
+                    success = true;
+                    break;
                 } catch (attemptError) {
                     error = attemptError;
                     console.log(`⚠️ Tentativa com ${attempt.format} falhou:`, attemptError.message);
