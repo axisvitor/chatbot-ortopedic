@@ -189,8 +189,14 @@ class AIServices {
         try {
             // Se a resposta for um objeto, extrai apenas o texto
             const messageText = typeof response === 'object' ? 
-                (response.message?.text || response.text || JSON.stringify(response)) : 
+                (response.message?.text || response.text || '') : 
                 String(response);
+
+            // Se a mensagem estiver vazia após a extração, não envia
+            if (!messageText.trim()) {
+                console.log('⚠️ Mensagem vazia, não será enviada');
+                return null;
+            }
 
             console.log('📤 Enviando resposta final...', {
                 para: to,
@@ -200,12 +206,11 @@ class AIServices {
 
             const result = await this.whatsAppService.sendText(to, messageText);
 
-            console.log('✅ Resposta enviada:', {
-                resultado: result,
-                timestamp: new Date().toISOString()
-            });
-
-            return result;
+            // Não retorna o resultado completo, apenas um indicador de sucesso
+            return {
+                success: !result.error,
+                messageId: result.messageId
+            };
         } catch (error) {
             console.error('❌ Erro ao enviar resposta:', {
                 para: to,
