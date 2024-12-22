@@ -211,15 +211,57 @@ class WhatsAppService {
      */
     async sendAudio(to, audioUrl) {
         try {
-            const response = await this.client.post(`${WHATSAPP_CONFIG.endpoints.audio}?connectionKey=${this.connectionKey}`, {
-                phoneNumber: to,
-                audio: audioUrl
+            console.log('🎵 Enviando áudio:', {
+                para: to,
+                url: audioUrl?.substring(0, 100),
+                timestamp: new Date().toISOString()
             });
 
-            await this.delay();
+            const response = await this.client.post(
+                `message/send-audio?connectionKey=${this.connectionKey}`,
+                {
+                    number: to,
+                    audioUrl: audioUrl
+                }
+            );
+
             return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar áudio:', error.message);
+            console.error('❌ Erro ao enviar áudio:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Faz download de uma mídia do WhatsApp
+     * @param {Object} message - Mensagem contendo a mídia
+     * @returns {Promise<Buffer>} Buffer com o conteúdo da mídia
+     */
+    async downloadMediaMessage(message) {
+        try {
+            if (!message || !message.mediaUrl) {
+                throw new Error('Mensagem ou URL da mídia não fornecida');
+            }
+
+            console.log('📥 Baixando mídia:', {
+                messageId: message.messageId,
+                tipo: message.type,
+                url: message.mediaUrl?.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+
+            const response = await this.client.get(
+                `message/download-media?connectionKey=${this.connectionKey}&messageId=${message.messageId}`,
+                { responseType: 'arraybuffer' }
+            );
+
+            return Buffer.from(response.data);
+        } catch (error) {
+            console.error('❌ Erro ao baixar mídia:', {
+                erro: error.message,
+                messageId: message?.messageId,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }
@@ -238,7 +280,7 @@ class WhatsAppService {
         }
     }
 
-    async delay() {
+    async delay(ms) {
         return new Promise(resolve => setTimeout(resolve, WHATSAPP_CONFIG.messageDelay));
     }
 

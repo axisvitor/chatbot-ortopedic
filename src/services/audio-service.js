@@ -21,8 +21,8 @@ class AudioService {
         }
     }
 
-    async processWhatsAppAudio({ audioMessage }) {
-        if (!audioMessage) {
+    async processWhatsAppAudio(message) {
+        if (!message || !message.type === 'audio') {
             throw new Error('Mensagem de áudio inválida');
         }
 
@@ -30,21 +30,52 @@ class AudioService {
         const wavPath = path.join(this.tempDir, `${uuidv4()}.wav`);
 
         try {
-            const audioBuffer = await this.whatsappClient.downloadMediaMessage(audioMessage);
+            console.log('📥 Baixando áudio do WhatsApp...', {
+                messageId: message.messageId,
+                timestamp: new Date().toISOString()
+            });
+
+            // Download do áudio
+            const audioBuffer = await this.whatsappClient.downloadMediaMessage(message);
             await fs.writeFile(audioPath, audioBuffer);
 
+            console.log('🔄 Convertendo áudio para WAV...', {
+                origem: audioPath,
+                destino: wavPath,
+                timestamp: new Date().toISOString()
+            });
+
+            // Converte para WAV
             await this.convertToWav(audioPath, wavPath);
 
+            console.log('📝 Transcrevendo áudio...', {
+                arquivo: wavPath,
+                timestamp: new Date().toISOString()
+            });
+
+            // Lê o arquivo WAV
             const wavBuffer = await fs.readFile(wavPath);
+            
+            // Transcreve o áudio
             const transcription = await this.groqServices.transcribeAudio(wavBuffer);
+
+            console.log('✅ Áudio transcrito com sucesso:', {
+                transcricao: transcription?.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
 
             return transcription;
 
         } catch (error) {
-            console.error('Erro ao processar áudio:', error);
+            console.error('❌ Erro ao processar áudio:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         } finally {
-            this.cleanupFiles(audioPath, wavPath);
+            // Limpa os arquivos temporários
+            await this.cleanupFiles(audioPath, wavPath);
         }
     }
 
@@ -52,8 +83,14 @@ class AudioService {
         return new Promise((resolve, reject) => {
             ffmpeg(inputPath)
                 .toFormat('wav')
-                .on('error', reject)
-                .on('end', resolve)
+                .on('error', error => {
+                    console.error('❌ Erro na conversão do áudio:', error);
+                    reject(error);
+                })
+                .on('end', () => {
+                    console.log('✅ Áudio convertido com sucesso');
+                    resolve();
+                })
                 .save(outputPath);
         });
     }
@@ -62,8 +99,9 @@ class AudioService {
         for (const file of files) {
             try {
                 await fs.unlink(file);
+                console.log('🧹 Arquivo temporário removido:', file);
             } catch (error) {
-                console.error(`Erro ao deletar arquivo ${file}:`, error);
+                console.error('Erro ao deletar arquivo', file, ':', error);
             }
         }
     }
