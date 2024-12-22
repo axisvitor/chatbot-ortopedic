@@ -49,44 +49,12 @@ class AIServices {
             // Marca a mensagem como processada antes de continuar
             await this.redisStore.set(processKey, 'true', 3600);
 
+            let response;
+
             // Verifica se é um comando especial
             if (message.text?.toLowerCase() === '#resetid') {
-                try {
-                    // Pega o threadId atual
-                    const threadKey = `thread:${message.from}`;
-                    const currentThreadId = await this.redisStore.get(threadKey);
-                    
-                    // Se existir um thread antigo, tenta deletá-lo
-                    if (currentThreadId) {
-                        await this.openAIService.deleteThread(currentThreadId);
-                    }
-                    
-                    // Cria um novo thread
-                    const newThread = await this.openAIService.createThread();
-                    
-                    // Salva o novo threadId no Redis
-                    await this.redisStore.set(threadKey, newThread.id);
-                    
-                    // Limpa outras chaves relacionadas ao usuário
-                    const userPrefix = `user:${message.from}:*`;
-                    await this.redisStore.deletePattern(userPrefix);
-                    
-                    console.log('🔄 Histórico resetado com sucesso:', {
-                        usuario: message.from,
-                        threadAntigo: currentThreadId,
-                        novoThreadId: newThread.id,
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    return await this.handleResponse(message, '✅ Histórico de mensagens resetado com sucesso!\n\nVocê pode começar uma nova conversa agora. Use este comando sempre que quiser começar do zero.');
-                } catch (error) {
-                    console.error('❌ Erro ao resetar histórico:', {
-                        usuario: message.from,
-                        erro: error.message,
-                        timestamp: new Date().toISOString()
-                    });
-                    return await this.handleResponse(message, '❌ Desculpe, ocorreu um erro ao resetar o histórico. Por favor, tente novamente em alguns instantes.');
-                }
+                response = await this.handleResetCommand(message);
+                return this.sendResponse(message.from, response);
             }
 
             // Verifica se é uma solicitação de atendimento humano
@@ -97,8 +65,8 @@ class AIServices {
                 const isBusinessHours = this.businessHours.isWithinBusinessHours();
                 if (!isBusinessHours) {
                     console.log('⏰ Fora do horário comercial para atendimento humano');
-                    const outOfHoursMessage = this.businessHours.getOutOfHoursMessage();
-                    return await this.handleResponse(message, outOfHoursMessage);
+                    response = this.businessHours.getOutOfHoursMessage();
+                    return this.sendResponse(message.from, response);
                 }
             }
 
@@ -121,18 +89,20 @@ class AIServices {
 
             if (message.type === 'image') {
                 console.log('🖼️ Processando mensagem de imagem...');
-                return await this.handleImageMessage(message);
+                response = await this.handleImageMessage(message);
+                return this.sendResponse(message.from, response);
             }
 
             if (message.type === 'audio') {
                 console.log('🎵 Processando mensagem de áudio...');
-                return await this.handleAudioMessage(message);
+                response = await this.handleAudioMessage(message);
+                return this.sendResponse(message.from, response);
             }
 
             // Busca histórico do chat no Redis
             const chatKey = `chat:${message.from}`;
-            console.log('🔄 Buscando histórico do chat no Redis:', chatKey);
             const chatHistory = await this.redisStore.get(chatKey);
+            console.log('🔄 Buscando histórico do chat no Redis:', chatKey);
             console.log('💭 Histórico do chat recuperado:', {
                 numeroMensagens: chatHistory?.messages?.length || 0,
                 ultimaMensagem: chatHistory?.messages?.[0]?.content
@@ -154,7 +124,7 @@ class AIServices {
             const run = await this.openAIService.runAssistant(threadId);
             
             // Aguarda a resposta
-            const response = await this.openAIService.waitForResponse(threadId, run.id);
+            response = await this.openAIService.waitForResponse(threadId, run.id);
             
             // Salva o histórico atualizado
             await this.redisStore.set(chatKey, {
@@ -162,8 +132,8 @@ class AIServices {
                 lastUpdate: new Date().toISOString()
             });
 
-            console.log('📤 Enviando resposta final...');
-            return await this.handleResponse(message, response);
+            // Envia a resposta
+            return this.sendResponse(message.from, response);
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
                 erro: error.message,
@@ -172,19 +142,63 @@ class AIServices {
             });
 
             const errorMessage = 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
-            return await this.handleResponse(message, errorMessage);
+            return this.sendResponse(message.from, errorMessage);
+        }
+    }
+
+    async handleResetCommand(message) {
+        try {
+            // Pega o threadId atual
+            const threadKey = `thread:${message.from}`;
+            const currentThreadId = await this.redisStore.get(threadKey);
+            
+            // Se existir um thread antigo, tenta deletá-lo
+            if (currentThreadId) {
+                await this.openAIService.deleteThread(currentThreadId);
+            }
+            
+            // Cria um novo thread
+            const newThread = await this.openAIService.createThread();
+            
+            // Salva o novo threadId no Redis
+            await this.redisStore.set(threadKey, newThread.id);
+            
+            // Limpa outras chaves relacionadas ao usuário
+            const userPrefix = `user:${message.from}:*`;
+            await this.redisStore.deletePattern(userPrefix);
+            
+            console.log('🔄 Histórico resetado com sucesso:', {
+                usuario: message.from,
+                threadAntigo: currentThreadId,
+                novoThreadId: newThread.id,
+                timestamp: new Date().toISOString()
+            });
+            
+            return '✅ Histórico de mensagens resetado com sucesso!\n\nVocê pode começar uma nova conversa agora. Use este comando sempre que quiser começar do zero.';
+        } catch (error) {
+            console.error('❌ Erro ao resetar histórico:', {
+                usuario: message.from,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            return '❌ Desculpe, ocorreu um erro ao resetar o histórico. Por favor, tente novamente em alguns instantes.';
         }
     }
 
     async sendResponse(to, response) {
         try {
+            // Se a resposta for um objeto, extrai apenas o texto
+            const messageText = typeof response === 'object' ? 
+                (response.message?.text || response.text || JSON.stringify(response)) : 
+                String(response);
+
             console.log('📤 Enviando resposta final...', {
                 para: to,
-                resposta: response?.substring(0, 100),
+                resposta: messageText?.substring(0, 100),
                 timestamp: new Date().toISOString()
             });
 
-            const result = await this.whatsAppService.sendText(to, response);
+            const result = await this.whatsAppService.sendText(to, messageText);
 
             console.log('✅ Resposta enviada:', {
                 resultado: result,
@@ -208,6 +222,12 @@ class AIServices {
                 console.log('⚠️ Resposta vazia, não será enviada');
                 return null;
             }
+
+            console.log('📤 Resposta gerada com sucesso:', {
+                para: message.from,
+                resposta: typeof response === 'object' ? 'Objeto de resposta' : response?.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
 
             // Envia a resposta
             return await this.sendResponse(message.from, response);
