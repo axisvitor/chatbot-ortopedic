@@ -305,7 +305,7 @@ class WebhookService {
 
             await this.redisStore.set(searchKey, JSON.stringify(searchData));
 
-            console.log('[Webhook] ��ndice de busca atualizado:', {
+            console.log('[Webhook] Índice de busca atualizado:', {
                 productId: product.id,
                 name: product.name
             });
@@ -440,6 +440,7 @@ class WebhookService {
                 ...webhookData.body, // Mantém toda a estrutura original
                 type: this.getMessageType(webhookData.body),
                 from: webhookData.body.key.remoteJid.replace('@s.whatsapp.net', ''),
+                messageId: webhookData.body.key.id, // Adiciona o messageId explicitamente
                 text: webhookData.body.message?.conversation || 
                       webhookData.body.message?.extendedTextMessage?.text ||
                       webhookData.body.text || 
@@ -449,7 +450,7 @@ class WebhookService {
             console.log('📝 [Webhook] Dados básicos extraídos:', {
                 tipo: messageData.type,
                 de: messageData.from,
-                messageId: messageData.key?.id,
+                messageId: messageData.messageId, // Usa o messageId explícito
                 texto: messageData.text,
                 timestamp: new Date(messageData.messageTimestamp * 1000).toISOString()
             });
@@ -484,7 +485,7 @@ class WebhookService {
             console.log('✅ [Webhook] Mensagem processada:', {
                 tipo: messageData.type,
                 de: messageData.from,
-                messageId: messageData.key?.id,
+                messageId: messageData.messageId,
                 temTexto: !!messageData.text,
                 textoPreview: messageData.text?.substring(0, 100),
                 temImagem: !!messageData.message?.imageMessage,
