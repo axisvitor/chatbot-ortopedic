@@ -96,11 +96,15 @@ class GroqServices {
         try {
             const formData = new FormData();
             formData.append('file', audioBuffer, 'audio.wav');
-            formData.append('model', 'whisper-1');
-            formData.append('language', 'pt');
+            formData.append('model', GROQ_CONFIG.models.audio);
+            formData.append('language', GROQ_CONFIG.audioConfig.language);
+            formData.append('response_format', GROQ_CONFIG.audioConfig.response_format);
+            formData.append('temperature', GROQ_CONFIG.audioConfig.temperature);
 
             console.log(' Enviando áudio para transcrição:', {
                 tamanho: audioBuffer.length,
+                modelo: GROQ_CONFIG.models.audio,
+                idioma: GROQ_CONFIG.audioConfig.language,
                 tentativa: attempt,
                 timestamp: new Date().toISOString()
             });
@@ -118,7 +122,44 @@ class GroqServices {
                 throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
             }
 
-            const transcription = response.data.text;
+            // Log da resposta completa para debug
+            console.log(' Resposta da API Groq:', {
+                status: response.status,
+                headers: response.headers,
+                data: JSON.stringify(response.data, null, 2),
+                timestamp: new Date().toISOString()
+            });
+
+            // Extrai o texto da transcrição com tratamento de diferentes formatos
+            let transcription;
+            if (typeof response.data === 'string') {
+                transcription = response.data;
+            } else if (typeof response.data === 'object') {
+                if (response.data.text && typeof response.data.text === 'string') {
+                    transcription = response.data.text;
+                } else if (response.data.transcription && typeof response.data.transcription === 'string') {
+                    transcription = response.data.transcription;
+                } else {
+                    console.error(' Formato de resposta inesperado:', {
+                        data: response.data,
+                        tipo: typeof response.data,
+                        timestamp: new Date().toISOString()
+                    });
+                    throw new Error('Formato de resposta inesperado da API Groq');
+                }
+            } else {
+                console.error(' Tipo de resposta inesperado:', {
+                    tipo: typeof response.data,
+                    valor: response.data,
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error(`Tipo de resposta inesperado: ${typeof response.data}`);
+            }
+
+            if (!transcription) {
+                throw new Error('Transcrição vazia ou nula');
+            }
+
             console.log(' Áudio transcrito com sucesso:', {
                 tamanho: transcription.length,
                 preview: transcription.substring(0, 100),
@@ -128,8 +169,14 @@ class GroqServices {
 
             return transcription;
         } catch (error) {
-            console.error(` Erro ao transcrever áudio (Tentativa ${attempt}):`, error.message);
+            console.error(` Erro ao transcrever áudio (Tentativa ${attempt}):`, {
+                erro: error.message,
+                stack: error.stack,
+                tentativa: attempt,
+                timestamp: new Date().toISOString()
+            });
             if (attempt < 3) {
+                console.log(` Tentando novamente (${attempt + 1}/3)...`);
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                 return this.transcribeAudio(audioBuffer, attempt + 1);
             }
