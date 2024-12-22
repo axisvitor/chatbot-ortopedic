@@ -14,13 +14,13 @@ class BusinessHoursService {
 
     getDayOfWeek() {
         const dayMap = {
-            'domingo': 'sunday',
-            'segunda-feira': 'monday',
-            'terça-feira': 'tuesday',
-            'quarta-feira': 'wednesday',
-            'quinta-feira': 'thursday',
-            'sexta-feira': 'friday',
-            'sábado': 'saturday'
+            'domingo': 'domingo',
+            'segunda-feira': 'segunda',
+            'terça-feira': 'terca',
+            'quarta-feira': 'quarta',
+            'quinta-feira': 'quinta',
+            'sexta-feira': 'sexta',
+            'sábado': 'sabado'
         };
         const ptDay = this.getCurrentTime().format('dddd');
         return dayMap[ptDay] || ptDay;
@@ -98,16 +98,15 @@ class BusinessHoursService {
         }
 
         if (!schedule?.start) {
-            const nextDay = this.getNextWorkDay();
-            return this.config.messages.weekend.replace(
-                '{NEXT_DAY}', 
-                nextDay.name
-            );
+            const nextWorkDay = this.getNextWorkDay();
+            return this.config.messages.weekend.replace('{NEXT_DAY}', `${nextWorkDay.name} às ${nextWorkDay.schedule.start}`);
         }
 
+        const [startHour] = schedule.start.split(':');
+        const [endHour] = schedule.end.split(':');
         return this.config.messages.outsideHours
-            .replace('{START_TIME}', schedule.start)
-            .replace('{END_TIME}', schedule.end);
+            .replace('{START_TIME}', `${startHour}h`)
+            .replace('{END_TIME}', `${endHour}h`);
     }
 
     async forwardToFinancial(message, userContact) {

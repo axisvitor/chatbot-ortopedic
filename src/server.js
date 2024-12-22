@@ -44,25 +44,31 @@ async function initializeServices() {
     try {
         console.log('🔄 Iniciando serviços...');
         
+        // Inicializa o WhatsAppService primeiro
+        whatsappService = new WhatsAppService();
+        await whatsappService.init();
+        const client = await whatsappService.getClient();
+        if (!client) {
+            throw new Error('WhatsAppService não inicializou corretamente');
+        }
+        console.log('✅ WhatsAppService inicializado');
+
+        // Inicializa os outros serviços
         groqServices = new GroqServices();
         console.log('✅ GroqServices inicializado');
         
         webhookService = new WebhookService();
         console.log('✅ WebhookService inicializado');
         
-        whatsappService = new WhatsAppService();
-        await whatsappService.init();
-        console.log('✅ WhatsAppService inicializado');
-        
-        aiServices = new AIServices(whatsappService);
-        console.log('✅ AIServices inicializado');
-        
-        const client = await whatsappService.getClient();
         audioService = new AudioService(groqServices, client);
         console.log('✅ AudioService inicializado');
         
         imageService = new ImageService(groqServices, client);
         console.log('✅ ImageService inicializado');
+        
+        // Inicializa o AIServices por último
+        aiServices = new AIServices(whatsappService);
+        console.log('✅ AIServices inicializado');
         
         console.log('✅ Todos os serviços inicializados com sucesso');
         isReady = true;

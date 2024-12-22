@@ -437,25 +437,20 @@ class WebhookService {
                 timestamp: webhookData.body.messageTimestamp,
                 pushName: webhookData.body.pushName,
                 device: webhookData.body.device,
-                isGroup: webhookData.body.isGroup || false
+                isGroup: webhookData.body.isGroup || false,
+                text: webhookData.body.text || webhookData.body.message.conversation || null
             };
 
             console.log('📝 [Webhook] Dados básicos extraídos:', {
                 tipo: messageData.type,
                 de: messageData.from,
                 messageId: messageData.messageId,
+                texto: messageData.text,
                 timestamp: new Date(messageData.timestamp * 1000).toISOString()
             });
 
-            // Extrai texto da mensagem
-            const message = webhookData.body.message;
-            messageData.text = message.conversation || 
-                             message.extendedTextMessage?.text ||
-                             message.imageMessage?.caption ||
-                             message.documentMessage?.caption ||
-                             null;
-
             // Adiciona dados da mídia se presente
+            const message = webhookData.body.message;
             if (message.imageMessage) {
                 messageData.imageMessage = message.imageMessage;
                 console.log('🖼️ [Webhook] Imagem detectada:', {
@@ -503,10 +498,14 @@ class WebhookService {
     }
 
     getMessageType(webhookBody) {
-        const message = webhookBody.message;
-        if (!message) return 'unknown';
+        if (!webhookBody?.message) return 'unknown';
 
-        if (message.conversation || message.extendedTextMessage) return 'text';
+        // Verifica primeiro o texto direto do webhook
+        if (webhookBody.text) return 'text';
+
+        // Verifica a estrutura da mensagem
+        const message = webhookBody.message;
+        if (message.conversation) return 'text';
         if (message.imageMessage) return 'image';
         if (message.audioMessage) return 'audio';
         if (message.documentMessage) return 'document';
