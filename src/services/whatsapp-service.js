@@ -243,78 +243,110 @@ class WhatsAppService {
                 throw new Error('Objeto de mensagem inválido');
             }
 
-            const { messageId, mediaUrl } = message;
+            const { messageId, mediaUrl, mediaId } = message;
 
-            if (!mediaUrl) {
-                console.error('❌ URL da mídia não fornecida:', {
+            if (!mediaUrl && !mediaId) {
+                console.error('❌ URL ou ID da mídia não fornecido:', {
                     messageId,
                     messageKeys: Object.keys(message),
                     timestamp: new Date().toISOString()
                 });
-                throw new Error('URL da mídia não fornecida');
+                throw new Error('URL ou ID da mídia não fornecido');
             }
 
             console.log('📥 Baixando mídia:', {
                 messageId,
                 tipo: message.type,
-                url: mediaUrl.substring(0, 100),
+                url: mediaUrl?.substring(0, 100),
+                mediaId,
                 timestamp: new Date().toISOString()
             });
 
-            // Tenta fazer o download com diferentes métodos
-            try {
-                // Primeiro tenta baixar direto da URL
-                const response = await axios.get(mediaUrl, {
-                    responseType: 'arraybuffer',
-                    headers: {
-                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
-                    },
-                    maxContentLength: Infinity,
-                    maxBodyLength: Infinity,
-                    timeout: 30000 // 30 segundos
-                });
+            // Primeiro tenta pelo ID da mídia (mais confiável)
+            if (mediaId) {
+                try {
+                    const mediaResponse = await this.client.get(
+                        `v1/media/${mediaId}/download`,
+                        { 
+                            responseType: 'arraybuffer',
+                            headers: {
+                                'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                            }
+                        }
+                    );
 
-                if (response.status === 200 && response.data) {
-                    console.log('✅ Mídia baixada com sucesso:', {
-                        messageId,
-                        tamanho: response.data.length,
+                    if (mediaResponse.status === 200 && mediaResponse.data) {
+                        console.log('✅ Mídia baixada via ID:', {
+                            messageId,
+                            mediaId,
+                            tamanho: mediaResponse.data.length,
+                            timestamp: new Date().toISOString()
+                        });
+                        return Buffer.from(mediaResponse.data);
+                    }
+                } catch (mediaError) {
+                    console.error('⚠️ Erro ao baixar mídia via ID:', {
+                        erro: mediaError.message,
+                        mediaId,
                         timestamp: new Date().toISOString()
                     });
-                    return Buffer.from(response.data);
+                    // Continua para tentar outros métodos
                 }
+            }
 
-                throw new Error(`Download falhou com status ${response.status}`);
+            // Se não tem ID ou falhou, tenta pela URL
+            if (mediaUrl) {
+                try {
+                    const response = await axios.get(mediaUrl, {
+                        responseType: 'arraybuffer',
+                        headers: {
+                            'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                        },
+                        maxContentLength: Infinity,
+                        maxBodyLength: Infinity,
+                        timeout: 30000
+                    });
 
-            } catch (downloadError) {
-                console.error('❌ Erro no download direto, tentando API:', {
-                    erro: downloadError.message,
+                    if (response.status === 200 && response.data) {
+                        console.log('✅ Mídia baixada via URL:', {
+                            messageId,
+                            tamanho: response.data.length,
+                            timestamp: new Date().toISOString()
+                        });
+                        return Buffer.from(response.data);
+                    }
+                } catch (urlError) {
+                    console.error('⚠️ Erro no download via URL:', {
+                        erro: urlError.message,
+                        messageId,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+
+            // Se ambos falharam, tenta o endpoint de download padrão
+            const apiResponse = await this.client.get(
+                `message/download-media?connectionKey=${this.connectionKey}&messageId=${messageId}`,
+                { responseType: 'arraybuffer' }
+            );
+
+            if (apiResponse.status === 200 && apiResponse.data) {
+                console.log('✅ Mídia baixada via API padrão:', {
                     messageId,
+                    tamanho: apiResponse.data.length,
                     timestamp: new Date().toISOString()
                 });
-
-                // Se falhar, tenta pela API do WhatsApp
-                const apiResponse = await this.client.get(
-                    `message/download-media?connectionKey=${this.connectionKey}&messageId=${messageId}`,
-                    { responseType: 'arraybuffer' }
-                );
-
-                if (apiResponse.status === 200 && apiResponse.data) {
-                    console.log('✅ Mídia baixada via API:', {
-                        messageId,
-                        tamanho: apiResponse.data.length,
-                        timestamp: new Date().toISOString()
-                    });
-                    return Buffer.from(apiResponse.data);
-                }
-
-                throw new Error(`Download via API falhou com status ${apiResponse.status}`);
+                return Buffer.from(apiResponse.data);
             }
+
+            throw new Error('Todos os métodos de download falharam');
 
         } catch (error) {
             console.error('❌ Erro ao baixar mídia:', {
                 erro: error.message,
                 messageId: message?.messageId,
                 url: message?.mediaUrl?.substring(0, 100),
+                mediaId: message?.mediaId,
                 timestamp: new Date().toISOString()
             });
             throw error;
