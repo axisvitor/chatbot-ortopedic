@@ -1,5 +1,5 @@
 const ffmpeg = require('fluent-ffmpeg');
-const ffmpegStatic = require('ffmpeg-static');
+const ffmpegStatic = require('@ffmpeg-installer/ffmpeg');
 const fs = require('fs').promises;
 const fse = require('fs-extra');
 const path = require('path');
@@ -74,12 +74,8 @@ class AudioService {
                 timestamp: new Date().toISOString()
             });
 
-            // Instancia o serviço do WhatsApp
-            const whatsappService = new WhatsAppService();
-            await whatsappService.init();
-
-            // Faz o download do áudio (já descriptografado pelo Baileys)
-            const audioBuffer = await whatsappService.downloadMediaMessage(message);
+            // Usa o whatsappClient injetado no construtor
+            const audioBuffer = await this.whatsappClient.downloadMediaMessage(message);
             
             if (!audioBuffer || audioBuffer.length === 0) {
                 throw new Error('Buffer de áudio vazio ou inválido');
@@ -193,5 +189,5 @@ class AudioService {
     }
 }
 
-// Exporta a classe AudioService
-module.exports = AudioService;
+// Exporta a classe AudioService da mesma forma que o WhatsAppService
+module.exports = { AudioService };
