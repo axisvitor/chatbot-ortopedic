@@ -415,6 +415,12 @@ class WebhookService {
                 tipo: webhookData?.type,
                 temBody: !!webhookData?.body,
                 temMensagem: !!webhookData?.body?.message,
+                messageStructure: {
+                    hasConversation: !!webhookData?.body?.message?.conversation,
+                    hasExtendedText: !!webhookData?.body?.message?.extendedTextMessage?.text,
+                    hasDirectText: !!webhookData?.body?.text,
+                    messageTypes: Object.keys(webhookData?.body?.message || {})
+                },
                 headers: webhookData?.headers,
                 timestamp: new Date().toISOString()
             });
@@ -438,7 +444,10 @@ class WebhookService {
                 pushName: webhookData.body.pushName,
                 device: webhookData.body.device,
                 isGroup: webhookData.body.isGroup || false,
-                text: webhookData.body.text || webhookData.body.message.conversation || null
+                text: webhookData.body.message?.conversation || 
+                      webhookData.body.message?.extendedTextMessage?.text ||
+                      webhookData.body.text || 
+                      null
             };
 
             console.log('📝 [Webhook] Dados básicos extraídos:', {
