@@ -246,59 +246,109 @@ class AIServices {
     }
 
     formatProductResponse(product) {
-        return `
-        **Produto:** ${product.name}
-        **SKU:** ${product.sku}
-        **Preço:** R$ ${product.price}
-        **Descrição:** ${product.description}
-        **Link:** ${product.url}
-        `;
+        if (!product) return 'Produto não encontrado.';
+        
+        return `*${product.name}*\n` +
+               `Preço: R$ ${(product.price / 100).toFixed(2)}\n` +
+               `SKU: ${product.sku || 'N/A'}\n` +
+               `Estoque: ${product.stock || 0} unidades\n` +
+               `${product.description || ''}\n\n` +
+               `Link: ${product.permalink || 'N/A'}`;
     }
 
     formatProductListResponse(products) {
-        let response = "**Produtos Encontrados:**\n";
-        products.forEach(product => {
-            response += `- ${product.name} - R$ ${product.price}\n`;
-        });
-        return response;
+        if (!products || !products.length) return 'Nenhum produto encontrado.';
+        
+        return products.map(product => 
+            `• *${product.name}*\n` +
+            `  Preço: R$ ${(product.price / 100).toFixed(2)}\n` +
+            `  SKU: ${product.sku || 'N/A'}`
+        ).join('\n\n');
     }
 
     formatOrderResponse(order) {
-        return `
-        **Pedido:** ${order.id}
-        **Status:** ${order.status}
-        **Total:** R$ ${order.total}
-        **Frete:** R$ ${order.shipping_cost || 'Não disponível'}
-        **Rastreamento:** ${order.shipping_address?.tracking_code || 'Não disponível'}
-        `;
+        if (!order) return 'Pedido não encontrado.';
+        
+        return `*Pedido #${order.number}*\n` +
+               `Status: ${this.translateOrderStatus(order.status)}\n` +
+               `Data: ${new Date(order.created_at).toLocaleDateString('pt-BR')}\n` +
+               `Total: R$ ${(order.total / 100).toFixed(2)}\n\n` +
+               `*Itens:*\n${this.formatOrderItems(order.items)}`;
     }
 
     formatOrderTrackingResponse(trackingCode) {
-        return `
-        **Rastreamento do Pedido:** ${trackingCode}
-        **Link:** https://www.17track.net/${trackingCode}
-        `;
+        if (!trackingCode) return 'Código de rastreamento não disponível.';
+        return `*Código de Rastreamento:* ${trackingCode}\n` +
+               `Rastreie seu pedido em: https://www.linkcorreto.com.br/track/${trackingCode}`;
     }
 
     formatOrderTotalResponse(total) {
-        return `**Total do Pedido:** R$ ${total}`;
+        if (!total && total !== 0) return 'Total do pedido não disponível.';
+        return `*Total do Pedido:* R$ ${(total / 100).toFixed(2)}`;
     }
 
     formatOrderPaymentStatusResponse(paymentStatus) {
-        return `**Status do Pagamento:** ${paymentStatus}`;
+        if (!paymentStatus) return 'Status de pagamento não disponível.';
+        const statusMap = {
+            'pending': '⏳ Pendente',
+            'paid': '✅ Pago',
+            'canceled': '❌ Cancelado',
+            'refunded': '↩️ Reembolsado'
+        };
+        return `*Status do Pagamento:* ${statusMap[paymentStatus] || paymentStatus}`;
     }
 
     formatOrderFinancialStatusResponse(financialStatus) {
-        return `**Status do Pedido:** ${financialStatus}`;
+        if (!financialStatus) return 'Status financeiro não disponível.';
+        const statusMap = {
+            'pending': '⏳ Pendente',
+            'authorized': '✅ Autorizado',
+            'paid': '✅ Pago',
+            'voided': '❌ Cancelado',
+            'refunded': '↩️ Reembolsado',
+            'charged_back': '⚠️ Contestado'
+        };
+        return `*Status Financeiro:* ${statusMap[financialStatus] || financialStatus}`;
     }
 
     formatOrderShippingAddressResponse(shippingAddress) {
-        return `
-        **Endereço de Entrega:**
-        ${shippingAddress.name}
-        ${shippingAddress.address}
-        ${shippingAddress.city}, ${shippingAddress.state} - ${shippingAddress.zipcode}
-        `;
+        if (!shippingAddress) return 'Endereço de entrega não disponível.';
+        
+        return `*Endereço de Entrega:*\n` +
+               `${shippingAddress.name}\n` +
+               `${shippingAddress.address}, ${shippingAddress.number}\n` +
+               `${shippingAddress.complement || ''}\n`.trim() + '\n' +
+               `${shippingAddress.neighborhood}\n` +
+               `${shippingAddress.city} - ${shippingAddress.state}\n` +
+               `CEP: ${shippingAddress.zipcode}`;
+    }
+
+    translateOrderStatus(status) {
+        const statusMap = {
+            'open': '🆕 Aberto',
+            'closed': '✅ Concluído',
+            'cancelled': '❌ Cancelado',
+            'pending': '⏳ Pendente',
+            'paid': '💰 Pago',
+            'unpaid': '💳 Não Pago',
+            'authorized': '✅ Autorizado',
+            'in_progress': '🔄 Em Andamento',
+            'in_separation': '📦 Em Separação',
+            'ready_for_shipping': '📫 Pronto para Envio',
+            'shipped': '🚚 Enviado',
+            'delivered': '✅ Entregue',
+            'unavailable': '❌ Indisponível'
+        };
+        return statusMap[status] || status;
+    }
+
+    formatOrderItems(items) {
+        return items.map(item => 
+            `• *${item.name}*\n` +
+            `  Quantidade: ${item.quantity}\n` +
+            `  Preço unitário: R$ ${(item.price / 100).toFixed(2)}\n` +
+            `  Total: R$ ${(item.total / 100).toFixed(2)}`
+        ).join('\n\n');
     }
 
     async handleImageMessage(message) {
