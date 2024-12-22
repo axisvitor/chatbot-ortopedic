@@ -196,7 +196,8 @@ async function initializeServices() {
                 null, // openAIService
                 null, // trackingService
                 null, // orderValidationService
-                null  // nuvemshopService
+                null, // nuvemshopService
+                audioService // passa o audioService inicializado
             );
             console.log('✅ AIServices inicializado');
             
