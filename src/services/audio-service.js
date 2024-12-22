@@ -17,7 +17,7 @@ class AudioService {
     constructor(groqServices, whatsappClient) {
         this.groqServices = groqServices;
         this.whatsappClient = whatsappClient;
-        this.ffmpegPath = process.env.FFMPEG_PATH || ffmpegStatic;
+        this.ffmpegPath = ffmpegStatic.path;
         this.initialized = false;
         this.hasOpusSupport = false;
         this.opusDetectionAttempts = 0;
