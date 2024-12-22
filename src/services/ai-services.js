@@ -25,18 +25,19 @@ class AIServices {
 
     async handleMessage(message) {
         try {
-            console.log('🤖 Iniciando processamento de mensagem:', {
-                tipo: message.type,
-                de: message.from,
-                corpo: message.text?.substring(0, 100),
+            if (!message) {
+                throw new Error('Mensagem inválida');
+            }
+
+            const { type, from } = message;
+
+            // Log da mensagem recebida
+            console.log('📨 Mensagem recebida:', {
+                tipo: type,
+                de: from,
                 messageId: message.messageId,
                 timestamp: new Date().toISOString()
             });
-
-            if (!message || !message.from) {
-                console.error('❌ Mensagem inválida:', message);
-                return;
-            }
 
             // Verifica se a mensagem já foi processada
             const processKey = `ai_processed:${message.messageId}`;
@@ -53,12 +54,10 @@ class AIServices {
             // Marca a mensagem como processada antes de continuar
             await this.redisStore.set(processKey, 'true', 3600);
 
-            let response;
-
             // Verifica se é um comando especial
             if (message.text?.toLowerCase() === '#resetid') {
-                response = await this.handleResetCommand(message);
-                await this.sendResponse(message.from, response);
+                const response = await this.handleResetCommand(message);
+                await this.sendResponse(from, response);
                 return;
             }
 
@@ -70,8 +69,8 @@ class AIServices {
                 const isBusinessHours = this.businessHours.isWithinBusinessHours();
                 if (!isBusinessHours) {
                     console.log('⏰ Fora do horário comercial para atendimento humano');
-                    response = this.businessHours.getOutOfHoursMessage();
-                    await this.sendResponse(message.from, response);
+                    const response = this.businessHours.getOutOfHoursMessage();
+                    await this.sendResponse(from, response);
                     return;
                 }
             }
@@ -89,59 +88,58 @@ class AIServices {
                     if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
                         console.log('🌍 Pedido internacional detectado:', orderId);
                         await this.whatsAppService.forwardToFinancial(message, orderId);
+                        return;
                     }
                 }
             }
 
-            if (message.type === 'image') {
-                console.log('🖼️ Processando mensagem de imagem...');
+            // Processa a mensagem com base no tipo
+            let response;
+            if (type === 'image') {
                 response = await this.handleImageMessage(message);
-                await this.sendResponse(message.from, response);
-                return;
-            }
-
-            if (message.type === 'audio') {
-                console.log('🎵 Processando mensagem de áudio...');
+            } else if (type === 'audio') {
                 response = await this.handleAudioMessage(message);
-                await this.sendResponse(message.from, response);
-                return;
+            } else {
+                // Busca histórico do chat no Redis
+                const chatKey = `chat:${from}`;
+                const chatHistory = await this.redisStore.get(chatKey);
+                console.log('🔄 Buscando histórico do chat:', {
+                    key: chatKey,
+                    numeroMensagens: chatHistory?.messages?.length || 0,
+                    ultimaMensagem: chatHistory?.messages?.[0]?.content
+                });
+
+                // Cria um novo thread ou usa o existente
+                const threadId = chatHistory?.threadId || (await this.openAIService.createThread()).id;
+                
+                // Adiciona a mensagem ao thread
+                await this.openAIService.addMessage(threadId, {
+                    role: 'user',
+                    content: message.text || 'Mensagem sem texto'
+                });
+                
+                // Executa o assistant
+                const run = await this.openAIService.runAssistant(threadId);
+                
+                // Aguarda a resposta
+                response = await this.openAIService.waitForResponse(threadId, run.id);
+                
+                // Salva o histórico atualizado
+                await this.redisStore.set(chatKey, {
+                    threadId,
+                    lastUpdate: new Date().toISOString()
+                });
             }
 
-            // Busca histórico do chat no Redis
-            const chatKey = `chat:${message.from}`;
-            const chatHistory = await this.redisStore.get(chatKey);
-            console.log('🔄 Buscando histórico do chat no Redis:', chatKey);
-            console.log('💭 Histórico do chat recuperado:', {
-                numeroMensagens: chatHistory?.messages?.length || 0,
-                ultimaMensagem: chatHistory?.messages?.[0]?.content
-            });
-
-            // Gera resposta com IA
-            console.log('🤔 Gerando resposta com IA...');
-            
-            // Cria um novo thread ou usa o existente
-            const threadId = chatHistory?.threadId || (await this.openAIService.createThread()).id;
-            
-            // Adiciona a mensagem ao thread
-            await this.openAIService.addMessage(threadId, {
-                role: 'user',
-                content: message.text || 'Mensagem sem texto'
-            });
-            
-            // Executa o assistant
-            const run = await this.openAIService.runAssistant(threadId);
-            
-            // Aguarda a resposta
-            response = await this.openAIService.waitForResponse(threadId, run.id);
-            
-            // Salva o histórico atualizado
-            await this.redisStore.set(chatKey, {
-                threadId,
-                lastUpdate: new Date().toISOString()
-            });
+            // Se não houver resposta, loga e retorna
+            if (!response) {
+                console.log('⚠️ Nenhuma resposta gerada');
+                return null;
+            }
 
             // Envia a resposta
-            await this.sendResponse(message.from, response);
+            return await this.sendResponse(from, response);
+
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
                 erro: error.message,
@@ -149,7 +147,70 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            await this.sendResponse(message.from, 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.');
+            // Tenta enviar mensagem de erro
+            if (message && message.from) {
+                await this.sendResponse(
+                    message.from,
+                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+                );
+            }
+
+            return null;
+        }
+    }
+
+    async sendResponse(to, response) {
+        try {
+            if (!to || !response) {
+                console.error('❌ Parâmetros inválidos em sendResponse:', {
+                    to,
+                    hasResponse: !!response,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+
+            console.log('📤 Enviando resposta final...', {
+                para: to,
+                resposta: typeof response === 'string' ? response.substring(0, 100) : 'Objeto de resposta',
+                timestamp: new Date().toISOString()
+            });
+
+            // Se a resposta for um objeto, tenta extrair a mensagem
+            let messageText = response;
+            if (typeof response === 'object' && response !== null) {
+                messageText = response.message || response.text || JSON.stringify(response);
+            }
+
+            // Garante que a mensagem é uma string
+            messageText = String(messageText);
+
+            const result = await this.whatsAppService.sendText(to, messageText);
+
+            if (!result) {
+                throw new Error('Resposta do WhatsApp inválida');
+            }
+
+            return result;
+
+        } catch (error) {
+            console.error('❌ Erro ao enviar resposta:', {
+                para: to,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+
+            // Tenta enviar mensagem de erro genérica
+            try {
+                await this.whatsAppService.sendText(
+                    to,
+                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+                );
+            } catch (fallbackError) {
+                console.error('❌ Erro ao enviar mensagem de fallback:', fallbackError);
+            }
+
+            return null;
         }
     }
 
@@ -190,169 +251,6 @@ class AIServices {
             });
             return '❌ Desculpe, ocorreu um erro ao resetar o histórico. Por favor, tente novamente em alguns instantes.';
         }
-    }
-
-    async sendResponse(to, response) {
-        try {
-            // Se a resposta for um objeto, extrai apenas o texto
-            const messageText = typeof response === 'object' ? 
-                (response.message?.text || response.text || '') : 
-                String(response);
-
-            // Se a mensagem estiver vazia após a extração, não envia
-            if (!messageText.trim()) {
-                console.log('⚠️ Mensagem vazia, não será enviada');
-                return null;
-            }
-
-            console.log('📤 Enviando resposta final...', {
-                para: to,
-                resposta: messageText?.substring(0, 100),
-                timestamp: new Date().toISOString()
-            });
-
-            const result = await this.whatsAppService.sendText(to, messageText);
-
-            // Não retorna o resultado completo, apenas um indicador de sucesso
-            return {
-                success: !result.error,
-                messageId: result.messageId
-            };
-        } catch (error) {
-            console.error('❌ Erro ao enviar resposta:', {
-                para: to,
-                erro: error.message,
-                timestamp: new Date().toISOString()
-            });
-            throw error;
-        }
-    }
-
-    async handleResponse(message, response) {
-        try {
-            if (!response) {
-                console.log('⚠️ Resposta vazia, não será enviada');
-                return null;
-            }
-
-            console.log('📤 Resposta gerada com sucesso:', {
-                para: message.from,
-                resposta: typeof response === 'object' ? 'Objeto de resposta' : response?.substring(0, 100),
-                timestamp: new Date().toISOString()
-            });
-
-            // Envia a resposta
-            return await this.sendResponse(message.from, response);
-        } catch (error) {
-            console.error('❌ Erro ao processar resposta:', error);
-            throw error;
-        }
-    }
-
-    formatProductResponse(product) {
-        if (!product) return 'Produto não encontrado.';
-        
-        return `*${product.name}*\n` +
-               `Preço: R$ ${(product.price / 100).toFixed(2)}\n` +
-               `SKU: ${product.sku || 'N/A'}\n` +
-               `Estoque: ${product.stock || 0} unidades\n` +
-               `${product.description || ''}\n\n` +
-               `Link: ${product.permalink || 'N/A'}`;
-    }
-
-    formatProductListResponse(products) {
-        if (!products || !products.length) return 'Nenhum produto encontrado.';
-        
-        return products.map(product => 
-            `• *${product.name}*\n` +
-            `  Preço: R$ ${(product.price / 100).toFixed(2)}\n` +
-            `  SKU: ${product.sku || 'N/A'}`
-        ).join('\n\n');
-    }
-
-    formatOrderResponse(order) {
-        if (!order) return 'Pedido não encontrado.';
-        
-        return `*Pedido #${order.number}*\n` +
-               `Status: ${this.translateOrderStatus(order.status)}\n` +
-               `Data: ${new Date(order.created_at).toLocaleDateString('pt-BR')}\n` +
-               `Total: R$ ${(order.total / 100).toFixed(2)}\n\n` +
-               `*Itens:*\n${this.formatOrderItems(order.items)}`;
-    }
-
-    formatOrderTrackingResponse(trackingCode) {
-        if (!trackingCode) return 'Código de rastreamento não disponível.';
-        return `*Código de Rastreamento:* ${trackingCode}\n` +
-               `Rastreie seu pedido em: https://www.linkcorreto.com.br/track/${trackingCode}`;
-    }
-
-    formatOrderTotalResponse(total) {
-        if (!total && total !== 0) return 'Total do pedido não disponível.';
-        return `*Total do Pedido:* R$ ${(total / 100).toFixed(2)}`;
-    }
-
-    formatOrderPaymentStatusResponse(paymentStatus) {
-        if (!paymentStatus) return 'Status de pagamento não disponível.';
-        const statusMap = {
-            'pending': '⏳ Pendente',
-            'paid': '✅ Pago',
-            'canceled': '❌ Cancelado',
-            'refunded': '↩️ Reembolsado'
-        };
-        return `*Status do Pagamento:* ${statusMap[paymentStatus] || paymentStatus}`;
-    }
-
-    formatOrderFinancialStatusResponse(financialStatus) {
-        if (!financialStatus) return 'Status financeiro não disponível.';
-        const statusMap = {
-            'pending': '⏳ Pendente',
-            'authorized': '✅ Autorizado',
-            'paid': '✅ Pago',
-            'voided': '❌ Cancelado',
-            'refunded': '↩️ Reembolsado',
-            'charged_back': '⚠️ Contestado'
-        };
-        return `*Status Financeiro:* ${statusMap[financialStatus] || financialStatus}`;
-    }
-
-    formatOrderShippingAddressResponse(shippingAddress) {
-        if (!shippingAddress) return 'Endereço de entrega não disponível.';
-        
-        return `*Endereço de Entrega:*\n` +
-               `${shippingAddress.name}\n` +
-               `${shippingAddress.address}, ${shippingAddress.number}\n` +
-               `${shippingAddress.complement || ''}\n`.trim() + '\n' +
-               `${shippingAddress.neighborhood}\n` +
-               `${shippingAddress.city} - ${shippingAddress.state}\n` +
-               `CEP: ${shippingAddress.zipcode}`;
-    }
-
-    translateOrderStatus(status) {
-        const statusMap = {
-            'open': '🆕 Aberto',
-            'closed': '✅ Concluído',
-            'cancelled': '❌ Cancelado',
-            'pending': '⏳ Pendente',
-            'paid': '💰 Pago',
-            'unpaid': '💳 Não Pago',
-            'authorized': '✅ Autorizado',
-            'in_progress': '🔄 Em Andamento',
-            'in_separation': '📦 Em Separação',
-            'ready_for_shipping': '📫 Pronto para Envio',
-            'shipped': '🚚 Enviado',
-            'delivered': '✅ Entregue',
-            'unavailable': '❌ Indisponível'
-        };
-        return statusMap[status] || status;
-    }
-
-    formatOrderItems(items) {
-        return items.map(item => 
-            `• *${item.name}*\n` +
-            `  Quantidade: ${item.quantity}\n` +
-            `  Preço unitário: R$ ${(item.price / 100).toFixed(2)}\n` +
-            `  Total: R$ ${(item.total / 100).toFixed(2)}`
-        ).join('\n\n');
     }
 
     async handleImageMessage(message) {
@@ -476,6 +374,112 @@ class AIServices {
             
             return null;
         }
+    }
+
+    formatProductResponse(product) {
+        if (!product) return 'Produto não encontrado.';
+        
+        return `*${product.name}*\n` +
+               `Preço: R$ ${(product.price / 100).toFixed(2)}\n` +
+               `SKU: ${product.sku || 'N/A'}\n` +
+               `Estoque: ${product.stock || 0} unidades\n` +
+               `${product.description || ''}\n\n` +
+               `Link: ${product.permalink || 'N/A'}`;
+    }
+
+    formatProductListResponse(products) {
+        if (!products || !products.length) return 'Nenhum produto encontrado.';
+        
+        return products.map(product => 
+            `• *${product.name}*\n` +
+            `  Preço: R$ ${(product.price / 100).toFixed(2)}\n` +
+            `  SKU: ${product.sku || 'N/A'}`
+        ).join('\n\n');
+    }
+
+    formatOrderResponse(order) {
+        if (!order) return 'Pedido não encontrado.';
+        
+        return `*Pedido #${order.number}*\n` +
+               `Status: ${this.translateOrderStatus(order.status)}\n` +
+               `Data: ${new Date(order.created_at).toLocaleDateString('pt-BR')}\n` +
+               `Total: R$ ${(order.total / 100).toFixed(2)}\n\n` +
+               `*Itens:*\n${this.formatOrderItems(order.items)}`;
+    }
+
+    formatOrderTrackingResponse(trackingCode) {
+        if (!trackingCode) return 'Código de rastreamento não disponível.';
+        return `*Código de Rastreamento:* ${trackingCode}\n` +
+               `Rastreie seu pedido em: https://www.linkcorreto.com.br/track/${trackingCode}`;
+    }
+
+    formatOrderTotalResponse(total) {
+        if (!total && total !== 0) return 'Total do pedido não disponível.';
+        return `*Total do Pedido:* R$ ${(total / 100).toFixed(2)}`;
+    }
+
+    formatOrderPaymentStatusResponse(paymentStatus) {
+        if (!paymentStatus) return 'Status de pagamento não disponível.';
+        const statusMap = {
+            'pending': '⏳ Pendente',
+            'paid': '✅ Pago',
+            'canceled': '❌ Cancelado',
+            'refunded': '↩️ Reembolsado'
+        };
+        return `*Status do Pagamento:* ${statusMap[paymentStatus] || paymentStatus}`;
+    }
+
+    formatOrderFinancialStatusResponse(financialStatus) {
+        if (!financialStatus) return 'Status financeiro não disponível.';
+        const statusMap = {
+            'pending': '⏳ Pendente',
+            'authorized': '✅ Autorizado',
+            'paid': '✅ Pago',
+            'voided': '❌ Cancelado',
+            'refunded': '↩️ Reembolsado',
+            'charged_back': '⚠️ Contestado'
+        };
+        return `*Status Financeiro:* ${statusMap[financialStatus] || financialStatus}`;
+    }
+
+    formatOrderShippingAddressResponse(shippingAddress) {
+        if (!shippingAddress) return 'Endereço de entrega não disponível.';
+        
+        return `*Endereço de Entrega:*\n` +
+               `${shippingAddress.name}\n` +
+               `${shippingAddress.address}, ${shippingAddress.number}\n` +
+               `${shippingAddress.complement || ''}\n`.trim() + '\n' +
+               `${shippingAddress.neighborhood}\n` +
+               `${shippingAddress.city} - ${shippingAddress.state}\n` +
+               `CEP: ${shippingAddress.zipcode}`;
+    }
+
+    translateOrderStatus(status) {
+        const statusMap = {
+            'open': '🆕 Aberto',
+            'closed': '✅ Concluído',
+            'cancelled': '❌ Cancelado',
+            'pending': '⏳ Pendente',
+            'paid': '💰 Pago',
+            'unpaid': '💳 Não Pago',
+            'authorized': '✅ Autorizado',
+            'in_progress': '🔄 Em Andamento',
+            'in_separation': '📦 Em Separação',
+            'ready_for_shipping': '📫 Pronto para Envio',
+            'shipped': '🚚 Enviado',
+            'delivered': '✅ Entregue',
+            'unavailable': '❌ Indisponível'
+        };
+        return statusMap[status] || status;
+    }
+
+    formatOrderItems(items) {
+        return items.map(item => 
+            `• *${item.name}*\n` +
+            `  Quantidade: ${item.quantity}\n` +
+            `  Preço unitário: R$ ${(item.price / 100).toFixed(2)}\n` +
+            `  Total: R$ ${(item.total / 100).toFixed(2)}`
+        ).join('\n\n');
     }
 }
 

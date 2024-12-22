@@ -3,6 +3,9 @@ const fs = require('fs').promises;
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { Queue } = require('../utils/queue');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 
 class AudioService {
     constructor(groqServices, whatsappClient) {
@@ -10,6 +13,8 @@ class AudioService {
         this.whatsappClient = whatsappClient;
         this.audioQueue = new Queue();
         this.tempDir = path.join(__dirname, '../../temp');
+        this.ffmpegChecked = false;
+        this.ffmpegAvailable = false;
         this.ensureTempDir();
     }
 
@@ -21,6 +26,24 @@ class AudioService {
         }
     }
 
+    async checkFfmpeg() {
+        if (this.ffmpegChecked) {
+            return this.ffmpegAvailable;
+        }
+
+        try {
+            await execAsync('ffmpeg -version');
+            this.ffmpegAvailable = true;
+            console.log('✅ FFmpeg encontrado e disponível');
+        } catch (error) {
+            this.ffmpegAvailable = false;
+            console.error('❌ FFmpeg não encontrado:', error.message);
+        }
+
+        this.ffmpegChecked = true;
+        return this.ffmpegAvailable;
+    }
+
     async processWhatsAppAudio(message) {
         if (!message || !message.type === 'audio') {
             throw new Error('Mensagem de áudio inválida');
@@ -30,6 +53,12 @@ class AudioService {
         const wavPath = path.join(this.tempDir, `${uuidv4()}.wav`);
 
         try {
+            // Verifica se o FFmpeg está disponível
+            const ffmpegOk = await this.checkFfmpeg();
+            if (!ffmpegOk) {
+                throw new Error('FFmpeg não está instalado. Por favor, instale o FFmpeg para processar áudios.');
+            }
+
             console.log('📥 Baixando áudio do WhatsApp...', {
                 messageId: message.messageId,
                 timestamp: new Date().toISOString()
@@ -74,8 +103,17 @@ class AudioService {
             });
             throw error;
         } finally {
-            // Limpa os arquivos temporários
-            await this.cleanupFiles(audioPath, wavPath);
+            // Limpa os arquivos temporários de forma segura
+            try {
+                if (await fs.access(audioPath).then(() => true).catch(() => false)) {
+                    await fs.unlink(audioPath);
+                }
+                if (await fs.access(wavPath).then(() => true).catch(() => false)) {
+                    await fs.unlink(wavPath);
+                }
+            } catch (cleanupError) {
+                console.error('⚠️ Erro ao limpar arquivos temporários:', cleanupError);
+            }
         }
     }
 
