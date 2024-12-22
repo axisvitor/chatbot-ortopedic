@@ -370,30 +370,47 @@ class AIServices {
     async handleAudioMessage(message) {
         const { from } = message;
         try {
-            console.log('🎤 Iniciando processamento de áudio...');
-            
-            // Processa o áudio e obtém a transcrição
-            const transcription = await this.audioService.processWhatsAppAudio(message);
-            
-            console.log('📝 Áudio transcrito:', transcription);
+            console.log('🎤 Iniciando processamento de áudio...', {
+                messageId: message.messageId,
+                from: from,
+                timestamp: new Date().toISOString()
+            });
 
-            if (!transcription) {
+            // Verifica se temos a URL da mídia
+            if (!message.mediaUrl) {
+                throw new Error('URL da mídia não encontrada na mensagem de áudio');
+            }
+
+            // Processa o áudio e obtém a transcrição
+            const audioText = await this.audioService.processWhatsAppAudio(message);
+            
+            if (!audioText) {
                 throw new Error('Não foi possível transcrever o áudio');
             }
+
+            console.log('📝 Áudio processado:', {
+                texto: audioText.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
 
             // Gera resposta baseada na transcrição
             const response = await this.openAIService.generateResponse({
                 ...message,
-                text: transcription
+                text: audioText
             });
 
             // Envia resposta ao usuário
-            await this.sendResponse(from, `🎵 *Transcrição do áudio:*\n${transcription}\n\n${response}`);
+            return await this.sendResponse(from, `🎵 *Mensagem de voz:*\n${audioText}\n\n${response}`);
 
         } catch (error) {
-            console.error('❌ Erro ao processar áudio:', error);
-            const errorMessage = 'Desculpe, não consegui processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.';
-            await this.sendResponse(from, errorMessage);
+            console.error('❌ Erro ao processar áudio:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            
+            await this.sendResponse(from, 'Desculpe, não consegui processar seu áudio. Por favor, tente novamente ou envie uma mensagem de texto.');
+            return null;
         }
     }
 }

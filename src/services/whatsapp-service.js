@@ -110,7 +110,7 @@ class WhatsAppService {
             // Gera um ID único para a mensagem
             const messageId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             
-            console.log('📤 Enviando mensagem:', {
+            console.log(' Enviando mensagem:', {
                 para: to,
                 texto: text.substring(0, 100),
                 messageId,
@@ -211,7 +211,7 @@ class WhatsAppService {
      */
     async sendAudio(to, audioUrl) {
         try {
-            console.log('🎵 Enviando áudio:', {
+            console.log(' Enviando áudio:', {
                 para: to,
                 url: audioUrl?.substring(0, 100),
                 timestamp: new Date().toISOString()
@@ -227,7 +227,7 @@ class WhatsAppService {
 
             return response.data;
         } catch (error) {
-            console.error('❌ Erro ao enviar áudio:', error);
+            console.error(' Erro ao enviar áudio:', error);
             throw error;
         }
     }
@@ -243,21 +243,24 @@ class WhatsAppService {
                 throw new Error('Mensagem ou URL da mídia não fornecida');
             }
 
-            console.log('📥 Baixando mídia:', {
+            console.log(' Baixando mídia:', {
                 messageId: message.messageId,
                 tipo: message.type,
                 url: message.mediaUrl?.substring(0, 100),
                 timestamp: new Date().toISOString()
             });
 
-            const response = await this.client.get(
-                `message/download-media?connectionKey=${this.connectionKey}&messageId=${message.messageId}`,
-                { responseType: 'arraybuffer' }
-            );
+            // Faz o download direto da URL
+            const response = await axios.get(message.mediaUrl, {
+                responseType: 'arraybuffer',
+                headers: {
+                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                }
+            });
 
             return Buffer.from(response.data);
         } catch (error) {
-            console.error('❌ Erro ao baixar mídia:', {
+            console.error(' Erro ao baixar mídia:', {
                 erro: error.message,
                 messageId: message?.messageId,
                 timestamp: new Date().toISOString()
@@ -309,13 +312,13 @@ class WhatsAppService {
             };
 
             // Envia para o número do departamento financeiro
-            const mensagemFinanceiro = `🔔 *Nova Notificação - Pedido Internacional*\n\n` +
-                `📦 *Pedido:* #${orderId}\n` +
-                `🕒 *Data:* ${new Date().toLocaleString('pt-BR')}\n` +
-                `📱 *Cliente:* ${message.from}\n` +
-                `🔑 *Protocolo:* ${financialNotification.data.atendimento.protocolo}\n\n` +
-                `💬 *Mensagem do Cliente:*\n${message.body}\n\n` +
-                `⚠️ *Ação Necessária:* Verificar taxação e processar pagamento`;
+            const mensagemFinanceiro = `*Nova Notificação - Pedido Internacional*\n\n` +
+                `*Pedido:* #${orderId}\n` +
+                `*Data:* ${new Date().toLocaleString('pt-BR')}\n` +
+                `*Cliente:* ${message.from}\n` +
+                `*Protocolo:* ${financialNotification.data.atendimento.protocolo}\n\n` +
+                `*Mensagem do Cliente:*\n${message.body}\n\n` +
+                `*Ação Necessária:* Verificar taxação e processar pagamento`;
 
             // Envia para o número do departamento financeiro
             const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
@@ -324,7 +327,7 @@ class WhatsAppService {
             }
 
             // Registra no console para debug
-            console.log('📧 Notificação enviada ao financeiro:', {
+            console.log(' Notificação enviada ao financeiro:', {
                 protocolo: financialNotification.data.atendimento.protocolo,
                 pedido: orderId,
                 timestamp: new Date().toISOString()
@@ -332,7 +335,7 @@ class WhatsAppService {
 
             return true;
         } catch (error) {
-            console.error('❌ Erro ao encaminhar para financeiro:', error);
+            console.error(' Erro ao encaminhar para financeiro:', error);
             throw error;
         }
     }
