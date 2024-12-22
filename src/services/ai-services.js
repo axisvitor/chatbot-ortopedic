@@ -437,7 +437,7 @@ class AIServices {
             }
 
             // Processa o áudio com a mensagem original do Baileys
-            const transcription = await this.audioService.handleAudio(message);
+            const transcription = await this.audioService.processWhatsAppAudio(message);
             if (!transcription) {
                 console.error('❌ Falha ao transcrever áudio:', {
                     messageId,

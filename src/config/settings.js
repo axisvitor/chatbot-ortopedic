@@ -25,7 +25,12 @@ const GROQ_CONFIG = {
         language: 'pt',
         response_format: 'text',
         temperature: 0.0
-    }
+    },
+    baseUrl: 'https://api.groq.com/v1',
+    get chatUrl() { return `${this.baseUrl}/chat/completions` },
+    get embeddingsUrl() { return `${this.baseUrl}/embeddings` },
+    get visionUrl() { return `${this.baseUrl}/vision/completions` },
+    get audioUrl() { return `${this.baseUrl}/audio/transcriptions` }
 };
 
 // Redis Configuration
