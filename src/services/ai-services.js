@@ -31,7 +31,7 @@ class AIServices {
 
             if (!message || !message.from) {
                 console.error('❌ Mensagem inválida:', message);
-                return null;
+                return;
             }
 
             // Verifica se a mensagem já foi processada
@@ -43,7 +43,7 @@ class AIServices {
                     messageId: message.messageId,
                     timestamp: new Date().toISOString()
                 });
-                return null;
+                return;
             }
 
             // Marca a mensagem como processada antes de continuar
@@ -54,7 +54,8 @@ class AIServices {
             // Verifica se é um comando especial
             if (message.text?.toLowerCase() === '#resetid') {
                 response = await this.handleResetCommand(message);
-                return this.sendResponse(message.from, response);
+                await this.sendResponse(message.from, response);
+                return;
             }
 
             // Verifica se é uma solicitação de atendimento humano
@@ -66,7 +67,8 @@ class AIServices {
                 if (!isBusinessHours) {
                     console.log('⏰ Fora do horário comercial para atendimento humano');
                     response = this.businessHours.getOutOfHoursMessage();
-                    return this.sendResponse(message.from, response);
+                    await this.sendResponse(message.from, response);
+                    return;
                 }
             }
 
@@ -90,13 +92,15 @@ class AIServices {
             if (message.type === 'image') {
                 console.log('🖼️ Processando mensagem de imagem...');
                 response = await this.handleImageMessage(message);
-                return this.sendResponse(message.from, response);
+                await this.sendResponse(message.from, response);
+                return;
             }
 
             if (message.type === 'audio') {
                 console.log('🎵 Processando mensagem de áudio...');
                 response = await this.handleAudioMessage(message);
-                return this.sendResponse(message.from, response);
+                await this.sendResponse(message.from, response);
+                return;
             }
 
             // Busca histórico do chat no Redis
@@ -133,7 +137,7 @@ class AIServices {
             });
 
             // Envia a resposta
-            return this.sendResponse(message.from, response);
+            await this.sendResponse(message.from, response);
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
                 erro: error.message,
@@ -141,8 +145,7 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            const errorMessage = 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
-            return this.sendResponse(message.from, errorMessage);
+            await this.sendResponse(message.from, 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.');
         }
     }
 
