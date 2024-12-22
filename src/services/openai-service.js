@@ -111,4 +111,4 @@ class OpenAIService {
     }
 }
 
-module.exports = OpenAIService;
+module.exports = { OpenAIService };
