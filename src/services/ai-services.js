@@ -371,7 +371,7 @@ class AIServices {
             });
 
             // Analisa a imagem com o Groq
-            const result = await this.groqServices.processImage(buffer);
+            const result = await this.groqServices.processImage(buffer, message);
 
             if (!result) {
                 throw new Error('Análise da imagem falhou');
@@ -380,13 +380,12 @@ class AIServices {
             console.log('🔍 Análise da imagem:', {
                 messageId,
                 tipo: result.type,
-                tamanhoAnalise: result.analysis.length,
-                preview: result.analysis.substring(0, 100),
+                isPaymentProof: result.isPaymentProof,
                 timestamp: new Date().toISOString()
             });
 
             // Se for um comprovante, pede informações adicionais
-            if (result.type === 'receipt') {
+            if (result.isPaymentProof) {
                 console.log('💳 Comprovante detectado:', {
                     messageId,
                     from,
@@ -395,7 +394,6 @@ class AIServices {
 
                 // Salva informações do comprovante no Redis
                 const info = {
-                    analysis: result.analysis,
                     messageId,
                     timestamp: new Date().toISOString()
                 };
