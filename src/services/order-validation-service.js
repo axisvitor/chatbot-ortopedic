@@ -60,31 +60,16 @@ class OrderValidationService {
             });
 
             const order = await this.nuvemshop.getOrderByNumber(cleanOrderNumber);
-            return order;
+            
+            if (!order) {
+                return null;
+            }
+
+            // Retorna informações formatadas do pedido
+            return this.formatSafeOrderInfo(order);
         } catch (error) {
             console.error('[OrderValidation] Erro ao validar número do pedido:', error);
             return null;
-        }
-    }
-
-    /**
-     * Valida CPF do cliente
-     * @param {string} orderNumber - Número do pedido
-     * @param {string} lastFourCPF - Últimos 4 dígitos do CPF
-     * @returns {Promise<boolean>} Se o CPF é válido
-     */
-    async validateCPF(orderNumber, lastFourCPF) {
-        try {
-            const order = await this.nuvemshop.getOrderByNumber(orderNumber);
-            if (!order || !order.customer || !order.customer.document) {
-                return false;
-            }
-
-            const customerCPF = order.customer.document.replace(/\D/g, '');
-            return customerCPF.endsWith(lastFourCPF);
-        } catch (error) {
-            console.error('[OrderValidation] Erro ao validar CPF:', error);
-            return false;
         }
     }
 
@@ -96,7 +81,7 @@ class OrderValidationService {
     formatSafeOrderInfo(order) {
         return {
             numero_pedido: order.number,
-            status: this.nuvemshop.translateOrderStatus(order.status),
+            status: this.nuvemshop.formatOrderStatus(order.status),
             data_compra: new Date(order.created_at).toLocaleString('pt-BR'),
             valor_total: this.nuvemshop.formatPrice(order.total),
             produtos: order.products.map(product => ({
@@ -104,9 +89,12 @@ class OrderValidationService {
                 quantidade: product.quantity
             })),
             status_envio: order.shipping_status ? 
-                this.nuvemshop.translateOrderStatus(order.shipping_status) : 
+                this.nuvemshop.formatOrderStatus(order.shipping_status) : 
                 'Não disponível',
-            codigo_rastreio: order.shipping_tracking || null
+            codigo_rastreio: order.shipping_tracking_number || null,
+            cliente: {
+                nome: order.customer?.name || 'Não informado'
+            }
         };
     }
 
@@ -117,6 +105,7 @@ class OrderValidationService {
      */
     formatOrderMessage(orderInfo) {
         let message = `🛍️ *Detalhes do Pedido #${orderInfo.numero_pedido}*\n\n`;
+        message += `👤 Cliente: ${orderInfo.cliente.nome}\n`;
         message += `📅 Data: ${orderInfo.data_compra}\n`;
         message += `📦 Status: ${orderInfo.status}\n`;
         message += `💰 Valor Total: ${orderInfo.valor_total}\n\n`;
