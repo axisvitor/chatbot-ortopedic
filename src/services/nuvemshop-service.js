@@ -15,68 +15,129 @@ class NuvemshopService {
             ? NUVEMSHOP_CONFIG.api.url.slice(0, -3) 
             : NUVEMSHOP_CONFIG.api.url;
 
-        this.client = axios.create({
-            baseURL,
-            headers: {
-                'Authorization': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
-                'Content-Type': 'application/json; charset=utf-8',
-                'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
-            },
-            timeout: NUVEMSHOP_CONFIG.api.timeout
-        });
+        // Validar o token de acesso
+        if (!NUVEMSHOP_CONFIG.accessToken) {
+            console.error('[Nuvemshop] Token de acesso não encontrado');
+            throw new Error('Token de acesso da Nuvemshop não configurado');
+        }
 
-        console.log('[Nuvemshop] Inicializando cliente:', {
+        // Log do token mascarado para debug
+        const maskedToken = NUVEMSHOP_CONFIG.accessToken.substring(0, 6) + '...' + 
+            NUVEMSHOP_CONFIG.accessToken.substring(NUVEMSHOP_CONFIG.accessToken.length - 4);
+
+        // Configurar headers padrão
+        const headers = {
+            'Authorization': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+            'Content-Type': 'application/json; charset=utf-8',
+            'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)',
+            'Accept': 'application/json'
+        };
+
+        console.log('[Nuvemshop] Configurando cliente:', {
             baseURL,
             storeId: NUVEMSHOP_CONFIG.userId,
+            tokenMascarado: maskedToken,
+            headers: {
+                'Content-Type': headers['Content-Type'],
+                'User-Agent': headers['User-Agent'],
+                'Accept': headers['Accept']
+            },
             timestamp: new Date().toISOString()
+        });
+
+        // Criar instância do axios com configuração completa
+        this.client = axios.create({
+            baseURL,
+            headers,
+            timeout: NUVEMSHOP_CONFIG.api.timeout,
+            validateStatus: function (status) {
+                return status >= 200 && status < 300; // Rejeita apenas status fora de 2xx
+            }
+        });
+
+        // Garantir que os headers sejam enviados em todas as requisições
+        this.client.interceptors.request.use(config => {
+            config.headers = {
+                ...headers,
+                ...config.headers
+            };
+            return config;
         });
 
         this.setupInterceptors();
     }
 
     setupInterceptors() {
+        // Interceptor para logs de request
+        this.client.interceptors.request.use(
+            config => {
+                const requestId = Math.random().toString(36).substring(7);
+                config.requestId = requestId;
+
+                console.log('[Nuvemshop] Enviando requisição:', {
+                    requestId,
+                    método: config.method?.toUpperCase(),
+                    url: config.url,
+                    params: config.params,
+                    headers: {
+                        'Content-Type': config.headers['Content-Type'],
+                        'User-Agent': config.headers['User-Agent'],
+                        'Accept': config.headers['Accept']
+                    },
+                    timestamp: new Date().toISOString()
+                });
+                return config;
+            },
+            error => {
+                console.error('[Nuvemshop] Erro ao preparar requisição:', {
+                    erro: error.message,
+                    timestamp: new Date().toISOString()
+                });
+                return Promise.reject(error);
+            }
+        );
+
+        // Interceptor para logs de response
         this.client.interceptors.response.use(
             response => {
-                console.log('[Nuvemshop] Sucesso:', {
+                console.log('[Nuvemshop] Resposta recebida:', {
+                    requestId: response.config.requestId,
+                    status: response.status,
                     url: response.config.url,
-                    params: response.config.params,
-                    storeId: NUVEMSHOP_CONFIG.userId,
+                    método: response.config.method?.toUpperCase(),
+                    headers: response.headers,
                     timestamp: new Date().toISOString()
                 });
                 return response;
             },
-            async error => {
+            error => {
                 if (error.response) {
-                    const { status, data } = error.response;
+                    const { status, data, config } = error.response;
                     
-                    switch (status) {
-                        case 400:
-                            console.error('[Nuvemshop] Erro de JSON inválido:', data);
-                            break;
-                        case 402:
-                            console.error('[Nuvemshop] Pagamento necessário. API inacessível.');
-                            break;
-                        case 415:
-                            console.error('[Nuvemshop] Content-Type inválido');
-                            break;
-                        case 422:
-                            console.error('[Nuvemshop] Campos inválidos:', data);
-                            break;
-                        case 429:
-                            console.error('[Nuvemshop] Limite de taxa excedido');
-                            const reset = error.response.headers['x-rate-limit-reset'];
-                            if (reset) {
-                                return new Promise(resolve => {
-                                    setTimeout(() => resolve(this.client(error.config)), reset);
-                                });
-                            }
-                            break;
-                        case 500:
-                        case 502:
-                        case 503:
-                        case 504:
-                            console.error('[Nuvemshop] Erro do servidor:', status);
-                            return this.retryRequest(error.config);
+                    console.error('[Nuvemshop] Erro na resposta:', {
+                        requestId: config.requestId,
+                        status,
+                        data,
+                        url: config.url,
+                        método: config.method?.toUpperCase(),
+                        headers: {
+                            request: {
+                                'Content-Type': config.headers['Content-Type'],
+                                'User-Agent': config.headers['User-Agent'],
+                                'Accept': config.headers['Accept']
+                            },
+                            response: error.response.headers
+                        },
+                        timestamp: new Date().toISOString()
+                    });
+
+                    if (status === 401) {
+                        console.error('[Nuvemshop] Erro de autenticação:', {
+                            tokenMascarado: NUVEMSHOP_CONFIG.accessToken.substring(0, 6) + '...' + 
+                                NUVEMSHOP_CONFIG.accessToken.substring(NUVEMSHOP_CONFIG.accessToken.length - 4),
+                            storeId: NUVEMSHOP_CONFIG.userId,
+                            timestamp: new Date().toISOString()
+                        });
                     }
                 }
                 return Promise.reject(error);
