@@ -2,10 +2,16 @@
 
 const https = require('https');
 const { TRACKING_CONFIG } = require('../config/settings');
+const { RedisStore } = require('../store/redis-store');
+const { NuvemshopService } = require('./nuvemshop-service');
+const { WhatsAppService } = require('./whatsapp-service');
 
 class TrackingService {
     constructor() {
         this.config = TRACKING_CONFIG;
+        this.redisStore = new RedisStore();
+        this.nuvemshopService = new NuvemshopService();
+        this.whatsAppService = new WhatsAppService();
     }
 
     async registerTracking(trackingNumber) {
@@ -169,7 +175,7 @@ class TrackingService {
             }
 
             // Formata a resposta com os eventos
-            return this._formatTrackingResponse(trackInfo, from);
+            return await this._formatTrackingResponse(trackInfo, from);
             
         } catch (error) {
             console.error('[Tracking] Erro ao processar rastreamento:', error);
@@ -177,7 +183,7 @@ class TrackingService {
         }
     }
 
-    _formatTrackingResponse(trackInfo, from) {
+    async _formatTrackingResponse(trackInfo, from) {
         try {
             // Formata a resposta com os eventos disponíveis
             let response = `📦 *Status do Rastreamento*\n\n`;
