@@ -11,7 +11,7 @@ class NuvemshopService {
 
     initializeClient() {
         this.client = axios.create({
-            baseURL: `${NUVEMSHOP_CONFIG.api.url}/v1/${NUVEMSHOP_CONFIG.userId}`,
+            baseURL: NUVEMSHOP_CONFIG.api.url,
             headers: {
                 'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'Content-Type': 'application/json; charset=utf-8',
@@ -25,7 +25,15 @@ class NuvemshopService {
 
     setupInterceptors() {
         this.client.interceptors.response.use(
-            response => response,
+            response => {
+                console.log('[Nuvemshop] Sucesso:', {
+                    url: response.config.url,
+                    params: response.config.params,
+                    storeId: NUVEMSHOP_CONFIG.userId,
+                    timestamp: new Date().toISOString()
+                });
+                return response;
+            },
             async error => {
                 if (error.response) {
                     const { status, data } = error.response;
@@ -139,7 +147,7 @@ class NuvemshopService {
         return this.getCachedData(
             cacheKey,
             async () => {
-                const response = await this.client.get(`/products/${productId}`);
+                const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/products/${productId}`);
                 return response.data;
             },
             NUVEMSHOP_CONFIG.cache.productsTtl
@@ -162,7 +170,7 @@ class NuvemshopService {
                     ...options
                 };
 
-                const response = await this.client.get('/products', { params });
+                const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/products`, { params });
                 
                 return {
                     data: response.data,
@@ -181,18 +189,31 @@ class NuvemshopService {
     /**
      * Obtém pedido por ID
      * @param {number} orderId - ID do pedido
-     * @returns {Promise<Object>} Dados do pedido
+     * @returns {Promise<Object|null>} Pedido ou null se não encontrado
      */
     async getOrder(orderId) {
-        const cacheKey = this.generateCacheKey('order', orderId);
-        return this.getCachedData(
-            cacheKey,
-            async () => {
-                const response = await this.client.get(`/orders/${orderId}`);
-                return response.data;
-            },
-            NUVEMSHOP_CONFIG.cache.ordersTtl
-        );
+        try {
+            const cacheKey = this.generateCacheKey('order', orderId);
+            return this.getCachedData(
+                cacheKey,
+                async () => {
+                    const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`);
+                    return response.data;
+                },
+                NUVEMSHOP_CONFIG.cache.ordersTtl
+            );
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao buscar detalhes do pedido:', {
+                erro: error.message,
+                pedidoId: orderId,
+                status: error.response?.status,
+                data: error.response?.data,
+                url: error.config?.url,
+                storeId: NUVEMSHOP_CONFIG.userId,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+        }
     }
 
     /**
@@ -211,7 +232,7 @@ class NuvemshopService {
                     ...options
                 };
 
-                const response = await this.client.get('/orders', { params });
+                const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders`, { params });
                 
                 return {
                     data: response.data,
@@ -269,20 +290,53 @@ class NuvemshopService {
      */
     async getOrderByNumber(orderNumber) {
         try {
-            const { data: orders } = await this.getOrders({
-                q: orderNumber,
-                per_page: 1
+            console.log('[Nuvemshop] Buscando pedido:', {
+                numero: orderNumber,
+                storeId: NUVEMSHOP_CONFIG.userId,
+                timestamp: new Date().toISOString()
             });
 
-            const order = orders.find(o => o.number === orderNumber);
+            // Remove o "#" se presente e qualquer espaço em branco
+            const cleanOrderNumber = orderNumber.replace(/[#\s]/g, '');
+
+            const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: {
+                    q: cleanOrderNumber,
+                    per_page: 1
+                }
+            });
+
+            const orders = response.data;
+            const order = orders.find(o => String(o.number) === cleanOrderNumber);
+
             if (!order) {
+                console.log('[Nuvemshop] Pedido não encontrado:', {
+                    numero: cleanOrderNumber,
+                    storeId: NUVEMSHOP_CONFIG.userId,
+                    timestamp: new Date().toISOString()
+                });
                 return null;
             }
+
+            console.log('[Nuvemshop] Pedido encontrado:', {
+                numero: cleanOrderNumber,
+                pedidoId: order.id,
+                status: order.status,
+                timestamp: new Date().toISOString()
+            });
 
             // Busca detalhes completos do pedido
             return await this.getOrder(order.id);
         } catch (error) {
-            console.error('[Nuvemshop] Erro ao buscar pedido por número:', error);
+            console.error('[Nuvemshop] Erro ao buscar pedido por número:', {
+                erro: error.message,
+                status: error.response?.status,
+                data: error.response?.data,
+                url: error.config?.url,
+                params: error.config?.params,
+                storeId: NUVEMSHOP_CONFIG.userId,
+                timestamp: new Date().toISOString()
+            });
             return null;
         }
     }
@@ -452,7 +506,7 @@ class NuvemshopService {
         return this.getCachedData(
             cacheKey,
             async () => {
-                const response = await this.client.get(`/customers/${customerId}`);
+                const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/customers/${customerId}`);
                 return response.data;
             },
             NUVEMSHOP_CONFIG.cache.ttl.customers
@@ -464,7 +518,7 @@ class NuvemshopService {
         return this.getCachedData(
             cacheKey,
             async () => {
-                const response = await this.client.get('/products', { 
+                const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/products`, { 
                     params: { q: query, per_page: 10 }
                 });
                 return response.data;
@@ -478,7 +532,7 @@ class NuvemshopService {
         return this.getCachedData(
             cacheKey,
             async () => {
-                const response = await this.client.get('/products', { 
+                const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/products`, { 
                     params: { sku, per_page: 1 }
                 });
                 return response.data[0] || null;
@@ -560,7 +614,7 @@ class NuvemshopService {
      */
     async getMainLanguage() {
         try {
-            const response = await this.client.get('/store');
+            const response = await this.client.get('/v1/' + NUVEMSHOP_CONFIG.userId + '/store');
             return response.data.main_language || 'pt';
         } catch (error) {
             console.error('[Nuvemshop] Erro ao obter idioma principal:', error);
