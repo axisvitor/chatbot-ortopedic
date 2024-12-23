@@ -93,7 +93,8 @@ class OrderValidationService {
                 'Não disponível',
             codigo_rastreio: order.shipping_tracking_number || null,
             cliente: {
-                nome: order.customer?.name || 'Não informado'
+                nome: order.customer?.name || 'Não informado',
+                telefone: order.customer?.phone || 'Não informado'
             }
         };
     }
@@ -103,7 +104,7 @@ class OrderValidationService {
      * @param {Object} orderInfo - Informações seguras do pedido
      * @returns {string} Mensagem formatada
      */
-    formatOrderMessage(orderInfo) {
+    async formatOrderMessage(orderInfo) {
         let message = `🛍️ *Detalhes do Pedido #${orderInfo.numero_pedido}*\n\n`;
         message += `👤 Cliente: ${orderInfo.cliente.nome}\n`;
         message += `📅 Data: ${orderInfo.data_compra}\n`;
@@ -119,7 +120,11 @@ class OrderValidationService {
         
         if (orderInfo.codigo_rastreio) {
             message += `\n📬 Código de Rastreio: ${orderInfo.codigo_rastreio}`;
-            message += `\n\n_Para rastrear seu pedido, basta me enviar o código de rastreio acima._`;
+            message += `\n\n_Para ver o status atual do seu pedido, digite "rastrear" ou "status da entrega"_`;
+            
+            // Armazena o código de rastreio no Redis para consulta rápida
+            const trackingKey = `tracking:${orderInfo.cliente.telefone}`;
+            await this.redisStore.set(trackingKey, orderInfo.codigo_rastreio, 3600); // 1 hora de TTL
         }
 
         return message;

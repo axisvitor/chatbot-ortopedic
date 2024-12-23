@@ -138,6 +138,73 @@ class AIServices {
                 }
             }
 
+            // Verifica se é um possível código de rastreio
+            const hasTrackingKeywords = this.trackingService.hasTrackingKeywords(text);
+            const trackingNumber = this.trackingService.validateTrackingNumber(text);
+            
+            if (trackingNumber || (hasTrackingKeywords && text.length > 8)) {
+                console.log('📦 Possível código de rastreio detectado:', {
+                    texto: text,
+                    codigo: trackingNumber,
+                    temPalavrasChave: hasTrackingKeywords,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Se for um código válido, busca direto
+                if (trackingNumber) {
+                    const trackingInfo = await this.trackingService.getTrackingStatus(trackingNumber);
+                    if (trackingInfo) {
+                        // Armazena para consultas futuras
+                        const trackingKey = `tracking:${from}`;
+                        await this.redisStore.set(trackingKey, trackingNumber, 3600);
+                        
+                        response = this.formatOrderTrackingResponse(trackingInfo);
+                        await this.sendResponse(from, response);
+                        return null;
+                    }
+                }
+                
+                // Se tiver palavras-chave mas não for código válido
+                if (hasTrackingKeywords) {
+                    const trackingKey = `tracking:${from}`;
+                    const savedTracking = await this.redisStore.get(trackingKey);
+                    
+                    if (savedTracking) {
+                        const trackingInfo = await this.trackingService.getTrackingStatus(savedTracking);
+                        if (trackingInfo) {
+                            response = this.formatOrderTrackingResponse(trackingInfo);
+                            await this.sendResponse(from, response);
+                            return null;
+                        }
+                    }
+                }
+            }
+
+            // Verifica se é uma solicitação de rastreamento
+            if (text?.toLowerCase().includes('rastrear') || 
+                text?.toLowerCase().includes('status da entrega') ||
+                text?.toLowerCase().includes('status do pedido')) {
+                
+                // Busca código de rastreio no Redis
+                const trackingKey = `tracking:${from}`;
+                const trackingNumber = await this.redisStore.get(trackingKey);
+                
+                if (trackingNumber) {
+                    console.log('🔍 Buscando status de rastreio:', {
+                        codigo: trackingNumber,
+                        de: from,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    const trackingInfo = await this.trackingService.getTrackingStatus(trackingNumber);
+                    if (trackingInfo) {
+                        response = this.formatOrderTrackingResponse(trackingInfo);
+                        await this.sendResponse(from, response);
+                        return null;
+                    }
+                }
+            }
+
             // Processa a mensagem com base no tipo
             let response;
             if (type === 'image') {

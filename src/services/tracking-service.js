@@ -122,7 +122,7 @@ class TrackingService {
         });
     }
 
-    async processTrackingRequest(trackingNumber, cpf) {
+    async processTrackingRequest(trackingNumber, cpf, from) {
         try {
             if (!trackingNumber) {
                 throw new Error('Número de rastreamento é obrigatório');
@@ -169,7 +169,7 @@ class TrackingService {
             }
 
             // Formata a resposta com os eventos
-            return this._formatTrackingResponse(trackInfo);
+            return this._formatTrackingResponse(trackInfo, from);
             
         } catch (error) {
             console.error('[Tracking] Erro ao processar rastreamento:', error);
@@ -177,11 +177,68 @@ class TrackingService {
         }
     }
 
-    _formatTrackingResponse(trackInfo) {
+    _formatTrackingResponse(trackInfo, from) {
         try {
             // Formata a resposta com os eventos disponíveis
             let response = `📦 *Status do Rastreamento*\n\n`;
             response += `*Código:* ${trackInfo.number}\n`;
+            
+            // Verifica se está em tributação para encaminhar ao financeiro
+            const isCustomsHold = trackInfo.package_status === 'CustomsHold' || 
+                                /tribut|taxa|imposto|aduaneir/i.test(trackInfo.latest_event_info);
+            
+            if (isCustomsHold) {
+                try {
+                    // Busca informações do pedido no Redis
+                    const orderKey = `pending_order:${from}`;
+                    const orderNumber = await this.redisStore.get(orderKey);
+                    let orderInfo = null;
+                    
+                    if (orderNumber) {
+                        orderInfo = await this.nuvemshopService.getOrderByNumber(orderNumber);
+                    }
+                    
+                    // Encaminha para o financeiro
+                    const financialMessage = {
+                        type: 'tracking_customs',
+                        trackingNumber: trackInfo.number,
+                        status: trackInfo.package_status,
+                        lastUpdate: trackInfo.latest_event_time,
+                        originalMessage: trackInfo.latest_event_info,
+                        from: from,
+                        orderDetails: orderInfo ? {
+                            number: orderInfo.number,
+                            customerName: orderInfo.customer?.name || 'Não informado',
+                            customerPhone: orderInfo.customer?.phone || from
+                        } : {
+                            number: 'Não encontrado',
+                            customerName: 'Não encontrado',
+                            customerPhone: from
+                        }
+                    };
+                    
+                    // Formata mensagem para o financeiro
+                    const financialNotification = `🚨 *Pedido em Tributação*\n\n` +
+                        `📦 Rastreio: ${trackInfo.number}\n` +
+                        `🛍️ Pedido: #${financialMessage.orderDetails.number}\n` +
+                        `👤 Cliente: ${financialMessage.orderDetails.customerName}\n` +
+                        `📱 Telefone: ${financialMessage.orderDetails.customerPhone}\n` +
+                        `📅 Atualização: ${new Date(trackInfo.latest_event_time).toLocaleString('pt-BR')}\n` +
+                        `📝 Status Original: ${trackInfo.latest_event_info}`;
+                    
+                    await this.whatsAppService.forwardToFinancial(financialMessage, financialNotification);
+                    
+                    console.log('💰 Notificação enviada ao financeiro:', {
+                        rastreio: trackInfo.number,
+                        pedido: financialMessage.orderDetails.number,
+                        cliente: financialMessage.orderDetails.customerName,
+                        telefone: financialMessage.orderDetails.customerPhone,
+                        timestamp: new Date().toISOString()
+                    });
+                } catch (error) {
+                    console.error('❌ Erro ao notificar financeiro:', error);
+                }
+            }
             
             // Adiciona informações do status atual
             if (trackInfo.package_status) {
@@ -196,6 +253,9 @@ class TrackingService {
                     case 'Pickup':
                         status = '🚚 Coletado';
                         break;
+                    case 'CustomsHold':
+                        status = '📦 Em processamento';
+                        break;
                     default:
                         status = trackInfo.package_status;
                 }
@@ -208,9 +268,27 @@ class TrackingService {
                 response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
             }
 
-            // Adiciona última informação
+            // Filtra mensagens de tributação/taxação
             if (trackInfo.latest_event_info) {
-                response += `*Situação:* ${trackInfo.latest_event_info}\n`;
+                let situacao = trackInfo.latest_event_info;
+                
+                // Lista de termos para filtrar
+                const termsToReplace = [
+                    /aguardando pagamento de tributos/i,
+                    /em processo de tributação/i,
+                    /pagamento de tributos/i,
+                    /taxa/i,
+                    /tribut[oaçã]/i,
+                    /imposto/i,
+                    /declaração aduaneira/i
+                ];
+                
+                // Substitui termos relacionados à tributação
+                if (termsToReplace.some(term => term.test(situacao))) {
+                    situacao = 'Em processamento na unidade dos Correios';
+                }
+                
+                response += `*Situação:* ${situacao}\n`;
             }
 
             // Adiciona tempo em trânsito
@@ -224,6 +302,54 @@ class TrackingService {
             console.error('[Tracking] Erro ao formatar resposta:', error);
             return 'Desculpe, ocorreu um erro ao formatar as informações do rastreamento.';
         }
+    }
+
+    /**
+     * Valida se o texto parece ser um código de rastreio
+     * @param {string} text - Texto para validar
+     * @returns {string|null} Código de rastreio limpo ou null
+     */
+    validateTrackingNumber(text) {
+        if (!text) return null;
+
+        // Remove espaços e caracteres especiais
+        const cleanText = text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
+        // Padrões comuns de rastreio
+        const patterns = [
+            /^[A-Z]{2}\d{9}[A-Z]{2}$/,     // Correios: BR123456789BR
+            /^[A-Z]{2}\d{12}$/,             // DHL, FedEx: XX123456789012
+            /^1Z[A-Z0-9]{16}$/,             // UPS: 1Z999AA1234567890
+            /^[A-Z]{3}\d{7}$/,              // TNT: ABC1234567
+            /^\d{12,14}$/                    // Outros: 123456789012
+        ];
+
+        // Verifica se o texto limpo corresponde a algum padrão
+        if (patterns.some(pattern => pattern.test(cleanText))) {
+            return cleanText;
+        }
+
+        return null;
+    }
+
+    /**
+     * Verifica se o texto contém palavras relacionadas a rastreamento
+     * @param {string} text - Texto para verificar
+     * @returns {boolean}
+     */
+    hasTrackingKeywords(text) {
+        if (!text) return false;
+
+        const keywords = [
+            'rastrear', 'rastreio', 'rastreamento',
+            'entrega', 'entregar', 'entregue',
+            'código', 'codigo', 'track',
+            'correio', 'correios', 'transportadora',
+            'pedido', 'encomenda', 'pacote'
+        ];
+
+        const normalizedText = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return keywords.some(keyword => normalizedText.includes(keyword));
     }
 }
 
