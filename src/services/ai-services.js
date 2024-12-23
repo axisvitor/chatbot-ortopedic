@@ -392,62 +392,22 @@ class AIServices {
     }
 
     async handleAudioMessage(message) {
+        const { messageId, from } = message;
+
         try {
-            const messageId = message.key?.id;
-            const from = message.key?.remoteJid?.replace('@s.whatsapp.net', '');
-            const type = 'audio';
-
-            // Log detalhado da mensagem recebida
-            console.log('🎤 Mensagem de áudio recebida:', {
-                messageId,
-                from,
-                type,
-                hasMessage: !!message.message,
-                hasAudioMessage: !!message.message?.audioMessage,
-                hasUrl: !!message.message?.audioMessage?.url,
-                hasMediaKey: !!message.message?.audioMessage?.mediaKey,
-                timestamp: new Date().toISOString()
-            });
-
-            // Verifica se temos a mensagem de áudio
-            if (!message.message?.audioMessage) {
-                console.error('❌ Mensagem de áudio não encontrada:', {
-                    messageId,
-                    from,
-                    messageKeys: Object.keys(message),
-                    timestamp: new Date().toISOString()
-                });
-                throw new Error('Mensagem de áudio não encontrada');
-            }
-
-            // Verifica se o FFmpeg está disponível antes de prosseguir
-            const ffmpegAvailable = await this.audioService.init();
-            if (!ffmpegAvailable) {
-                console.error('❌ FFmpeg não disponível:', {
-                    messageId,
-                    from,
-                    timestamp: new Date().toISOString()
-                });
-                await this.sendResponse(
-                    from,
-                    'Desculpe, o sistema está temporariamente indisponível para processar mensagens de voz. ' +
-                    'Por favor, envie sua mensagem como texto.'
-                );
-                return null;
-            }
-
-            // Processa o áudio com a mensagem original do Baileys
+            // Processa o áudio e obtém a transcrição
             const transcription = await this.audioService.processWhatsAppAudio(message);
-            if (!transcription) {
-                console.error('❌ Falha ao transcrever áudio:', {
+
+            if (!transcription || typeof transcription === 'object' && transcription.error) {
+                console.error('❌ Erro ao processar áudio:', {
                     messageId,
-                    from,
+                    erro: transcription?.error ? transcription.message : 'Transcrição vazia',
                     timestamp: new Date().toISOString()
                 });
+                
                 await this.sendResponse(
                     from,
-                    'Desculpe, não consegui entender o áudio. ' +
-                    'Por favor, tente novamente ou envie sua mensagem como texto.'
+                    'Desculpe, não consegui processar sua mensagem de voz. Por favor, tente novamente ou envie uma mensagem de texto.'
                 );
                 return null;
             }
@@ -459,11 +419,20 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            // Gera resposta baseada na transcrição
-            const response = await this.openAIService.generateResponse({
-                ...message,
-                text: transcription
+            // Cria um novo thread para a conversa
+            const thread = await this.openAIService.createThread();
+
+            // Adiciona a transcrição como mensagem
+            await this.openAIService.addMessage(thread.id, {
+                role: 'user',
+                content: transcription
             });
+
+            // Executa o assistant
+            const run = await this.openAIService.runAssistant(thread.id);
+
+            // Aguarda a resposta
+            const response = await this.openAIService.waitForResponse(thread.id, run.id);
 
             if (!response) {
                 throw new Error('Resposta do OpenAI inválida');
@@ -481,27 +450,22 @@ class AIServices {
             });
 
             await this.sendResponse(from, formattedResponse);
-            return null;
+            return formattedResponse;
 
         } catch (error) {
             console.error('❌ Erro ao processar áudio:', {
                 erro: error.message,
                 stack: error.stack,
-                messageId: message.key?.id,
-                from: message.key?.remoteJid?.replace('@s.whatsapp.net', ''),
+                messageId,
+                from,
                 timestamp: new Date().toISOString()
             });
 
-            // Envia mensagem de erro amigável
-            if (message?.key?.remoteJid) {
-                const from = message.key.remoteJid.replace('@s.whatsapp.net', '');
-                await this.sendResponse(
-                    from,
-                    'Desculpe, não consegui processar sua mensagem de voz. Por favor, tente novamente ou envie uma mensagem de texto.'
-                );
-            }
-            
-            throw error;
+            await this.sendResponse(
+                from,
+                'Desculpe, não consegui processar sua mensagem de voz. Por favor, tente novamente ou envie uma mensagem de texto.'
+            );
+            return null;
         }
     }
 
