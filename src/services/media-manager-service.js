@@ -123,12 +123,17 @@ class MediaManagerService {
                 throw new Error(`Imagem muito grande. Máximo: ${this.MAX_IMAGE_SIZE / (1024 * 1024)}MB`);
             }
 
-            // Processa a imagem com o WhatsApp Service
-            const whatsapp = new WhatsAppService();
-            await whatsapp.handleImageMessage(message);
+            // Processa a imagem
+            const result = await this.imageService.processWhatsAppImage(message);
 
-            // Não retorna nada pois o handleImageMessage já cuida das respostas
-            return null;
+            // Se for comprovante, encaminha para o WhatsApp Service
+            if (result && result.isPaymentProof) {
+                const whatsapp = new WhatsAppService();
+                await whatsapp.handleImageMessage(message);
+                return null;
+            }
+
+            return result;
         } catch (error) {
             console.error('[MediaManager] Erro ao processar imagem:', error);
             throw error;
