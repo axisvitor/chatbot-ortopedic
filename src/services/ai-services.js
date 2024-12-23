@@ -333,41 +333,30 @@ class AIServices {
                 messageId,
                 from,
                 type,
-                hasMediaUrl: !!message.mediaUrl,
-                hasImageMessage: !!message.imageMessage,
+                hasMessage: !!message.message,
+                hasImageMessage: !!message.message?.imageMessage,
                 timestamp: new Date().toISOString()
             });
 
-            // Tenta obter a URL da imagem de diferentes propriedades
-            const mediaUrl = message.mediaUrl || 
-                           (message.imageMessage && message.imageMessage.url) ||
-                           (message.image && message.image.url);
-
-            if (!mediaUrl) {
-                console.error('❌ URL da imagem não encontrada:', {
+            // Verifica se temos o objeto de mensagem completo
+            if (!message.message?.imageMessage) {
+                console.error('❌ Objeto de imagem não encontrado:', {
                     messageId,
                     from,
                     messageKeys: Object.keys(message),
                     timestamp: new Date().toISOString()
                 });
-                throw new Error('URL da imagem não encontrada na mensagem');
+                throw new Error('Objeto de imagem não encontrado na mensagem');
             }
 
-            // Processa a imagem com a URL encontrada
-            const imageMessage = {
-                ...message,
-                mediaUrl,
-                messageId: messageId || `image_${Date.now()}`
-            };
-
-            console.log('🎯 Processando imagem:', {
-                messageId: imageMessage.messageId,
-                mediaUrl: mediaUrl.substring(0, 100),
+            console.log('🎯 Baixando imagem:', {
+                messageId,
+                mimetype: message.message.imageMessage.mimetype,
                 timestamp: new Date().toISOString()
             });
 
-            // Baixa e processa a imagem
-            const { buffer, metadata } = await this.whatsAppImageService.downloadImage(mediaUrl, imageMessage);
+            // Baixa a imagem usando o Baileys
+            const buffer = await this.whatsAppService.downloadMediaMessage(message);
 
             // Valida o buffer da imagem
             if (!buffer || buffer.length < 100) {
@@ -377,8 +366,7 @@ class AIServices {
             console.log('✅ Imagem baixada:', {
                 messageId,
                 tamanho: buffer.length,
-                tipo: metadata.mimetype,
-                dimensoes: metadata.dimensions,
+                tipo: message.message.imageMessage.mimetype,
                 timestamp: new Date().toISOString()
             });
 
@@ -399,21 +387,26 @@ class AIServices {
 
             // Se for um comprovante, pede informações adicionais
             if (result.type === 'receipt') {
-                const info = result.info;
-                
-                // Pede número do pedido e nome
-                await this.sendResponse(
-                    from,
-                    `💰 *Comprovante Detectado*\n\nPara processar seu comprovante, preciso de algumas informações:\n\n1️⃣ Número do pedido (exemplo: #123456)\n2️⃣ Nome completo do titular da compra\n\nPor favor, envie essas informações em uma única mensagem.`
-                );
-
-                // Salva o comprovante no Redis para processar quando o cliente responder
-                await this.redisStore.set(`receipt:${messageId}`, {
+                console.log('💳 Comprovante detectado:', {
                     messageId,
                     from,
-                    info,
                     timestamp: new Date().toISOString()
-                }, 3600); // expira em 1 hora
+                });
+
+                // Salva informações do comprovante no Redis
+                const info = {
+                    analysis: result.analysis,
+                    messageId,
+                    timestamp: new Date().toISOString()
+                };
+
+                await this.redisStore.set(`receipt:${from}`, JSON.stringify(info), 3600); // expira em 1 hora
+
+                // Envia mensagem pedindo o número do pedido
+                await this.sendResponse(
+                    from,
+                    'Por favor, me informe o número do pedido relacionado a este comprovante para que eu possa validá-lo.'
+                );
 
                 return null;
             }
