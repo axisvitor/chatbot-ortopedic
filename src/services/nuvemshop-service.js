@@ -25,7 +25,7 @@ class NuvemshopService {
 
         // Configurar headers padrão
         const headers = {
-            'Authorization': `bearer ${NUVEMSHOP_CONFIG.accessToken}`, // Mantendo 'bearer' minúsculo conforme documentação
+            'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
             'Content-Type': 'application/json',
             'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)',
             'Accept': 'application/json'
@@ -65,6 +65,18 @@ class NuvemshopService {
             if (!config.url.startsWith('/v1/')) {
                 config.url = `/v1/${config.url}`;
             }
+
+            // Log dos headers completos para debug
+            console.log('[Nuvemshop] Headers da requisição:', {
+                url: config.url,
+                headers: {
+                    'Authentication': config.headers['Authentication'],
+                    'Content-Type': config.headers['Content-Type'],
+                    'User-Agent': config.headers['User-Agent'],
+                    'Accept': config.headers['Accept']
+                },
+                timestamp: new Date().toISOString()
+            });
 
             return config;
         });
