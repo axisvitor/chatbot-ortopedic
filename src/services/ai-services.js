@@ -98,7 +98,29 @@ class AIServices {
             if (type === 'image') {
                 response = await this.handleImageMessage(message);
             } else if (type === 'audio') {
-                response = await this.handleAudioMessage(message);
+                const transcription = await this.handleAudioMessage(message);
+                if (transcription) {
+                    // Adiciona a transcrição ao thread do OpenAI
+                    const threadId = await this.openAIService.createThread();
+                    await this.openAIService.addMessage(threadId, {
+                        role: 'user',
+                        content: transcription
+                    });
+                    
+                    // Executa o assistant e aguarda resposta
+                    const run = await this.openAIService.runAssistant(threadId);
+                    response = await this.openAIService.waitForResponse(threadId, run.id);
+
+                    // Log da resposta
+                    console.log('📤 Enviando resposta para áudio:', {
+                        messageId: message.messageId,
+                        from: message.from,
+                        transcriptionLength: transcription.length,
+                        responseLength: response.length,
+                        preview: response.substring(0, 100),
+                        timestamp: new Date().toISOString()
+                    });
+                }
             } else {
                 // Busca histórico do chat no Redis
                 const chatKey = `chat:${from}`;
@@ -465,38 +487,7 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            // Cria um novo thread para a conversa
-            const thread = await this.openAIService.createThread();
-
-            // Adiciona a transcrição como mensagem
-            await this.openAIService.addMessage(thread.id, {
-                role: 'user',
-                content: transcription
-            });
-
-            // Executa o assistant
-            const run = await this.openAIService.runAssistant(thread.id);
-
-            // Aguarda a resposta
-            const response = await this.openAIService.waitForResponse(thread.id, run.id);
-
-            if (!response) {
-                throw new Error('Resposta do OpenAI inválida');
-            }
-
-            // Formata e envia a resposta
-            const formattedResponse = `🎵 *Mensagem de voz:*\n${transcription}\n\n${response}`;
-            
-            console.log('📤 Enviando resposta:', {
-                messageId,
-                from,
-                responseLength: formattedResponse.length,
-                preview: formattedResponse.substring(0, 100),
-                timestamp: new Date().toISOString()
-            });
-
-            await this.sendResponse(from, formattedResponse);
-            return null; // Retorna null para evitar envio duplicado
+            return transcription;
 
         } catch (error) {
             console.error('❌ Erro ao processar áudio:', {
