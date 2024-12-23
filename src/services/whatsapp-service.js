@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { GroqServices } = require('./groq-services');
 
 class WhatsAppService {
     constructor() {
@@ -8,6 +9,7 @@ class WhatsAppService {
         this.connectionKey = null;
         this.retryCount = 0;
         this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
+        this.paymentProofMessages = {};
     }
 
     async init() {
@@ -416,6 +418,94 @@ class WhatsAppService {
             }
         } catch (error) {
             console.error('[WhatsApp] Erro ao encerrar conexão:', error);
+            throw error;
+        }
+    }
+
+    async handleImageMessage(message) {
+        try {
+            console.log('🖼️ Mensagem de imagem recebida:', {
+                messageId: message.messageId,
+                from: message.from,
+                type: message.type,
+                hasMessage: !!message.message,
+                hasImageMessage: !!message.message?.imageMessage,
+                timestamp: new Date().toISOString()
+            });
+
+            // Baixa a imagem
+            const buffer = await this.downloadMediaMessage(message);
+
+            // Processa a imagem com o Groq
+            const groqService = new GroqServices();
+            const result = await groqService.processImage(buffer, message);
+
+            // Se for um comprovante, pede o número do pedido
+            if (result.isPaymentProof) {
+                await this.sendText(
+                    message.from, 
+                    '✅ Recebi seu comprovante! Para que eu possa encaminhar para nossa equipe financeira, ' + 
+                    'por favor me informe o número do seu pedido.'
+                );
+                
+                // Armazena temporariamente a mensagem do comprovante
+                this.paymentProofMessages = this.paymentProofMessages || {};
+                this.paymentProofMessages[message.from] = message;
+                
+                return;
+            }
+
+            // Se não for um comprovante, continua com o fluxo normal
+            console.log('🔍 Análise da imagem:', {
+                messageId: message.messageId,
+                tipo: result.type,
+                isPaymentProof: result.isPaymentProof,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            console.error('❌ Erro ao processar mensagem de imagem:', error);
+            throw error;
+        }
+    }
+
+    async handleOrderNumber(message) {
+        try {
+            // Verifica se tem um comprovante pendente para este número
+            if (!this.paymentProofMessages || !this.paymentProofMessages[message.from]) {
+                return false;
+            }
+
+            // Extrai o número do pedido da mensagem
+            const orderNumber = message.body.trim();
+
+            // Valida se é um número de pedido válido (você pode adicionar mais validações aqui)
+            if (!orderNumber) {
+                await this.sendText(
+                    message.from,
+                    '❌ Por favor, me envie um número de pedido válido.'
+                );
+                return true;
+            }
+
+            // Recupera a mensagem do comprovante
+            const proofMessage = this.paymentProofMessages[message.from];
+
+            // Encaminha para o financeiro com o número do pedido
+            await this.forwardToFinancial(proofMessage, orderNumber);
+            
+            // Confirma para o cliente
+            await this.sendText(
+                message.from,
+                `✅ Seu comprovante foi encaminhado para nossa equipe financeira junto com o número do pedido #${orderNumber}. Em breve retornaremos com uma confirmação.`
+            );
+
+            // Limpa o comprovante da memória
+            delete this.paymentProofMessages[message.from];
+            return true;
+
+        } catch (error) {
+            console.error('❌ Erro ao processar número do pedido:', error);
             throw error;
         }
     }

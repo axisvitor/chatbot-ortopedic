@@ -58,7 +58,7 @@ class GroqServices {
         }
     }
 
-    async processImage(buffer, attempt = 1) {
+    async processImage(buffer, message, attempt = 1) {
         try {
             const imageFormat = detectImageFormatFromBuffer(buffer);
             if (!imageFormat) {
@@ -86,7 +86,7 @@ class GroqServices {
                         content: [
                             {
                                 type: 'text',
-                                text: 'Analise esta imagem em detalhes e me diga o que você vê.'
+                                text: 'Determine se esta imagem é um comprovante de pagamento. Responda apenas "sim" ou "não".'
                             },
                             {
                                 type: 'image_url',
@@ -97,9 +97,9 @@ class GroqServices {
                         ]
                     }
                 ],
-                temperature: 0.7,
+                temperature: 0.2,
                 max_tokens: 1024,
-                top_p: 1,
+                top_p: 0.2,
                 stream: false
             };
 
@@ -116,10 +116,15 @@ class GroqServices {
                 throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
             }
 
+            const answer = response.data.choices[0].message.content.toLowerCase().trim();
+            const isPaymentProof = answer.includes('sim');
+
             return {
                 type: 'image',
-                analysis: response.data.choices[0].message.content
+                isPaymentProof,
+                originalMessage: message
             };
+
         } catch (error) {
             console.error(`❌ Erro ao processar imagem (Tentativa ${attempt}):`, {
                 erro: error.message,
@@ -131,7 +136,7 @@ class GroqServices {
             // Só tenta novamente se não for erro 404
             if (error.response?.status !== 404 && attempt < 3) {
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                return this.processImage(buffer, attempt + 1);
+                return this.processImage(buffer, message, attempt + 1);
             }
             throw new Error(`Falha ao processar imagem após ${attempt} tentativas: ${error.message}`);
         }

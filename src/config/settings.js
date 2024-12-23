@@ -17,7 +17,7 @@ const OPENAI_CONFIG = {
 const GROQ_CONFIG = {
     apiKey: validateEnvVar('GROQ_API_KEY'),
     models: {
-        vision: 'llama-3.2-11b-vision-preview',
+        vision: 'llama-3.2-90b-vision-preview',
         audio: 'whisper-large-v3-turbo',
         chat: 'llama-3.2-90b-chat'
     },

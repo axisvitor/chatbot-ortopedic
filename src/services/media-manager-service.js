@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { RedisStore } = require('../store/redis-store');
+const { WhatsAppService } = require('./whatsapp-service');
 
 class MediaManagerService {
     constructor(audioService, imageService) {
@@ -111,24 +112,27 @@ class MediaManagerService {
      * @returns {Promise<Object>} Resultado do processamento
      */
     async processImage(message) {
-        // Validação de tipo
-        if (!this.ALLOWED_IMAGE_TYPES.includes(message.imageMessage.mimetype)) {
-            throw new Error(`Formato não suportado. Use: ${this.ALLOWED_IMAGE_TYPES.join(', ')}`);
+        try {
+            // Validação de tipo
+            if (!this.ALLOWED_IMAGE_TYPES.includes(message.imageMessage.mimetype)) {
+                throw new Error(`Formato não suportado. Use: ${this.ALLOWED_IMAGE_TYPES.join(', ')}`);
+            }
+
+            // Validação de tamanho
+            if (message.imageMessage.fileLength > this.MAX_IMAGE_SIZE) {
+                throw new Error(`Imagem muito grande. Máximo: ${this.MAX_IMAGE_SIZE / (1024 * 1024)}MB`);
+            }
+
+            // Processa a imagem com o WhatsApp Service
+            const whatsapp = new WhatsAppService();
+            await whatsapp.handleImageMessage(message);
+
+            // Não retorna nada pois o handleImageMessage já cuida das respostas
+            return null;
+        } catch (error) {
+            console.error('[MediaManager] Erro ao processar imagem:', error);
+            throw error;
         }
-
-        // Validação de tamanho
-        if (message.imageMessage.fileLength > this.MAX_IMAGE_SIZE) {
-            throw new Error(`Imagem muito grande. Máximo: ${this.MAX_IMAGE_SIZE / (1024 * 1024)}MB`);
-        }
-
-        // Processa a imagem
-        const result = await this.imageService.processWhatsAppImage(message);
-
-        // Cache do resultado
-        const mediaId = this.generateMediaId(message);
-        await this.cacheResult(mediaId, 'image', result);
-
-        return result;
     }
 
     /**
@@ -190,4 +194,4 @@ class MediaManagerService {
     }
 }
 
-module.exports = { MediaManagerService }; 
+module.exports = { MediaManagerService };
