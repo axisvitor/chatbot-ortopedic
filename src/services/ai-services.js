@@ -145,8 +145,12 @@ class AIServices {
             } else if (type === 'audio') {
                 const transcription = await this.handleAudioMessage(message);
                 if (transcription) {
-                    // Adiciona a transcrição ao thread do OpenAI
-                    const threadId = await this.openAIService.createThread();
+                    // Busca ou cria thread
+                    const threadKey = `chat:${from}`;
+                    const chatHistory = await this.redisStore.get(threadKey);
+                    const threadId = chatHistory?.threadId || (await this.openAIService.createThread()).id;
+                    
+                    // Adiciona a transcrição ao thread
                     await this.openAIService.addMessage(threadId, {
                         role: 'user',
                         content: transcription
@@ -156,10 +160,17 @@ class AIServices {
                     const run = await this.openAIService.runAssistant(threadId);
                     response = await this.openAIService.waitForResponse(threadId, run.id);
 
+                    // Salva o thread no Redis
+                    await this.redisStore.set(threadKey, {
+                        threadId,
+                        lastUpdate: new Date().toISOString()
+                    });
+
                     // Log da resposta
                     console.log('📤 Enviando resposta para áudio:', {
                         messageId: message.messageId,
                         from: message.from,
+                        threadId,
                         transcriptionLength: transcription.length,
                         responseLength: response.length,
                         preview: response.substring(0, 100),
