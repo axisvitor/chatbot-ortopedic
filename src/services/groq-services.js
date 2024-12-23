@@ -65,12 +65,43 @@ class GroqServices {
                 throw new Error('Formato de imagem não suportado.');
             }
 
-            const formData = new FormData();
-            formData.append('file', buffer, `image.${imageFormat.split('/')[1]}`);
+            // Log da URL e payload antes da chamada
+            console.log('🔍 Chamando API Groq:', {
+                url: GROQ_CONFIG.visionUrl,
+                model: GROQ_CONFIG.models.vision,
+                imageFormat,
+                bufferSize: buffer.length,
+                timestamp: new Date().toISOString()
+            });
 
-            const response = await this.axios.post(GROQ_CONFIG.visionUrl, formData, {
+            // Converte o buffer para base64
+            const base64Image = buffer.toString('base64');
+
+            // Monta o payload no formato correto do Groq Vision
+            const payload = {
+                model: GROQ_CONFIG.models.vision,
+                messages: [
+                    {
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'text',
+                                text: 'Analise esta imagem em detalhes e me diga o que você vê.'
+                            },
+                            {
+                                type: 'image',
+                                image_url: {
+                                    url: `data:${imageFormat};base64,${base64Image}`
+                                }
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            const response = await this.axios.post(GROQ_CONFIG.visionUrl, payload, {
                 headers: {
-                    ...formData.getHeaders(),
+                    'Content-Type': 'application/json',
                     'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`
                 },
                 timeout: 30000
@@ -81,10 +112,20 @@ class GroqServices {
                 throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
             }
 
-            return response.data.choices[0].message.content;
+            return {
+                type: 'image',
+                analysis: response.data.choices[0].message.content
+            };
         } catch (error) {
-            console.error(`❌ Erro ao processar imagem (Tentativa ${attempt}):`, error.message);
-            if (attempt < 3) {
+            console.error(`❌ Erro ao processar imagem (Tentativa ${attempt}):`, {
+                erro: error.message,
+                status: error.response?.status,
+                data: error.response?.data,
+                timestamp: new Date().toISOString()
+            });
+
+            // Só tenta novamente se não for erro 404
+            if (error.response?.status !== 404 && attempt < 3) {
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                 return this.processImage(buffer, attempt + 1);
             }
