@@ -130,6 +130,66 @@ class ImageService {
         }
     }
 
+    /**
+     * Detecta se uma imagem é um comprovante
+     * @param {string} analysis - Análise da imagem pelo Groq
+     * @returns {boolean} true se for comprovante
+     */
+    isPaymentReceipt(analysis) {
+        const keywords = [
+            'comprovante',
+            'pagamento',
+            'transferência',
+            'pix',
+            'recibo',
+            'valor',
+            'data',
+            'beneficiário',
+            'banco',
+            'agência',
+            'conta'
+        ];
+
+        // Converte para minúsculas para comparação
+        const lowerAnalysis = analysis.toLowerCase();
+        
+        // Conta quantas palavras-chave foram encontradas
+        const matchCount = keywords.reduce((count, keyword) => {
+            return count + (lowerAnalysis.includes(keyword) ? 1 : 0);
+        }, 0);
+
+        // Se encontrou pelo menos 3 palavras-chave, considera como comprovante
+        return matchCount >= 3;
+    }
+
+    /**
+     * Extrai informações relevantes de um comprovante
+     * @param {string} analysis - Análise da imagem pelo Groq
+     * @returns {Object} Informações extraídas
+     */
+    extractReceiptInfo(analysis) {
+        // Expressões regulares para extrair informações comuns
+        const patterns = {
+            valor: /R\$\s*[\d,.]+|valor:?\s*R?\$?\s*[\d,.]+/i,
+            data: /\d{2}\/\d{2}\/\d{4}|\d{2}\.\d{2}\.\d{4}/,
+            pix: /pix|chave\s+pix/i,
+            beneficiario: /benefici[aá]rio:?\s*([^,\n]+)/i,
+            banco: /banco:?\s*([^,\n]+)/i
+        };
+
+        const info = {};
+
+        // Tenta extrair cada informação
+        for (const [key, pattern] of Object.entries(patterns)) {
+            const match = analysis.match(pattern);
+            if (match) {
+                info[key] = match[1] || match[0];
+            }
+        }
+
+        return info;
+    }
+
     async processWhatsAppImage({ imageMessage, caption = '', from, messageId, businessHours }) {
         try {
             console.log('[ImageService] Processando imagem:', {
@@ -188,7 +248,24 @@ class ImageService {
             // Analisa a imagem com Groq Vision
             const analysis = await this.groqServices.analyzeImage(base64Image);
 
-            return analysis;
+            // Verifica se é um comprovante
+            const isReceipt = this.isPaymentReceipt(analysis);
+
+            if (isReceipt) {
+                console.log('💰 Comprovante detectado, extraindo informações...');
+                const receiptInfo = this.extractReceiptInfo(analysis);
+                
+                return {
+                    type: 'receipt',
+                    analysis,
+                    info: receiptInfo
+                };
+            }
+
+            return {
+                type: 'image',
+                analysis
+            };
 
         } catch (error) {
             console.error('[ImageService] Erro ao processar imagem:', error);
@@ -199,10 +276,10 @@ class ImageService {
             } else if (error.message.includes('autenticação')) {
                 throw new Error('Houve um erro de autenticação. Por favor, tente novamente mais tarde.');
             } else if (error.message.includes('segurança')) {
-                throw new Error('A imagem não passou nas validações de segurança. Por favor, envie outra imagem.');
+                throw new Error('Esta imagem não passou nas validações de segurança.');
+            } else {
+                throw new Error('Não foi possível processar a imagem. Por favor, tente novamente.');
             }
-
-            throw new Error('Não foi possível processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.');
         }
     }
 }

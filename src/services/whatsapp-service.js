@@ -364,6 +364,47 @@ class WhatsAppService {
         }
     }
 
+    /**
+     * Encaminha uma mensagem para outro número
+     * @param {Object} message - Mensagem original
+     * @param {string} to - Número de destino
+     * @returns {Promise<void>}
+     */
+    async forwardMessage(message, to) {
+        try {
+            if (!message || !to) {
+                throw new Error('Mensagem e destino são obrigatórios');
+            }
+
+            // Log do encaminhamento
+            console.log('🔄 Encaminhando mensagem:', {
+                messageId: message.messageId,
+                from: message.from,
+                to,
+                type: message.type,
+                timestamp: new Date().toISOString()
+            });
+
+            // Encaminha a mensagem
+            await this.client.forwardMessage(to, message);
+
+            console.log('✅ Mensagem encaminhada com sucesso:', {
+                messageId: message.messageId,
+                to,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            console.error('❌ Erro ao encaminhar mensagem:', {
+                erro: error.message,
+                stack: error.stack,
+                messageId: message?.messageId,
+                to,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
     async close() {
         try {
             if (this.client) {

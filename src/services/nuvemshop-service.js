@@ -228,156 +228,110 @@ class NuvemshopService {
     }
 
     /**
-     * Atualiza um produto
-     * @param {number} productId - ID do produto
-     * @param {Object} data - Dados do produto
-     * @returns {Promise<Object>} Produto atualizado
+     * Busca pedidos recentes por telefone
+     * @param {string} phone - Número do telefone
+     * @param {Object} options - Opções adicionais
+     * @returns {Promise<Array>} Lista de pedidos
      */
-    async updateProduct(productId, data) {
+    async getRecentOrdersByPhone(phone, options = {}) {
         try {
-            const response = await this.client.put(`/products/${productId}`, data);
-            await this.invalidateCache('product');
-            return response.data;
+            // Remove caracteres não numéricos
+            const cleanPhone = phone.replace(/\D/g, '');
+            
+            // Busca pedidos dos últimos 30 dias
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+            const params = {
+                created_at_min: thirtyDaysAgo.toISOString(),
+                per_page: options.per_page || 10,
+                page: options.page || 1,
+                status: options.status || ['pending', 'paid', 'packed', 'shipped']
+            };
+
+            const { data: orders } = await this.getOrders(params);
+
+            // Filtra por telefone
+            return orders.filter(order => {
+                const customerPhone = order.customer?.phone?.replace(/\D/g, '');
+                return customerPhone && customerPhone.includes(cleanPhone);
+            });
         } catch (error) {
-            console.error('[Nuvemshop] Erro ao atualizar produto:', error);
-            throw error;
+            console.error('[Nuvemshop] Erro ao buscar pedidos por telefone:', error);
+            return [];
         }
     }
 
     /**
-     * Atualiza um pedido
-     * @param {number} orderId - ID do pedido
-     * @param {Object} data - Dados do pedido
-     * @returns {Promise<Object>} Pedido atualizado
+     * Obtém pedido pelo número
+     * @param {string} orderNumber - Número do pedido
+     * @returns {Promise<Object|null>} Pedido ou null se não encontrado
      */
-    async updateOrder(orderId, data) {
+    async getOrderByNumber(orderNumber) {
         try {
-            const response = await this.client.put(`/orders/${orderId}`, data);
-            await this.invalidateCache('order');
-            return response.data;
+            const { data: orders } = await this.getOrders({
+                q: orderNumber,
+                per_page: 1
+            });
+
+            const order = orders.find(o => o.number === orderNumber);
+            if (!order) {
+                return null;
+            }
+
+            // Busca detalhes completos do pedido
+            return await this.getOrder(order.id);
         } catch (error) {
-            console.error('[Nuvemshop] Erro ao atualizar pedido:', error);
-            throw error;
+            console.error('[Nuvemshop] Erro ao buscar pedido por número:', error);
+            return null;
         }
     }
 
-    async retryRequest(config, retryCount = 0) {
-        const maxRetries = NUVEMSHOP_CONFIG.api.retryAttempts;
-        const baseDelay = 1000; // 1 segundo
-
-        if (retryCount >= maxRetries) {
-            return Promise.reject(new Error('Número máximo de tentativas excedido'));
-        }
-
-        const delay = baseDelay * Math.pow(2, retryCount);
-        await new Promise(resolve => setTimeout(resolve, delay));
-
+    /**
+     * Verifica se um pedido está pendente de pagamento
+     * @param {number} orderId - ID do pedido
+     * @returns {Promise<boolean>} true se estiver pendente
+     */
+    async isOrderPendingPayment(orderId) {
         try {
-            return await this.client(config);
+            const order = await this.getOrder(orderId);
+            return order && order.payment_status === 'pending';
         } catch (error) {
-            return this.retryRequest(config, retryCount + 1);
+            console.error('[Nuvemshop] Erro ao verificar status de pagamento:', error);
+            return false;
         }
     }
 
-    async getCustomer(customerId) {
-        return this._makeRequest('get', `/customers/${customerId}`);
+    /**
+     * Formata o status do pedido para exibição
+     * @param {string} status - Status original
+     * @returns {string} Status formatado
+     */
+    formatOrderStatus(status) {
+        const statusMap = {
+            'pending': '🕒 Pendente',
+            'paid': '✅ Pago',
+            'packed': '📦 Embalado',
+            'shipped': '🚚 Enviado',
+            'delivered': '📬 Entregue',
+            'cancelled': '❌ Cancelado'
+        };
+        return statusMap[status] || status;
     }
 
-    async searchProducts(query) {
-        return this._makeRequest('get', `/products?q=${encodeURIComponent(query)}`);
-    }
-
-    async getProductBySku(sku) {
-        const products = await this._makeRequest('get', `/products?sku=${encodeURIComponent(sku)}`);
-        return products.length > 0 ? products[0] : null;
-    }
-
-    async getOrderTracking(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.shipping_address || !order.shipping_address.tracking_code) {
-            return null;
-        }
-        return order.shipping_address.tracking_code;
-    }
-
-    async getOrderTotal(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.total) {
-            return null;
-        }
-        return order.total;
-    }
-
-    async getOrderPaymentStatus(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.payment_status) {
-            return null;
-        }
-        return order.payment_status;
-    }
-
-    async getOrderFinancialStatus(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.financial_status) {
-            return null;
-        }
-        return order.financial_status;
-    }
-
-    async getOrderShippingAddress(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.shipping_address) {
-            return null;
-        }
-        return order.shipping_address;
-    }
-
-    async getOrderBillingAddress(orderId) {
-        const order = await this.getOrder(orderId);
-         if (!order || !order.billing_address) {
-            return null;
-        }
-        return order.billing_address;
-    }
-
-    async getOrderItems(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.items) {
-            return null;
-        }
-        return order.items;
-    }
-
-    async getOrderCustomer(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.customer) {
-            return null;
-        }
-        return order.customer;
-    }
-
-    async getOrderShippingMethod(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.shipping_method) {
-            return null;
-        }
-        return order.shipping_method;
-    }
-
-    async getOrderShippingCost(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.shipping_cost) {
-            return null;
-        }
-        return order.shipping_cost;
-    }
-
-    async getOrderSubtotal(orderId) {
-        const order = await this.getOrder(orderId);
-        if (!order || !order.subtotal) {
-            return null;
-        }
-        return order.subtotal;
+    /**
+     * Formata o resumo do pedido para exibição
+     * @param {Object} order - Dados do pedido
+     * @returns {string} Resumo formatado
+     */
+    formatOrderSummary(order) {
+        if (!order) return null;
+        
+        return `🛍️ *Pedido #${order.number}*
+📅 Data: ${new Date(order.created_at).toLocaleDateString('pt-BR')}
+💰 Total: ${this.formatPrice(order.total)}
+📦 Status: ${this.formatOrderStatus(order.status)}
+💳 Pagamento: ${this.formatOrderStatus(order.payment_status)}`;
     }
 
     /**
@@ -475,48 +429,117 @@ class NuvemshopService {
         }, {});
     }
 
-    /**
-     * Obtém pedido pelo número
-     * @param {string} orderNumber - Número do pedido
-     * @returns {Promise<Object|null>} Pedido ou null se não encontrado
-     */
-    async getOrderByNumber(orderNumber) {
+    async retryRequest(config, retryCount = 0) {
+        const maxRetries = NUVEMSHOP_CONFIG.api.retryAttempts;
+        const baseDelay = 1000; // 1 segundo
+
+        if (retryCount >= maxRetries) {
+            return Promise.reject(new Error('Número máximo de tentativas excedido'));
+        }
+
+        const delay = baseDelay * Math.pow(2, retryCount);
+        await new Promise(resolve => setTimeout(resolve, delay));
+
         try {
-            const response = await this.client.get(`/orders?q=${orderNumber}`);
-            const orders = response.data;
-            return orders.find(order => order.number === orderNumber) || null;
+            return await this.client(config);
         } catch (error) {
-            console.error('[Nuvemshop] Erro ao buscar pedido por número:', error);
-            return null;
+            return this.retryRequest(config, retryCount + 1);
         }
     }
 
-    /**
-     * Traduz status do pedido
-     * @param {string} status - Status original
-     * @returns {string} Status traduzido
-     */
-    translateOrderStatus(status) {
-        const translations = {
-            'open': 'Em aberto',
-            'closed': 'Finalizado',
-            'cancelled': 'Cancelado',
-            'pending': 'Pendente',
-            'paid': 'Pago',
-            'unpaid': 'Não pago',
-            'authorized': 'Autorizado',
-            'refunded': 'Reembolsado',
-            'partially_refunded': 'Parcialmente reembolsado',
-            'voided': 'Anulado',
-            'shipped': 'Enviado',
-            'unshipped': 'Não enviado',
-            'partially_shipped': 'Parcialmente enviado',
-            'ready_for_pickup': 'Pronto para retirada',
-            'picked_up': 'Retirado',
-            'ready_for_shipping': 'Pronto para envio'
-        };
+    async getCustomer(customerId) {
+        const cacheKey = this.generateCacheKey('customer', customerId);
+        return this.getCachedData(
+            cacheKey,
+            async () => {
+                const response = await this.client.get(`/customers/${customerId}`);
+                return response.data;
+            },
+            NUVEMSHOP_CONFIG.cache.ttl.customers
+        );
+    }
 
-        return translations[status?.toLowerCase()] || status;
+    async searchProducts(query) {
+        const cacheKey = this.generateCacheKey('products', 'search', { q: query });
+        return this.getCachedData(
+            cacheKey,
+            async () => {
+                const response = await this.client.get('/products', { 
+                    params: { q: query, per_page: 10 }
+                });
+                return response.data;
+            },
+            NUVEMSHOP_CONFIG.cache.ttl.products
+        );
+    }
+
+    async getProductBySku(sku) {
+        const cacheKey = this.generateCacheKey('products', 'sku', { sku });
+        return this.getCachedData(
+            cacheKey,
+            async () => {
+                const response = await this.client.get('/products', { 
+                    params: { sku, per_page: 1 }
+                });
+                return response.data[0] || null;
+            },
+            NUVEMSHOP_CONFIG.cache.ttl.products
+        );
+    }
+
+    async getOrderTracking(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.shipping_tracking || null;
+    }
+
+    async getOrderTotal(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.total || 0;
+    }
+
+    async getOrderPaymentStatus(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.payment_status || null;
+    }
+
+    async getOrderFinancialStatus(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.financial_status || null;
+    }
+
+    async getOrderShippingAddress(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.shipping_address || null;
+    }
+
+    async getOrderBillingAddress(orderId) {
+        const order = await this.getOrder(orderId);
+         return order?.billing_address || null;
+    }
+
+    async getOrderItems(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.products || [];
+    }
+
+    async getOrderCustomer(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.customer || null;
+    }
+
+    async getOrderShippingMethod(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.shipping_option || null;
+    }
+
+    async getOrderShippingCost(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.shipping_cost || 0;
+    }
+
+    async getOrderSubtotal(orderId) {
+        const order = await this.getOrder(orderId);
+        return order?.subtotal || 0;
     }
 
     /**
@@ -546,4 +569,4 @@ class NuvemshopService {
     }
 }
 
-module.exports = { NuvemshopService }; 
+module.exports = { NuvemshopService };

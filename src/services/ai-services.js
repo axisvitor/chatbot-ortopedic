@@ -269,6 +269,35 @@ class AIServices {
         }
     }
 
+    async validateOrderForReceipt(from, orderNumber) {
+        try {
+            // Busca o pedido na Nuvemshop
+            const order = await this.nuvemshopService.getOrder(orderNumber);
+            
+            if (!order) {
+                return null;
+            }
+
+            // Verifica se o pedido pertence ao cliente
+            const customerPhone = order.customer?.phone?.replace(/\D/g, '');
+            const fromPhone = from.replace(/\D/g, '');
+
+            if (!customerPhone || !customerPhone.includes(fromPhone)) {
+                console.log('❌ Pedido não pertence ao cliente:', {
+                    orderNumber,
+                    customerPhone,
+                    fromPhone
+                });
+                return null;
+            }
+
+            return order;
+        } catch (error) {
+            console.error('❌ Erro ao validar pedido:', error);
+            return null;
+        }
+    }
+
     async handleImageMessage(message) {
         try {
             if (!message) {
@@ -332,43 +361,60 @@ class AIServices {
             });
 
             // Analisa a imagem com o Groq
-            const imageAnalysis = await this.groqServices.processImage(buffer);
+            const result = await this.groqServices.processImage(buffer);
 
-            if (!imageAnalysis) {
+            if (!result) {
                 throw new Error('Análise da imagem falhou');
             }
 
             console.log('🔍 Análise da imagem:', {
                 messageId,
-                tamanhoAnalise: imageAnalysis.length,
-                preview: imageAnalysis.substring(0, 100),
+                tipo: result.type,
+                tamanhoAnalise: result.analysis.length,
+                preview: result.analysis.substring(0, 100),
                 timestamp: new Date().toISOString()
             });
 
-            // Gera resposta baseada na análise
-            const prompt = `Analise esta imagem e forneça uma resposta detalhada e profissional:\n${imageAnalysis}`;
-            
-            const response = await this.openAIService.generateResponse({
-                ...message,
-                text: prompt
+            // Se for um comprovante, pede informações adicionais
+            if (result.type === 'receipt') {
+                const info = result.info;
+                
+                // Pede número do pedido e nome
+                await this.sendResponse(
+                    from,
+                    `💰 *Comprovante Detectado*\n\nPara processar seu comprovante, preciso de algumas informações:\n\n1️⃣ Número do pedido (exemplo: #123456)\n2️⃣ Nome completo do titular da compra\n\nPor favor, envie essas informações em uma única mensagem.`
+                );
+
+                // Salva o comprovante no Redis para processar quando o cliente responder
+                await this.redisStore.set(`receipt:${messageId}`, {
+                    messageId,
+                    from,
+                    info,
+                    timestamp: new Date().toISOString()
+                }, 3600); // expira em 1 hora
+
+                return null;
+            }
+
+            // Se não for comprovante, processa normalmente
+            const thread = await this.openAIService.createThread();
+
+            await this.openAIService.addMessage(thread.id, {
+                role: 'user',
+                content: `Analise esta imagem e forneça uma resposta detalhada e profissional:\n${result.analysis}`
             });
+
+            const run = await this.openAIService.runAssistant(thread.id);
+            const response = await this.openAIService.waitForResponse(thread.id, run.id);
 
             if (!response) {
                 throw new Error('Resposta do OpenAI inválida');
             }
 
-            // Formata e envia a resposta
             const formattedResponse = `🖼️ *Análise da imagem:*\n\n${response}`;
             
-            console.log('📤 Enviando resposta:', {
-                messageId,
-                from,
-                responseLength: formattedResponse.length,
-                preview: formattedResponse.substring(0, 100),
-                timestamp: new Date().toISOString()
-            });
-
-            return await this.sendResponse(from, formattedResponse);
+            await this.sendResponse(from, formattedResponse);
+            return null;
 
         } catch (error) {
             console.error('❌ Erro ao processar imagem:', {
@@ -450,7 +496,7 @@ class AIServices {
             });
 
             await this.sendResponse(from, formattedResponse);
-            return formattedResponse;
+            return null; // Retorna null para evitar envio duplicado
 
         } catch (error) {
             console.error('❌ Erro ao processar áudio:', {
@@ -466,6 +512,98 @@ class AIServices {
                 'Desculpe, não consegui processar sua mensagem de voz. Por favor, tente novamente ou envie uma mensagem de texto.'
             );
             return null;
+        }
+    }
+
+    async handleReceiptInfo(message) {
+        try {
+            const { from, text, messageId } = message;
+
+            // Busca dados do comprovante no Redis
+            const receiptKey = await this.redisStore.keys(`receipt:*`);
+            if (!receiptKey || receiptKey.length === 0) {
+                await this.sendResponse(
+                    from,
+                    'Desculpe, não encontrei nenhum comprovante pendente. Por favor, envie o comprovante novamente.'
+                );
+                return;
+            }
+
+            const receipt = await this.redisStore.get(receiptKey[0]);
+            if (!receipt) {
+                await this.sendResponse(
+                    from,
+                    'Desculpe, não encontrei os dados do seu comprovante. Por favor, envie o comprovante novamente.'
+                );
+                return;
+            }
+
+            // Tenta extrair número do pedido e nome
+            const orderMatch = text.match(/#?(\d{6,})/);
+            const orderNumber = orderMatch?.[1];
+
+            if (!orderNumber) {
+                await this.sendResponse(
+                    from,
+                    'Por favor, inclua o número do pedido começando com # (exemplo: #123456).'
+                );
+                return;
+            }
+
+            // Remove o número do pedido para pegar o nome
+            const name = text.replace(/#?\d+/, '').trim();
+
+            if (!name || name.length < 5) {
+                await this.sendResponse(
+                    from,
+                    'Por favor, inclua o nome completo do titular da compra.'
+                );
+                return;
+            }
+
+            // Encaminha para o financeiro
+            const { number: financialNumber } = settings.WHATSAPP_CONFIG.departments.financial;
+
+            // Encaminha a imagem original
+            await this.whatsAppService.forwardMessage(receipt.originalMessage, financialNumber);
+
+            // Envia contexto para o financeiro
+            const context = `*Comprovante Recebido*
+📱 De: ${from}
+🛍️ Pedido: #${orderNumber}
+👤 Nome: ${name}
+💳 Valor: ${receipt.info.valor || 'Não identificado'}
+📅 Data: ${receipt.info.data || 'Não identificada'}
+🏦 Banco: ${receipt.info.banco || 'Não identificado'}
+👤 Beneficiário: ${receipt.info.beneficiario || 'Não identificado'}
+🔄 Tipo: ${receipt.info.pix ? 'PIX' : 'Não especificado'}`;
+
+            await this.whatsAppService.sendMessage(financialNumber, context);
+
+            console.log('💼 Comprovante encaminhado para o financeiro:', {
+                messageId: receipt.messageId,
+                from,
+                to: financialNumber,
+                orderNumber,
+                name,
+                timestamp: new Date().toISOString()
+            });
+
+            // Remove o comprovante do Redis
+            await this.redisStore.del(receiptKey[0]);
+
+            // Confirma para o cliente
+            await this.sendResponse(
+                from,
+                '✅ Obrigado! Seu comprovante foi encaminhado para nossa equipe financeira. Em breve faremos a confirmação do pagamento.'
+            );
+
+        } catch (error) {
+            console.error('❌ Erro ao processar informações do comprovante:', error);
+            await this.sendResponse(
+                message.from,
+                'Desculpe, ocorreu um erro ao processar as informações. Por favor, tente novamente.'
+            );
         }
     }
 
