@@ -10,14 +10,25 @@ class NuvemshopService {
     }
 
     initializeClient() {
+        // Garantir que a URL base não termine com /v1
+        const baseURL = NUVEMSHOP_CONFIG.api.url.endsWith('/v1') 
+            ? NUVEMSHOP_CONFIG.api.url.slice(0, -3) 
+            : NUVEMSHOP_CONFIG.api.url;
+
         this.client = axios.create({
-            baseURL: NUVEMSHOP_CONFIG.api.url,
+            baseURL,
             headers: {
-                'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'Authorization': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'Content-Type': 'application/json; charset=utf-8',
                 'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
             },
             timeout: NUVEMSHOP_CONFIG.api.timeout
+        });
+
+        console.log('[Nuvemshop] Inicializando cliente:', {
+            baseURL,
+            storeId: NUVEMSHOP_CONFIG.userId,
+            timestamp: new Date().toISOString()
         });
 
         this.setupInterceptors();
@@ -290,6 +301,13 @@ class NuvemshopService {
      */
     async getOrderByNumber(orderNumber) {
         try {
+            // Primeiro testa a conexão
+            const connectionOk = await this.testConnection();
+            if (!connectionOk) {
+                console.error('[Nuvemshop] Não foi possível buscar o pedido - conexão falhou');
+                return null;
+            }
+
             console.log('[Nuvemshop] Buscando pedido:', {
                 numero: orderNumber,
                 storeId: NUVEMSHOP_CONFIG.userId,
@@ -299,11 +317,35 @@ class NuvemshopService {
             // Remove o "#" se presente e qualquer espaço em branco
             const cleanOrderNumber = orderNumber.replace(/[#\s]/g, '');
 
+            // Primeiro tenta buscar sem filtros para ver se consegue acessar a API
+            const testResponse = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: {
+                    per_page: 1
+                }
+            });
+
+            console.log('[Nuvemshop] Teste de acesso OK:', {
+                status: testResponse.status,
+                totalPedidos: testResponse.data.length,
+                timestamp: new Date().toISOString()
+            });
+
+            // Agora busca o pedido específico
             const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params: {
                     q: cleanOrderNumber,
-                    per_page: 1
+                    per_page: 50,
+                    status: ['open', 'closed', 'cancelled'],
+                    created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() // últimos 30 dias
                 }
+            });
+
+            console.log('[Nuvemshop] Resposta da API:', {
+                url: response.config.url,
+                params: response.config.params,
+                status: response.status,
+                totalPedidos: response.data.length,
+                timestamp: new Date().toISOString()
             });
 
             const orders = response.data;
@@ -313,6 +355,7 @@ class NuvemshopService {
                 console.log('[Nuvemshop] Pedido não encontrado:', {
                     numero: cleanOrderNumber,
                     storeId: NUVEMSHOP_CONFIG.userId,
+                    totalPedidosEncontrados: orders.length,
                     timestamp: new Date().toISOString()
                 });
                 return null;
@@ -619,6 +662,46 @@ class NuvemshopService {
         } catch (error) {
             console.error('[Nuvemshop] Erro ao obter idioma principal:', error);
             return 'pt';
+        }
+    }
+
+    /**
+     * Testa a conexão com a API da Nuvemshop
+     * @returns {Promise<boolean>} true se a conexão está ok
+     */
+    async testConnection() {
+        try {
+            console.log('[Nuvemshop] Testando conexão:', {
+                storeId: NUVEMSHOP_CONFIG.userId,
+                timestamp: new Date().toISOString()
+            });
+
+            // Tenta buscar apenas 1 pedido para testar
+            const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: {
+                    per_page: 1
+                }
+            });
+
+            console.log('[Nuvemshop] Conexão OK:', {
+                status: response.status,
+                totalPedidos: response.data.length,
+                url: response.config.url,
+                storeId: NUVEMSHOP_CONFIG.userId,
+                timestamp: new Date().toISOString()
+            });
+
+            return true;
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao testar conexão:', {
+                erro: error.message,
+                status: error.response?.status,
+                data: error.response?.data,
+                url: error.config?.url,
+                storeId: NUVEMSHOP_CONFIG.userId,
+                timestamp: new Date().toISOString()
+            });
+            return false;
         }
     }
 }
