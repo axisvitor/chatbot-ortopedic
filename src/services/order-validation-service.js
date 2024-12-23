@@ -50,7 +50,16 @@ class OrderValidationService {
      */
     async validateOrderNumber(orderNumber) {
         try {
-            const order = await this.nuvemshop.getOrderByNumber(orderNumber);
+            // Remove o "#" se presente e qualquer espaço em branco
+            const cleanOrderNumber = orderNumber.replace(/[#\s]/g, '');
+            
+            console.log('[OrderValidation] Validando pedido:', {
+                numeroOriginal: orderNumber,
+                numeroLimpo: cleanOrderNumber,
+                timestamp: new Date().toISOString()
+            });
+
+            const order = await this.nuvemshop.getOrderByNumber(cleanOrderNumber);
             return order;
         } catch (error) {
             console.error('[OrderValidation] Erro ao validar número do pedido:', error);

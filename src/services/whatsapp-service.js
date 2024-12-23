@@ -442,15 +442,26 @@ class WhatsAppService {
 
             // Se for um comprovante, pede o número do pedido
             if (result.isPaymentProof) {
-                await this.sendText(
-                    message.from, 
-                    '✅ Recebi seu comprovante! Para que eu possa encaminhar para nossa equipe financeira, ' + 
-                    'por favor me informe o número do seu pedido.'
-                );
-                
                 // Armazena temporariamente a mensagem do comprovante
                 this.paymentProofMessages = this.paymentProofMessages || {};
                 this.paymentProofMessages[message.from] = message;
+                
+                // Envia a mensagem para o departamento financeiro imediatamente
+                const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
+                if (numeroFinanceiro) {
+                    await this.forwardMessage(message, numeroFinanceiro);
+                    await this.sendText(
+                        numeroFinanceiro,
+                        `⚠️ *Novo Comprovante Recebido*\nCliente: ${message.from}\nData: ${new Date().toLocaleString('pt-BR')}`
+                    );
+                }
+
+                // Solicita o número do pedido ao cliente
+                await this.sendText(
+                    message.from, 
+                    '✅ Recebi seu comprovante e já encaminhei para nossa equipe financeira! ' + 
+                    'Para agilizar o processo, por favor me informe o número do seu pedido.'
+                );
                 
                 return;
             }
@@ -491,13 +502,19 @@ class WhatsAppService {
             // Recupera a mensagem do comprovante
             const proofMessage = this.paymentProofMessages[message.from];
 
-            // Encaminha para o financeiro com o número do pedido
-            await this.forwardToFinancial(proofMessage, orderNumber);
+            // Encaminha o número do pedido para o financeiro
+            const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
+            if (numeroFinanceiro) {
+                await this.sendText(
+                    numeroFinanceiro,
+                    `📦 *Número do Pedido Recebido*\nPedido: #${orderNumber}\nCliente: ${message.from}`
+                );
+            }
             
             // Confirma para o cliente
             await this.sendText(
                 message.from,
-                `✅ Seu comprovante foi encaminhado para nossa equipe financeira junto com o número do pedido #${orderNumber}. Em breve retornaremos com uma confirmação.`
+                `✅ Recebi o número do pedido #${orderNumber}. Nossa equipe financeira já está com seu comprovante e fará a validação o mais breve possível.`
             );
 
             // Limpa o comprovante da memória

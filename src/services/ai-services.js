@@ -29,7 +29,7 @@ class AIServices {
                 throw new Error('Mensagem inválida');
             }
 
-            const { type, from } = message;
+            const { type, from, text } = message;
 
             // Log da mensagem recebida
             console.log('📨 Mensagem recebida:', {
@@ -55,16 +55,16 @@ class AIServices {
             await this.redisStore.set(processKey, 'true', 3600);
 
             // Verifica se é um comando especial
-            if (message.text?.toLowerCase() === '#resetid') {
+            if (text?.toLowerCase() === '#resetid') {
                 const response = await this.handleResetCommand(message);
                 await this.sendResponse(from, response);
                 return null;
             }
 
             // Verifica se é uma solicitação de atendimento humano
-            if (message.text?.toLowerCase().includes('atendente') || 
-                message.text?.toLowerCase().includes('humano') || 
-                message.text?.toLowerCase().includes('pessoa')) {
+            if (text?.toLowerCase().includes('atendente') || 
+                text?.toLowerCase().includes('humano') || 
+                text?.toLowerCase().includes('pessoa')) {
                 
                 const isBusinessHours = this.businessHours.isWithinBusinessHours();
                 if (!isBusinessHours) {
@@ -75,10 +75,64 @@ class AIServices {
                 }
             }
 
+            // Verifica se é um CPF (4 últimos dígitos)
+            if (text && /^\d{4}$/.test(text.trim())) {
+                const lastFourCPF = text.trim();
+                const orderKey = `pending_order:${from}`;
+                const pendingOrder = await this.redisStore.get(orderKey);
+
+                if (pendingOrder) {
+                    const isValid = await this.orderValidationService.validateCPF(pendingOrder, lastFourCPF);
+                    if (isValid) {
+                        const order = await this.orderValidationService.validateOrderNumber(pendingOrder);
+                        if (order) {
+                            const orderInfo = this.orderValidationService.formatSafeOrderInfo(order);
+                            const response = this.formatOrderResponse(orderInfo);
+                            await this.sendResponse(from, response);
+                        } else {
+                            await this.sendResponse(from, "Desculpe, não consegui encontrar as informações do pedido. Por favor, tente novamente mais tarde.");
+                        }
+                    } else {
+                        await this.sendResponse(from, "❌ Os últimos 4 dígitos do CPF não correspondem ao pedido informado. Por favor, verifique e tente novamente.");
+                    }
+                    await this.redisStore.del(orderKey);
+                    return null;
+                }
+            }
+
+            // Verifica se é um número de pedido (com ou sem #)
+            if (text) {
+                // Remove o "#" e espaços em branco, se houver
+                const cleanText = text.trim().replace(/[#\s]/g, '');
+                
+                // Verifica se o texto limpo é apenas números
+                if (/^\d+$/.test(cleanText)) {
+                    const orderNumber = cleanText;
+                    const order = await this.orderValidationService.validateOrderNumber(orderNumber);
+                    
+                    if (order) {
+                        // Armazena o número do pedido temporariamente
+                        const orderKey = `pending_order:${from}`;
+                        await this.redisStore.set(orderKey, orderNumber, 300); // 5 minutos de TTL
+                        
+                        await this.sendResponse(from, 
+                            "Por favor, para validar sua identidade, me informe apenas os 4 últimos dígitos do CPF " +
+                            "utilizado na compra."
+                        );
+                        return null;
+                    } else {
+                        await this.sendResponse(from, 
+                            "❌ Não encontrei nenhum pedido com este número. Por favor, verifique se o número está correto e tente novamente."
+                        );
+                        return null;
+                    }
+                }
+            }
+
             // Verifica internamente se o pedido é internacional
-            if (message.text?.toLowerCase().includes('pedido') || message.text?.toLowerCase().includes('encomenda')) {
+            if (text?.toLowerCase().includes('pedido') || text?.toLowerCase().includes('encomenda')) {
                 console.log('🔍 Verificando se é pedido internacional...');
-                const orderIdMatch = message.text.match(/\d+/);
+                const orderIdMatch = text.match(/\d+/);
                 if (orderIdMatch) {
                     const orderId = orderIdMatch[0];
                     console.log('📦 Buscando informações do pedido:', orderId);
