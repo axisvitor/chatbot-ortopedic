@@ -75,58 +75,49 @@ class AIServices {
                 }
             }
 
-            // Verifica se é um CPF (4 últimos dígitos)
-            if (text && /^\d{4}$/.test(text.trim())) {
-                const lastFourCPF = text.trim();
-                const orderKey = `pending_order:${from}`;
-                const pendingOrder = await this.redisStore.get(orderKey);
+            // Verifica se é um número de pedido
+            if (text && /^\d{4,}$/.test(text.trim())) {
+                const orderNumber = text.trim();
+                console.log('🔍 Buscando pedido:', {
+                    numero: orderNumber,
+                    de: from,
+                    timestamp: new Date().toISOString()
+                });
 
-                if (pendingOrder) {
-                    const isValid = await this.orderValidationService.validateCPF(pendingOrder, lastFourCPF);
-                    if (isValid) {
-                        const order = await this.orderValidationService.validateOrderNumber(pendingOrder);
-                        if (order) {
-                            const orderInfo = this.orderValidationService.formatSafeOrderInfo(order);
-                            const response = this.formatOrderResponse(orderInfo);
-                            await this.sendResponse(from, response);
-                        } else {
-                            await this.sendResponse(from, "Desculpe, não consegui encontrar as informações do pedido. Por favor, tente novamente mais tarde.");
-                        }
-                    } else {
-                        await this.sendResponse(from, "❌ Os últimos 4 dígitos do CPF não correspondem ao pedido informado. Por favor, verifique e tente novamente.");
-                    }
-                    await this.redisStore.del(orderKey);
+                const order = await this.orderValidationService.validateOrderNumber(orderNumber);
+                if (order) {
+                    // Armazena o número do pedido temporariamente para contexto
+                    const orderKey = `pending_order:${from}`;
+                    await this.redisStore.set(orderKey, orderNumber, 300); // 5 minutos de TTL
+                    
+                    const response = this.orderValidationService.formatOrderMessage(order);
+                    await this.sendResponse(from, response);
+                    
+                    // Log do pedido armazenado
+                    console.log('💾 Pedido armazenado temporariamente:', {
+                        numero: orderNumber,
+                        de: from,
+                        chave: orderKey,
+                        ttl: '5 minutos',
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    return null;
+                } else {
+                    await this.sendResponse(from, "Desculpe, não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.");
                     return null;
                 }
             }
 
-            // Verifica se é um número de pedido (com ou sem #)
-            if (text) {
-                // Remove o "#" e espaços em branco, se houver
-                const cleanText = text.trim().replace(/[#\s]/g, '');
-                
-                // Verifica se o texto limpo é apenas números
-                if (/^\d+$/.test(cleanText)) {
-                    const orderNumber = cleanText;
-                    const order = await this.orderValidationService.validateOrderNumber(orderNumber);
-                    
-                    if (order) {
-                        // Armazena o número do pedido temporariamente
-                        const orderKey = `pending_order:${from}`;
-                        await this.redisStore.set(orderKey, orderNumber, 300); // 5 minutos de TTL
-                        
-                        await this.sendResponse(from, 
-                            "Por favor, para validar sua identidade, me informe apenas os 4 últimos dígitos do CPF " +
-                            "utilizado na compra."
-                        );
-                        return null;
-                    } else {
-                        await this.sendResponse(from, 
-                            "❌ Não encontrei nenhum pedido com este número. Por favor, verifique se o número está correto e tente novamente."
-                        );
-                        return null;
-                    }
-                }
+            // Verifica se há um pedido pendente para o usuário
+            const orderKey = `pending_order:${from}`;
+            const pendingOrder = await this.redisStore.get(orderKey);
+            if (pendingOrder) {
+                console.log('📦 Pedido pendente encontrado:', {
+                    numero: pendingOrder,
+                    de: from,
+                    timestamp: new Date().toISOString()
+                });
             }
 
             // Verifica internamente se o pedido é internacional
