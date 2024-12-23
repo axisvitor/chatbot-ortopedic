@@ -89,14 +89,18 @@ class GroqServices {
                                 text: 'Analise esta imagem em detalhes e me diga o que você vê.'
                             },
                             {
-                                type: 'image',
+                                type: 'image_url',
                                 image_url: {
                                     url: `data:${imageFormat};base64,${base64Image}`
                                 }
                             }
                         ]
                     }
-                ]
+                ],
+                temperature: 0.7,
+                max_tokens: 1024,
+                top_p: 1,
+                stream: false
             };
 
             const response = await this.axios.post(GROQ_CONFIG.visionUrl, payload, {

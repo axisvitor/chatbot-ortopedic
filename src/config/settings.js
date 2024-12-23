@@ -17,7 +17,7 @@ const OPENAI_CONFIG = {
 const GROQ_CONFIG = {
     apiKey: validateEnvVar('GROQ_API_KEY'),
     models: {
-        vision: 'llama-3.2-90b-vision-preview',
+        vision: 'llama-3.2-11b-vision-preview',
         audio: 'whisper-large-v3-turbo',
         chat: 'llama-3.2-90b-chat'
     },
@@ -26,10 +26,10 @@ const GROQ_CONFIG = {
         response_format: 'text',
         temperature: 0.0
     },
-    baseUrl: 'https://api.groq.com/v1',
+    baseUrl: 'https://api.groq.com/openai/v1',
     get chatUrl() { return `${this.baseUrl}/chat/completions` },
     get embeddingsUrl() { return `${this.baseUrl}/embeddings` },
-    get visionUrl() { return `${this.baseUrl}/vision/completions` },
+    get visionUrl() { return `${this.baseUrl}/chat/completions` },
     get audioUrl() { return `${this.baseUrl}/audio/transcriptions` }
 };
 
