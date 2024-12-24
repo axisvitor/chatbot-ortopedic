@@ -283,38 +283,10 @@ class AIServices {
                         return null;
                     }
 
-                    const order = await this.orderValidationService.validateOrderNumber(orderNumber);
-                    if (order) {
-                        // Reseta tentativas em caso de sucesso
-                        await this.orderValidationService.resetAttempts(from);
-
-                        console.log('✅ Pedido encontrado:', {
-                            numero: orderNumber,
-                            cliente: order.customer?.name,
-                            status: order.status,
-                            timestamp: new Date().toISOString()
-                        });
-                        
-                        // Armazena o número do pedido temporariamente para contexto
-                        const orderKey = `pending_order:${from}`;
-                        await this.redisStore.set(orderKey, orderNumber);
-                        
-                        const response = this.orderValidationService.formatOrderMessage(order);
-                        await this.sendResponse(from, response);
-                        
-                        // Log do pedido armazenado
-                        console.log('💾 Pedido armazenado:', {
-                            numero: orderNumber,
-                            de: from,
-                            chave: orderKey,
-                            timestamp: new Date().toISOString()
-                        });
-                        
-                        return null;
-                    } else {
-                        // Incrementa tentativas em caso de falha
+                    // Valida o pedido usando o serviço de validação
+                    const validatedOrder = await this.orderValidationService.validateOrderNumber(orderNumber);
+                    if (!validatedOrder) {
                         await this.orderValidationService.incrementAttempts(from);
-
                         console.log('❌ Pedido não encontrado:', {
                             numero: orderNumber,
                             textoOriginal: text,
@@ -325,6 +297,38 @@ class AIServices {
                         await this.sendResponse(from, "Desculpe, não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.");
                         return null;
                     }
+
+                    // Reseta tentativas em caso de sucesso
+                    await this.orderValidationService.resetAttempts(from);
+
+                    // Formata a mensagem de resposta
+                    const response = await this.orderValidationService.formatOrderMessage(validatedOrder);
+                    if (!response) {
+                        console.error('❌ Erro ao formatar mensagem:', {
+                            numero: orderNumber,
+                            de: from,
+                            timestamp: new Date().toISOString()
+                        });
+                        await this.sendResponse(from, "Desculpe, houve um erro ao processar as informações do pedido. Por favor, tente novamente.");
+                        return null;
+                    }
+                    
+                    // Armazena o número do pedido temporariamente para contexto
+                    const orderKey = `pending_order:${from}`;
+                    await this.redisStore.set(orderKey, orderNumber);
+                    
+                    // Envia a resposta
+                    await this.sendResponse(from, response);
+                    
+                    // Log do pedido armazenado
+                    console.log('💾 Pedido armazenado:', {
+                        numero: orderNumber,
+                        de: from,
+                        chave: orderKey,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    return null;
                 }
             }
 

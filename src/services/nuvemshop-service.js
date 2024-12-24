@@ -75,7 +75,7 @@ class NuvemshopService {
 
     async getOrderByNumber(orderNumber) {
         try {
-            const cleanOrderNumber = orderNumber.replace(/[#\s]/g, '');
+            const cleanOrderNumber = String(orderNumber).replace(/[#\s]/g, '');
             
             console.log('[Nuvemshop] Buscando pedido:', {
                 numero: cleanOrderNumber,
@@ -86,22 +86,28 @@ class NuvemshopService {
             const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params: {
                     q: cleanOrderNumber,
-                    per_page: 50,  // Aumentar para ter mais chances de encontrar
-                    created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() // últimos 30 dias
+                    per_page: 50,
+                    created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
                 }
             });
 
             if (response.data && Array.isArray(response.data)) {
-                // Busca mais flexível
                 const order = response.data.find(o => String(o.number) === cleanOrderNumber);
                 
                 if (order) {
+                    // Log detalhado do pedido encontrado
                     console.log('[Nuvemshop] Pedido encontrado:', {
                         numero: cleanOrderNumber,
                         pedidoId: order.id,
                         status: order.status,
-                        cliente: order.customer?.name || 'Não informado'
+                        cliente: order.customer?.name || order.client_details?.name || 'Não informado',
+                        produtos: order.products?.length || 0,
+                        timestamp: new Date().toISOString()
                     });
+
+                    // Log do pedido completo para debug
+                    console.log('[Nuvemshop] Dados completos do pedido:', JSON.stringify(order, null, 2));
+
                     return order;
                 }
             }
@@ -113,8 +119,9 @@ class NuvemshopService {
             return null;
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
-                numero: cleanOrderNumber,
+                numero: orderNumber,
                 erro: error.message,
+                stack: error.stack,
                 resposta: error.response?.data,
                 timestamp: new Date().toISOString()
             });
@@ -136,6 +143,7 @@ class NuvemshopService {
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar detalhes do pedido:', {
                 erro: error.message,
+                stack: error.stack,
                 pedidoId: orderId,
                 status: error.response?.status,
                 data: error.response?.data,
@@ -198,7 +206,12 @@ class NuvemshopService {
                 return customerPhone && customerPhone.includes(cleanPhone);
             });
         } catch (error) {
-            console.error('[Nuvemshop] Erro ao buscar pedidos por telefone:', error);
+            console.error('[Nuvemshop] Erro ao buscar pedidos por telefone:', {
+                erro: error.message,
+                stack: error.stack,
+                telefone: phone,
+                timestamp: new Date().toISOString()
+            });
             return [];
         }
     }
@@ -208,17 +221,25 @@ class NuvemshopService {
             const order = await this.getOrder(orderId);
             return order && order.payment_status === 'pending';
         } catch (error) {
-            console.error('[Nuvemshop] Erro ao verificar status de pagamento:', error);
+            console.error('[Nuvemshop] Erro ao verificar status de pagamento:', {
+                erro: error.message,
+                stack: error.stack,
+                pedidoId: orderId,
+                timestamp: new Date().toISOString()
+            });
             return false;
         }
     }
 
     /**
      * Formata o status do pedido para exibição
-     * @param {string} status - Status original
+     * @param {string} status - Status original do pedido
      * @returns {string} Status formatado
      */
     formatOrderStatus(status) {
+        if (!status) return 'Não disponível';
+
+        // Mapa completo de status
         const statusMap = {
             // Status do pedido
             'open': 'Em aberto',
@@ -239,10 +260,19 @@ class NuvemshopService {
             'partially_shipped': 'Parcialmente enviado',
             'ready_to_ship': 'Pronto para envio',
             'in_transit': 'Em trânsito',
-            'delivered': 'Entregue'
+            'delivered': 'Entregue',
+            'ready_for_pickup': 'Pronto para retirada',
+            'packed': 'Embalado'
         };
 
-        return statusMap[status?.toLowerCase()] || status || 'Status desconhecido';
+        // Log para debug
+        console.log('🔄 Formatando status:', {
+            original: status,
+            formatado: statusMap[status?.toLowerCase()] || status,
+            timestamp: new Date().toISOString()
+        });
+
+        return statusMap[status?.toLowerCase()] || status;
     }
 
     /**
@@ -250,11 +280,12 @@ class NuvemshopService {
      * @param {number} price - Preço a ser formatado
      * @returns {string} Preço formatado
      */
-    formatPrice(price) {
+    formatPrice(value) {
+        if (!value) return 'R$ 0,00';
         return new Intl.NumberFormat('pt-BR', {
             style: 'currency',
             currency: 'BRL'
-        }).format(price);
+        }).format(value);
     }
 
     /**
@@ -298,7 +329,12 @@ class NuvemshopService {
             
             return data;
         } catch (error) {
-            console.error('[Nuvemshop] Erro ao obter dados:', error);
+            console.error('[Nuvemshop] Erro ao obter dados:', {
+                erro: error.message,
+                stack: error.stack,
+                cacheKey: cacheKey,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }
@@ -317,7 +353,12 @@ class NuvemshopService {
                 console.log(`[Nuvemshop] Cache invalidado: ${keys.length} chaves`);
             }
         } catch (error) {
-            console.error('[Nuvemshop] Erro ao invalidar cache:', error);
+            console.error('[Nuvemshop] Erro ao invalidar cache:', {
+                erro: error.message,
+                stack: error.stack,
+                prefix: prefix,
+                timestamp: new Date().toISOString()
+            });
         }
     }
 
@@ -613,6 +654,7 @@ class NuvemshopService {
         } catch (error) {
             console.error('[Nuvemshop] Erro ao testar conexão:', {
                 erro: error.message,
+                stack: error.stack,
                 status: error.response?.status,
                 data: error.response?.data,
                 url: error.config?.url,
