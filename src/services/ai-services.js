@@ -39,6 +39,66 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
+            // Verifica se já existe um thread para este usuário
+            const threadKey = `chat:${from}`;
+            let chatHistory;
+            try {
+                const rawHistory = await this.redisStore.get(threadKey);
+                chatHistory = typeof rawHistory === 'string' ? JSON.parse(rawHistory) : rawHistory;
+                
+                console.log('📜 Histórico recuperado:', {
+                    key: threadKey,
+                    threadId: chatHistory?.threadId,
+                    mensagens: chatHistory?.messages?.length || 0,
+                    ultimaMensagem: chatHistory?.messages?.[0]?.content?.substring(0, 100),
+                    ultimaAtualizacao: chatHistory?.lastUpdate,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('❌ Erro ao buscar histórico:', {
+                    erro: error.message,
+                    key: threadKey,
+                    timestamp: new Date().toISOString()
+                });
+                chatHistory = null;
+            }
+
+            let threadId = chatHistory?.threadId;
+            
+            // Se não existe thread ou dados estão inválidos, cria um novo
+            if (!threadId) {
+                console.log('🔄 Criando novo thread:', {
+                    key: threadKey,
+                    from,
+                    timestamp: new Date().toISOString()
+                });
+
+                const thread = await this.openAIService.createThread();
+                threadId = thread.id;
+                chatHistory = {
+                    threadId,
+                    lastUpdate: new Date().toISOString(),
+                    messages: []
+                };
+
+                console.log('💾 Salvando novo histórico:', {
+                    key: threadKey,
+                    threadId,
+                    timestamp: new Date().toISOString()
+                });
+
+                await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
+            }
+
+            // Log do histórico
+            console.log('📜 Histórico do chat:', {
+                key: threadKey,
+                threadId,
+                lastUpdate: chatHistory.lastUpdate,
+                numeroMensagens: chatHistory.messages?.length || 0,
+                timestamp: new Date().toISOString()
+            });
+
             // Verifica se a mensagem já foi processada
             const processKey = `ai_processed:${message.messageId}`;
             const wasProcessed = await this.redisStore.get(processKey);
@@ -52,7 +112,71 @@ class AIServices {
             }
 
             // Marca a mensagem como processada antes de continuar
-            await this.redisStore.set(processKey, 'true', 3600);
+            await this.redisStore.set(processKey, 'true');
+
+            // Se for mensagem de áudio, processa com Whisper
+            if (message.audioMessage) {
+                const transcription = await this.handleAudioMessage(message);
+                if (transcription) {
+                    // Adiciona a transcrição ao thread
+                    await this.openAIService.addMessage(threadId, {
+                        role: 'user',
+                        content: transcription
+                    });
+                    
+                    // Executa o assistant e aguarda resposta
+                    const run = await this.openAIService.runAssistant(threadId);
+                    const response = await this.openAIService.waitForResponse(threadId, run.id);
+
+                    // Atualiza o histórico com a transcrição e resposta
+                    chatHistory.messages = chatHistory.messages || [];
+                    chatHistory.messages.unshift(
+                        {
+                            role: 'user',
+                            content: transcription,
+                            type: 'audio',
+                            timestamp: new Date().toISOString()
+                        },
+                        {
+                            role: 'assistant',
+                            content: response,
+                            timestamp: new Date().toISOString()
+                        }
+                    );
+                    
+                    chatHistory.lastUpdate = new Date().toISOString();
+                    console.log('💾 Salvando histórico de áudio:', {
+                        key: threadKey,
+                        threadId,
+                        mensagens: chatHistory.messages.length,
+                        timestamp: new Date().toISOString()
+                    });
+                    await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
+
+                    // Log da resposta
+                    console.log('📤 Enviando resposta para áudio:', {
+                        messageId: message.messageId,
+                        from: message.from,
+                        threadId,
+                        transcriptionLength: transcription.length,
+                        responseLength: response.length,
+                        preview: response.substring(0, 100),
+                        timestamp: new Date().toISOString()
+                    });
+
+                    await this.sendResponse(from, response);
+                }
+                return null;
+            }
+
+            // Se for mensagem de imagem, processa com Vision
+            if (message.imageMessage) {
+                const response = await this.handleImageMessage(message);
+                if (response) {
+                    await this.sendResponse(from, response);
+                }
+                return null;
+            }
 
             // Verifica se é um comando especial
             if (text?.toLowerCase() === '#resetid') {
@@ -88,7 +212,7 @@ class AIServices {
                 if (order) {
                     // Armazena o número do pedido temporariamente para contexto
                     const orderKey = `pending_order:${from}`;
-                    await this.redisStore.set(orderKey, orderNumber, 300); // 5 minutos de TTL
+                    await this.redisStore.set(orderKey, orderNumber); // expira em 5 minutos
                     
                     const response = this.orderValidationService.formatOrderMessage(order);
                     await this.sendResponse(from, response);
@@ -98,7 +222,6 @@ class AIServices {
                         numero: orderNumber,
                         de: from,
                         chave: orderKey,
-                        ttl: '5 minutos',
                         timestamp: new Date().toISOString()
                     });
                     
@@ -107,17 +230,6 @@ class AIServices {
                     await this.sendResponse(from, "Desculpe, não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.");
                     return null;
                 }
-            }
-
-            // Verifica se há um pedido pendente para o usuário
-            const orderKey = `pending_order:${from}`;
-            const pendingOrder = await this.redisStore.get(orderKey);
-            if (pendingOrder) {
-                console.log('📦 Pedido pendente encontrado:', {
-                    numero: pendingOrder,
-                    de: from,
-                    timestamp: new Date().toISOString()
-                });
             }
 
             // Verifica internamente se o pedido é internacional
@@ -156,9 +268,9 @@ class AIServices {
                     if (trackingInfo) {
                         // Armazena para consultas futuras
                         const trackingKey = `tracking:${from}`;
-                        await this.redisStore.set(trackingKey, trackingNumber, 3600);
+                        await this.redisStore.set(trackingKey, trackingNumber);
                         
-                        response = this.formatOrderTrackingResponse(trackingInfo);
+                        const response = this.formatOrderTrackingResponse(trackingInfo);
                         await this.sendResponse(from, response);
                         return null;
                     }
@@ -172,7 +284,7 @@ class AIServices {
                     if (savedTracking) {
                         const trackingInfo = await this.trackingService.getTrackingStatus(savedTracking);
                         if (trackingInfo) {
-                            response = this.formatOrderTrackingResponse(trackingInfo);
+                            const response = this.formatOrderTrackingResponse(trackingInfo);
                             await this.sendResponse(from, response);
                             return null;
                         }
@@ -198,95 +310,77 @@ class AIServices {
                     
                     const trackingInfo = await this.trackingService.getTrackingStatus(trackingNumber);
                     if (trackingInfo) {
-                        response = this.formatOrderTrackingResponse(trackingInfo);
+                        const response = this.formatOrderTrackingResponse(trackingInfo);
                         await this.sendResponse(from, response);
                         return null;
                     }
                 }
             }
 
-            // Processa a mensagem com base no tipo
-            let response;
-            if (type === 'image') {
-                response = await this.handleImageMessage(message);
-            } else if (type === 'audio') {
-                const transcription = await this.handleAudioMessage(message);
-                if (transcription) {
-                    // Busca ou cria thread
-                    const threadKey = `chat:${from}`;
-                    const chatHistory = await this.redisStore.get(threadKey);
-                    const threadId = chatHistory?.threadId || (await this.openAIService.createThread()).id;
-                    
-                    // Adiciona a transcrição ao thread
-                    await this.openAIService.addMessage(threadId, {
-                        role: 'user',
-                        content: transcription
-                    });
-                    
-                    // Executa o assistant e aguarda resposta
-                    const run = await this.openAIService.runAssistant(threadId);
-                    response = await this.openAIService.waitForResponse(threadId, run.id);
-
-                    // Salva o thread no Redis
-                    await this.redisStore.set(threadKey, {
-                        threadId,
-                        lastUpdate: new Date().toISOString()
-                    });
-
-                    // Log da resposta
-                    console.log('📤 Enviando resposta para áudio:', {
-                        messageId: message.messageId,
-                        from: message.from,
-                        threadId,
-                        transcriptionLength: transcription.length,
-                        responseLength: response.length,
-                        preview: response.substring(0, 100),
-                        timestamp: new Date().toISOString()
-                    });
-                }
-            } else {
-                // Busca histórico do chat no Redis
-                const chatKey = `chat:${from}`;
-                const chatHistory = await this.redisStore.get(chatKey);
-                console.log('🔄 Buscando histórico do chat:', {
-                    key: chatKey,
-                    numeroMensagens: chatHistory?.messages?.length || 0,
-                    ultimaMensagem: chatHistory?.messages?.[0]?.content
+            // Verifica se há um pedido pendente para o usuário
+            const orderKey = `pending_order:${from}`;
+            const pendingOrder = await this.redisStore.get(orderKey);
+            if (pendingOrder) {
+                console.log('📦 Pedido pendente encontrado:', {
+                    numero: pendingOrder,
+                    de: from,
+                    timestamp: new Date().toISOString()
                 });
+            }
 
-                // Cria um novo thread ou usa o existente
-                const threadId = chatHistory?.threadId || (await this.openAIService.createThread()).id;
-                
-                // Adiciona a mensagem ao thread
-                await this.openAIService.addMessage(threadId, {
+            // Adiciona a mensagem ao thread
+            console.log('💬 Adicionando mensagem:', {
+                threadId,
+                from,
+                messageId: message.messageId,
+                tipo: text ? 'texto' : message.audioMessage ? 'audio' : message.imageMessage ? 'imagem' : 'desconhecido',
+                preview: text?.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+
+            await this.openAIService.addMessage(threadId, {
+                role: 'user',
+                content: text || 'Mensagem sem texto'
+            });
+
+            // Executa o assistant
+            const run = await this.openAIService.runAssistant(threadId);
+            
+            // Aguarda e obtém a resposta
+            const response = await this.openAIService.waitForResponse(threadId, run.id);
+
+            // Atualiza o histórico com a mensagem e resposta
+            chatHistory.messages = chatHistory.messages || [];
+            chatHistory.messages.unshift(
+                {
                     role: 'user',
-                    content: message.text || 'Mensagem sem texto'
-                });
-                
-                // Executa o assistant
-                const run = await this.openAIService.runAssistant(threadId);
-                
-                // Aguarda a resposta
-                response = await this.openAIService.waitForResponse(threadId, run.id);
-                
-                // Salva o histórico atualizado
-                await this.redisStore.set(chatKey, {
-                    threadId,
-                    lastUpdate: new Date().toISOString()
-                });
-            }
+                    content: text || 'Mensagem sem texto',
+                    type: 'text',
+                    timestamp: new Date().toISOString()
+                },
+                {
+                    role: 'assistant',
+                    content: response,
+                    timestamp: new Date().toISOString()
+                }
+            );
+            
+            chatHistory.lastUpdate = new Date().toISOString();
+            console.log('💾 Salvando histórico:', {
+                key: threadKey,
+                threadId,
+                mensagens: chatHistory.messages.length,
+                ultimaMensagem: chatHistory.messages[0].content.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+            await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
 
-            // Se não houver resposta, loga e retorna
-            if (!response) {
-                console.log('⚠️ Nenhuma resposta gerada');
-                return null;
-            }
-
-            // Se a resposta for um objeto de erro, envia apenas a mensagem
-            if (typeof response === 'object' && response.error) {
-                await this.sendResponse(from, response.message);
-                return null;
-            }
+            console.log('🤖 Resposta do Assistant:', {
+                threadId,
+                runId: run.id,
+                preview: response?.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
 
             // Envia a resposta
             await this.sendResponse(from, response);
@@ -298,16 +392,7 @@ class AIServices {
                 stack: error.stack,
                 timestamp: new Date().toISOString()
             });
-
-            // Tenta enviar mensagem de erro
-            if (message && message.from) {
-                await this.sendResponse(
-                    message.from,
-                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
-                );
-            }
-            
-            return null;
+            throw error;
         }
     }
 
@@ -378,8 +463,8 @@ class AIServices {
     async handleResetCommand(message) {
         try {
             // Pega o threadId atual
-            const threadKey = `thread:${message.from}`;
-            const currentThreadId = await this.redisStore.get(threadKey);
+            const threadKey = `chat:${message.from}`;
+            const currentThreadId = await this.redisStore.get(threadKey)?.threadId;
             
             // Se existir um thread antigo, tenta deletá-lo
             if (currentThreadId) {
@@ -390,7 +475,10 @@ class AIServices {
             const newThread = await this.openAIService.createThread();
             
             // Salva o novo threadId no Redis
-            await this.redisStore.set(threadKey, newThread.id);
+            await this.redisStore.set(threadKey, {
+                threadId: newThread.id,
+                lastUpdate: new Date().toISOString()
+            });
             
             // Limpa outras chaves relacionadas ao usuário
             const userPrefix = `user:${message.from}:*`;
@@ -521,8 +609,8 @@ class AIServices {
                     timestamp: new Date().toISOString()
                 };
 
-                await this.redisStore.set(`receipt:${from}`, JSON.stringify(info), 3600); // expira em 1 hora
-
+                await this.redisStore.set(`receipt:${from}`, JSON.stringify(info));
+                
                 // Envia mensagem pedindo o número do pedido
                 await this.sendResponse(
                     from,
