@@ -107,50 +107,49 @@ class WhatsAppService {
 
     /**
      * Envia uma mensagem de texto
+     * @param {string} to - Número do destinatário
+     * @param {string} text - Texto da mensagem
+     * @returns {Promise<Object>} Resposta do servidor
      */
     async sendText(to, text) {
         try {
-            // Gera um ID único para a mensagem
-            const messageId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            
-            console.log(' Enviando mensagem:', {
-                para: to,
-                texto: text.substring(0, 100),
-                messageId,
-                timestamp: new Date().toISOString()
-            });
-
-            if (!to || !text) {
-                console.error('[WhatsApp] Parâmetros inválidos:', { to, text });
-                return null;
-            }
-
-            // Garante que a mensagem é uma string
-            const messageText = String(text);
-
-            // Garante que o cliente está inicializado
             const client = await this.getClient();
             if (!client) {
-                throw new Error('Cliente WhatsApp não inicializado');
+                throw new Error('Cliente HTTP não inicializado');
             }
 
-            console.log('[WhatsApp] Iniciando envio de mensagem:', {
+            const messageText = String(text);
+
+            console.log(' Enviando mensagem:', {
                 para: to,
-                previewMensagem: messageText.substring(0, 100),
-                chaveConexao: this.connectionKey,
+                texto: messageText,
+                messageId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 timestamp: new Date().toISOString()
             });
 
             const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
+            console.log('[WhatsApp] Iniciando envio de mensagem:', {
+                para: to,
+                previewMensagem: messageText.slice(0, 100) + (messageText.length > 100 ? '...' : ''),
+                chaveConexao: this.connectionKey,
+                timestamp: new Date().toISOString()
+            });
+
             console.log('[WhatsApp] Endpoint:', endpoint);
 
-            // Formata o número de telefone se necessário
             const phoneNumber = to.includes('@') ? to.split('@')[0] : to;
 
             const response = await client.post(endpoint, {
                 phoneNumber,
                 text: messageText
             });
+
+            // Verifica erro de conta
+            if (response.data?.error && response.data?.message?.includes('conta')) {
+                console.log('🔄 Erro de conta, reinicializando conexão...');
+                await this.init();
+                return this.sendText(to, text);
+            }
 
             console.log('[WhatsApp] Resposta do servidor:', {
                 status: response.status,
@@ -159,10 +158,10 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            await this.delay();
             return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar mensagem:', {
+            console.error('❌ Erro ao enviar mensagem:', {
+                para: to,
                 erro: error.message,
                 status: error.response?.status,
                 data: error.response?.data,
@@ -170,14 +169,52 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            // Se for erro de conexão, tenta reinicializar o cliente
-            if (error.code === 'ECONNREFUSED' || error.response?.status === 403) {
-                console.log('[WhatsApp] Tentando reinicializar o cliente...');
+            // Verifica erro de conta no catch
+            if (error.response?.data?.error && error.response?.data?.message?.includes('conta')) {
+                console.log('🔄 Erro de conta no catch, reinicializando conexão...');
                 await this.init();
-                return this.sendText(to, text); // Tenta enviar novamente
+                return this.sendText(to, text);
             }
 
             throw error;
+        }
+    }
+
+    async init() {
+        try {
+            console.log('🔄 Inicializando WhatsApp Service...');
+            
+            // Reseta contadores
+            this.retryCount = 0;
+            this.connectionKey = WHATSAPP_CONFIG.connectionKey;
+
+            // Inicializa cliente HTTP
+            this.client = axios.create({
+                baseURL: WHATSAPP_CONFIG.apiUrl,
+                headers: {
+                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });
+
+            // Adiciona interceptors
+            this.addInterceptor();
+
+            console.log('✅ WhatsApp Service inicializado:', {
+                baseUrl: WHATSAPP_CONFIG.apiUrl,
+                chaveConexao: this.connectionKey,
+                timestamp: new Date().toISOString()
+            });
+
+            return true;
+        } catch (error) {
+            console.error('❌ Erro ao inicializar WhatsApp Service:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            return false;
         }
     }
 
