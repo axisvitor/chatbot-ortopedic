@@ -44,6 +44,40 @@ class OrderValidationService {
     }
 
     /**
+     * Verifica se o texto é um número de pedido válido
+     * @param {string} text - Texto a ser verificado
+     * @returns {boolean} True se for número de pedido válido
+     */
+    isValidOrderNumber(text) {
+        if (!text) return false;
+        
+        // Remove caracteres especiais e espaços
+        const cleanText = text.replace(/[^0-9]/g, '');
+        
+        // Verifica se é um número com pelo menos 4 dígitos
+        return /^\d{4,}$/.test(cleanText);
+    }
+
+    /**
+     * Extrai número do pedido do texto
+     * @param {string} text - Texto com número do pedido
+     * @returns {string|null} Número do pedido ou null
+     */
+    extractOrderNumber(text) {
+        if (!text) return null;
+        
+        // Remove caracteres especiais e espaços
+        const cleanText = text.replace(/[^0-9]/g, '');
+        
+        // Retorna se for um número válido
+        if (this.isValidOrderNumber(cleanText)) {
+            return cleanText;
+        }
+        
+        return null;
+    }
+
+    /**
      * Valida número do pedido
      * @param {string} orderNumber - Número do pedido
      * @returns {Promise<Object|null>} Pedido ou null se não encontrado

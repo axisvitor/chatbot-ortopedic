@@ -268,20 +268,40 @@ class AIServices {
             }
 
             // Verifica se é um número de pedido
-            if (this.orderValidationService.isValidOrderNumber(text)) {
+            const orderNumber = this.orderValidationService.extractOrderNumber(text);
+            if (orderNumber) {
                 console.log('🔍 Buscando pedido:', {
-                    numero: text,
+                    numero: orderNumber,
                     textoOriginal: text,
                     de: from,
                     timestamp: new Date().toISOString()
                 });
 
-                const order = await this.orderValidationService.validateOrderNumber(text);
+                // Verifica tentativas de validação
+                const isBlocked = await this.orderValidationService.checkAttempts(from);
+                if (isBlocked) {
+                    console.log('🚫 Usuário bloqueado por muitas tentativas:', {
+                        numero: from,
+                        timestamp: new Date().toISOString()
+                    });
+                    await this.sendResponse(from, 'Você excedeu o número máximo de tentativas. Por favor, aguarde alguns minutos antes de tentar novamente.');
+                    return null;
+                }
+
+                const order = await this.orderValidationService.validateOrderNumber(orderNumber);
                 if (order) {
+                    // Reseta tentativas em caso de sucesso
+                    await this.orderValidationService.resetAttempts(from);
+
                     const response = await this.orderValidationService.formatOrderMessage(order, from);
                     await this.sendResponse(from, response);
                     return null;
                 }
+
+                // Incrementa tentativas em caso de falha
+                await this.orderValidationService.incrementAttempts(from);
+                await this.sendResponse(from, "Desculpe, não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.");
+                return null;
             }
 
             // Verifica se é uma pergunta sobre pedido ou se é pedido internacional
@@ -344,8 +364,8 @@ class AIServices {
 
                     const order = await this.orderValidationService.validateOrderNumber(pendingOrder);
                     if (order) {
-                        const response = this.orderValidationService.formatOrderMessage(order);
-                        await this.sendResponse(from, response);
+                        const orderResponse = await this.orderValidationService.formatOrderMessage(order);
+                        await this.sendResponse(from, orderResponse);
                         return null;
                     }
                 }
