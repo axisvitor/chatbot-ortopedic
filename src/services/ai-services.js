@@ -200,35 +200,54 @@ class AIServices {
             }
 
             // Verifica se é um número de pedido
-            if (text && /^\d{4,}$/.test(text.trim())) {
-                const orderNumber = text.trim();
-                console.log('🔍 Buscando pedido:', {
-                    numero: orderNumber,
-                    de: from,
-                    timestamp: new Date().toISOString()
-                });
-
-                const order = await this.orderValidationService.validateOrderNumber(orderNumber);
-                if (order) {
-                    // Armazena o número do pedido temporariamente para contexto
-                    const orderKey = `pending_order:${from}`;
-                    await this.redisStore.set(orderKey, orderNumber); // expira em 5 minutos
-                    
-                    const response = this.orderValidationService.formatOrderMessage(order);
-                    await this.sendResponse(from, response);
-                    
-                    // Log do pedido armazenado
-                    console.log('💾 Pedido armazenado temporariamente:', {
+            if (text) {
+                // Remove caracteres especiais e espaços
+                const cleanText = text.replace(/[^0-9]/g, '');
+                if (/^\d{4,}$/.test(cleanText)) {
+                    const orderNumber = cleanText;
+                    console.log('🔍 Buscando pedido:', {
                         numero: orderNumber,
+                        textoOriginal: text,
                         de: from,
-                        chave: orderKey,
                         timestamp: new Date().toISOString()
                     });
-                    
-                    return null;
-                } else {
-                    await this.sendResponse(from, "Desculpe, não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.");
-                    return null;
+
+                    const order = await this.orderValidationService.validateOrderNumber(orderNumber);
+                    if (order) {
+                        // Armazena o número do pedido temporariamente para contexto
+                        const orderKey = `pending_order:${from}`;
+                        await this.redisStore.set(orderKey, orderNumber);
+                        
+                        console.log('✅ Pedido encontrado:', {
+                            numero: orderNumber,
+                            cliente: order.client_details?.name,
+                            status: order.status,
+                            timestamp: new Date().toISOString()
+                        });
+                        
+                        const response = this.orderValidationService.formatOrderMessage(order);
+                        await this.sendResponse(from, response);
+                        
+                        // Log do pedido armazenado
+                        console.log('💾 Pedido armazenado:', {
+                            numero: orderNumber,
+                            de: from,
+                            chave: orderKey,
+                            timestamp: new Date().toISOString()
+                        });
+                        
+                        return null;
+                    } else {
+                        console.log('❌ Pedido não encontrado:', {
+                            numero: orderNumber,
+                            textoOriginal: text,
+                            de: from,
+                            timestamp: new Date().toISOString()
+                        });
+                        
+                        await this.sendResponse(from, "Desculpe, não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.");
+                        return null;
+                    }
                 }
             }
 
@@ -414,15 +433,25 @@ class AIServices {
                 if (response.success !== undefined && response.messageId) {
                     return response;
                 }
-                messageText = response.message || response.text || response.content || 'Erro: Resposta inválida';
+                messageText = response.message || response.text || response.content || 'Não foi possível processar sua solicitação. Por favor, tente novamente.';
             }
 
             // Garante que a mensagem é uma string
-            messageText = String(messageText);
+            messageText = String(messageText).trim();
+
+            // Não envia mensagens vazias
+            if (!messageText) {
+                console.error('❌ Mensagem vazia:', {
+                    para: to,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
 
             console.log('📤 Enviando resposta:', {
                 para: to,
                 preview: messageText.substring(0, 100),
+                tamanho: messageText.length,
                 timestamp: new Date().toISOString()
             });
 
@@ -434,7 +463,9 @@ class AIServices {
             }
 
             console.log('✅ Resposta enviada:', {
-                resultado: result,
+                messageId: result.messageId,
+                para: to,
+                preview: messageText.substring(0, 100),
                 timestamp: new Date().toISOString()
             });
 

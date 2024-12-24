@@ -50,25 +50,40 @@ class OrderValidationService {
      */
     async validateOrderNumber(orderNumber) {
         try {
-            // Remove o "#" se presente e qualquer espaço em branco
-            const cleanOrderNumber = orderNumber.replace(/[#\s]/g, '');
+            // Remove caracteres especiais e espaços
+            const cleanNumber = String(orderNumber).replace(/[^0-9]/g, '');
             
-            console.log('[OrderValidation] Validando pedido:', {
+            console.log('🔍 Validando pedido:', {
+                numero: cleanNumber,
                 numeroOriginal: orderNumber,
-                numeroLimpo: cleanOrderNumber,
                 timestamp: new Date().toISOString()
             });
 
-            const order = await this.nuvemshop.getOrderByNumber(cleanOrderNumber);
+            const order = await this.nuvemshop.getOrderByNumber(cleanNumber);
             
             if (!order) {
+                console.log('❌ Pedido não encontrado:', {
+                    numero: cleanNumber,
+                    timestamp: new Date().toISOString()
+                });
                 return null;
             }
+
+            console.log('✅ Pedido validado:', {
+                numero: cleanNumber,
+                cliente: order.customer?.name,
+                status: order.status,
+                timestamp: new Date().toISOString()
+            });
 
             // Retorna informações formatadas do pedido
             return this.formatSafeOrderInfo(order);
         } catch (error) {
-            console.error('[OrderValidation] Erro ao validar número do pedido:', error);
+            console.error('❌ Erro ao validar pedido:', {
+                numero: orderNumber,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
             return null;
         }
     }
@@ -128,6 +143,21 @@ class OrderValidationService {
         }
 
         return message;
+    }
+
+    formatOrderTrackingResponse(trackingInfo) {
+        if (!trackingInfo) return null;
+
+        // Remove ponto e vírgula extra da URL se existir
+        if (trackingInfo.url) {
+            trackingInfo.url = trackingInfo.url.replace(/;$/, '');
+        }
+
+        return `🚚 *Status do Rastreamento*\n\n` +
+            `📦 Código: ${trackingInfo.code}\n` +
+            `📍 Status: ${trackingInfo.status}\n` +
+            `🔗 Link: ${trackingInfo.url}\n\n` +
+            `Última atualização: ${new Date().toLocaleString('pt-BR')}`;
     }
 }
 
