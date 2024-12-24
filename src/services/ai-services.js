@@ -171,9 +171,34 @@ class AIServices {
 
             // Se for mensagem de imagem, processa com Vision
             if (message.imageMessage) {
-                const response = await this.handleImageMessage(message);
-                if (response) {
-                    await this.sendResponse(from, response);
+                const imageResponse = await this.handleImageMessage(message);
+                if (imageResponse) {
+                    // Atualiza o histórico com a mensagem e resposta
+                    chatHistory.messages = chatHistory.messages || [];
+                    chatHistory.messages.unshift(
+                        {
+                            role: 'user',
+                            content: 'Imagem enviada',
+                            type: 'image',
+                            timestamp: new Date().toISOString()
+                        },
+                        {
+                            role: 'assistant',
+                            content: imageResponse,
+                            timestamp: new Date().toISOString()
+                        }
+                    );
+
+                    chatHistory.lastUpdate = new Date().toISOString();
+                    console.log('💾 Salvando histórico de imagem:', {
+                        key: threadKey,
+                        threadId,
+                        mensagens: chatHistory.messages.length,
+                        timestamp: new Date().toISOString()
+                    });
+                    await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
+
+                    await this.sendResponse(from, imageResponse);
                 }
                 return null;
             }
@@ -199,6 +224,41 @@ class AIServices {
                 }
             }
 
+            // Verifica se é uma pergunta sobre pedido ou se é pedido internacional
+            if (text?.toLowerCase().includes('pedido') || 
+                text?.toLowerCase().includes('encomenda') ||
+                text?.toLowerCase().includes('compra')) {
+                
+                // Primeiro verifica se tem número de pedido na mensagem
+                const orderIdMatch = text.match(/\d+/);
+                if (orderIdMatch) {
+                    const orderId = orderIdMatch[0];
+                    console.log('📦 Buscando informações do pedido:', orderId);
+                    const order = await this.nuvemshopService.getOrder(orderId);
+                    
+                    // Se for pedido internacional, encaminha para o financeiro
+                    if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
+                        console.log('🌍 Pedido internacional detectado:', {
+                            numero: orderId,
+                            pais: order.shipping_address.country,
+                            timestamp: new Date().toISOString()
+                        });
+                        await this.whatsAppService.forwardToFinancial(message, orderId);
+                        return null;
+                    }
+                }
+
+                // Se não for internacional, pede o número do pedido
+                console.log('❓ Pergunta sobre pedido detectada:', {
+                    texto: text,
+                    de: from,
+                    timestamp: new Date().toISOString()
+                });
+
+                await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar o status.');
+                return null;
+            }
+
             // Verifica se é um número de pedido
             if (text) {
                 // Remove caracteres especiais e espaços
@@ -212,18 +272,32 @@ class AIServices {
                         timestamp: new Date().toISOString()
                     });
 
+                    // Verifica tentativas de validação
+                    const isBlocked = await this.orderValidationService.checkAttempts(from);
+                    if (isBlocked) {
+                        console.log('🚫 Usuário bloqueado por muitas tentativas:', {
+                            numero: from,
+                            timestamp: new Date().toISOString()
+                        });
+                        await this.sendResponse(from, 'Você excedeu o número máximo de tentativas. Por favor, aguarde alguns minutos antes de tentar novamente.');
+                        return null;
+                    }
+
                     const order = await this.orderValidationService.validateOrderNumber(orderNumber);
                     if (order) {
-                        // Armazena o número do pedido temporariamente para contexto
-                        const orderKey = `pending_order:${from}`;
-                        await this.redisStore.set(orderKey, orderNumber);
-                        
+                        // Reseta tentativas em caso de sucesso
+                        await this.orderValidationService.resetAttempts(from);
+
                         console.log('✅ Pedido encontrado:', {
                             numero: orderNumber,
-                            cliente: order.client_details?.name,
+                            cliente: order.customer?.name,
                             status: order.status,
                             timestamp: new Date().toISOString()
                         });
+                        
+                        // Armazena o número do pedido temporariamente para contexto
+                        const orderKey = `pending_order:${from}`;
+                        await this.redisStore.set(orderKey, orderNumber);
                         
                         const response = this.orderValidationService.formatOrderMessage(order);
                         await this.sendResponse(from, response);
@@ -238,6 +312,9 @@ class AIServices {
                         
                         return null;
                     } else {
+                        // Incrementa tentativas em caso de falha
+                        await this.orderValidationService.incrementAttempts(from);
+
                         console.log('❌ Pedido não encontrado:', {
                             numero: orderNumber,
                             textoOriginal: text,
@@ -280,6 +357,25 @@ class AIServices {
                     temPalavrasChave: hasTrackingKeywords,
                     timestamp: new Date().toISOString()
                 });
+
+                // Verifica se tem pedido pendente
+                const orderKey = `pending_order:${from}`;
+                const pendingOrder = await this.redisStore.get(orderKey);
+
+                if (pendingOrder) {
+                    console.log('📦 Pedido pendente encontrado:', {
+                        numero: pendingOrder,
+                        de: from,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    const order = await this.orderValidationService.validateOrderNumber(pendingOrder);
+                    if (order) {
+                        const response = this.orderValidationService.formatOrderMessage(order);
+                        await this.sendResponse(from, response);
+                        return null;
+                    }
+                }
 
                 // Se for um código válido, busca direto
                 if (trackingNumber) {
@@ -334,17 +430,6 @@ class AIServices {
                         return null;
                     }
                 }
-            }
-
-            // Verifica se há um pedido pendente para o usuário
-            const orderKey = `pending_order:${from}`;
-            const pendingOrder = await this.redisStore.get(orderKey);
-            if (pendingOrder) {
-                console.log('📦 Pedido pendente encontrado:', {
-                    numero: pendingOrder,
-                    de: from,
-                    timestamp: new Date().toISOString()
-                });
             }
 
             // Adiciona a mensagem ao thread
@@ -668,6 +753,37 @@ class AIServices {
 
             const formattedResponse = `🖼️ *Análise da imagem:*\n\n${response}`;
             
+            // Atualiza o histórico com a mensagem e resposta
+            const threadKey = `chat:${from}`;
+            let chatHistory = await this.redisStore.get(threadKey);
+            chatHistory = typeof chatHistory === 'string' ? JSON.parse(chatHistory) : chatHistory;
+            
+            if (chatHistory) {
+                chatHistory.messages = chatHistory.messages || [];
+                chatHistory.messages.unshift(
+                    {
+                        role: 'user',
+                        content: result.analysis,
+                        type: 'image',
+                        timestamp: new Date().toISOString()
+                    },
+                    {
+                        role: 'assistant',
+                        content: response,
+                        timestamp: new Date().toISOString()
+                    }
+                );
+
+                chatHistory.lastUpdate = new Date().toISOString();
+                console.log('💾 Salvando histórico de imagem:', {
+                    key: threadKey,
+                    threadId: chatHistory.threadId,
+                    mensagens: chatHistory.messages.length,
+                    timestamp: new Date().toISOString()
+                });
+                await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
+            }
+
             await this.sendResponse(from, formattedResponse);
             return null;
 
