@@ -224,6 +224,66 @@ class AIServices {
                 }
             }
 
+            // Verifica se é uma solicitação de rastreamento
+            if (text?.toLowerCase().includes('rastrear') || 
+                text?.toLowerCase().includes('status da entrega') ||
+                text?.toLowerCase().includes('status do pedido')) {
+                
+                console.log('🔍 Solicitação de rastreamento detectada');
+
+                // Tenta recuperar o código de rastreio
+                const trackingKey = `tracking:${from}`;
+                const trackingNumber = await this.redisStore.get(trackingKey);
+
+                if (trackingNumber) {
+                    console.log('📦 Código de rastreio encontrado:', {
+                        codigo: trackingNumber,
+                        de: from,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    // Busca status atual no 17track
+                    const trackingStatus = await this.orderValidationService.getTrackingStatus(trackingNumber);
+                    if (trackingStatus) {
+                        await this.sendResponse(from, trackingStatus);
+                        return null;
+                    }
+                }
+
+                // Se não encontrou código de rastreio, verifica se tem pedido em cache
+                const orderKey = `order:${from}`;
+                const orderNumber = await this.redisStore.get(orderKey);
+
+                if (orderNumber) {
+                    const order = await this.orderValidationService.validateOrderNumber(orderNumber);
+                    if (order) {
+                        const orderResponse = await this.orderValidationService.formatOrderMessage(order, from);
+                        await this.sendResponse(from, orderResponse);
+                        return null;
+                    }
+                }
+
+                await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar o status de entrega.');
+                return null;
+            }
+
+            // Verifica se é um número de pedido
+            if (this.orderValidationService.isValidOrderNumber(text)) {
+                console.log('🔍 Buscando pedido:', {
+                    numero: text,
+                    textoOriginal: text,
+                    de: from,
+                    timestamp: new Date().toISOString()
+                });
+
+                const order = await this.orderValidationService.validateOrderNumber(text);
+                if (order) {
+                    const response = await this.orderValidationService.formatOrderMessage(order, from);
+                    await this.sendResponse(from, response);
+                    return null;
+                }
+            }
+
             // Verifica se é uma pergunta sobre pedido ou se é pedido internacional
             if (text?.toLowerCase().includes('pedido') || 
                 text?.toLowerCase().includes('encomenda') ||
@@ -257,97 +317,6 @@ class AIServices {
 
                 await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar o status.');
                 return null;
-            }
-
-            // Verifica se é um número de pedido
-            if (text) {
-                // Remove caracteres especiais e espaços
-                const cleanText = text.replace(/[^0-9]/g, '');
-                if (/^\d{4,}$/.test(cleanText)) {
-                    const orderNumber = cleanText;
-                    console.log('🔍 Buscando pedido:', {
-                        numero: orderNumber,
-                        textoOriginal: text,
-                        de: from,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    // Verifica tentativas de validação
-                    const isBlocked = await this.orderValidationService.checkAttempts(from);
-                    if (isBlocked) {
-                        console.log('🚫 Usuário bloqueado por muitas tentativas:', {
-                            numero: from,
-                            timestamp: new Date().toISOString()
-                        });
-                        await this.sendResponse(from, 'Você excedeu o número máximo de tentativas. Por favor, aguarde alguns minutos antes de tentar novamente.');
-                        return null;
-                    }
-
-                    // Valida o pedido usando o serviço de validação
-                    const validatedOrder = await this.orderValidationService.validateOrderNumber(orderNumber);
-                    if (!validatedOrder) {
-                        await this.orderValidationService.incrementAttempts(from);
-                        console.log('❌ Pedido não encontrado:', {
-                            numero: orderNumber,
-                            textoOriginal: text,
-                            de: from,
-                            timestamp: new Date().toISOString()
-                        });
-                        
-                        await this.sendResponse(from, "Desculpe, não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.");
-                        return null;
-                    }
-
-                    // Reseta tentativas em caso de sucesso
-                    await this.orderValidationService.resetAttempts(from);
-
-                    // Formata a mensagem de resposta
-                    const response = await this.orderValidationService.formatOrderMessage(validatedOrder);
-                    if (!response) {
-                        console.error('❌ Erro ao formatar mensagem:', {
-                            numero: orderNumber,
-                            de: from,
-                            timestamp: new Date().toISOString()
-                        });
-                        await this.sendResponse(from, "Desculpe, houve um erro ao processar as informações do pedido. Por favor, tente novamente.");
-                        return null;
-                    }
-                    
-                    // Armazena o número do pedido temporariamente para contexto
-                    const orderKey = `pending_order:${from}`;
-                    await this.redisStore.set(orderKey, orderNumber);
-                    
-                    // Envia a resposta
-                    await this.sendResponse(from, response);
-                    
-                    // Log do pedido armazenado
-                    console.log('💾 Pedido armazenado:', {
-                        numero: orderNumber,
-                        de: from,
-                        chave: orderKey,
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    return null;
-                }
-            }
-
-            // Verifica internamente se o pedido é internacional
-            if (text?.toLowerCase().includes('pedido') || text?.toLowerCase().includes('encomenda')) {
-                console.log('🔍 Verificando se é pedido internacional...');
-                const orderIdMatch = text.match(/\d+/);
-                if (orderIdMatch) {
-                    const orderId = orderIdMatch[0];
-                    console.log('📦 Buscando informações do pedido:', orderId);
-                    const order = await this.nuvemshopService.getOrder(orderId);
-                    
-                    // Se for pedido internacional, encaminha internamente para o financeiro
-                    if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
-                        console.log('🌍 Pedido internacional detectado:', orderId);
-                        await this.whatsAppService.forwardToFinancial(message, orderId);
-                        return null;
-                    }
-                }
             }
 
             // Verifica se é um possível código de rastreio
@@ -411,26 +380,19 @@ class AIServices {
                 }
             }
 
-            // Verifica se é uma solicitação de rastreamento
-            if (text?.toLowerCase().includes('rastrear') || 
-                text?.toLowerCase().includes('status da entrega') ||
-                text?.toLowerCase().includes('status do pedido')) {
-                
-                // Busca código de rastreio no Redis
-                const trackingKey = `tracking:${from}`;
-                const trackingNumber = await this.redisStore.get(trackingKey);
-                
-                if (trackingNumber) {
-                    console.log('🔍 Buscando status de rastreio:', {
-                        codigo: trackingNumber,
-                        de: from,
-                        timestamp: new Date().toISOString()
-                    });
+            // Verifica internamente se o pedido é internacional
+            if (text?.toLowerCase().includes('pedido') || text?.toLowerCase().includes('encomenda')) {
+                console.log('🔍 Verificando se é pedido internacional...');
+                const orderIdMatch = text.match(/\d+/);
+                if (orderIdMatch) {
+                    const orderId = orderIdMatch[0];
+                    console.log('📦 Buscando informações do pedido:', orderId);
+                    const order = await this.nuvemshopService.getOrder(orderId);
                     
-                    const trackingInfo = await this.trackingService.getTrackingStatus(trackingNumber);
-                    if (trackingInfo) {
-                        const response = this.formatOrderTrackingResponse(trackingInfo);
-                        await this.sendResponse(from, response);
+                    // Se for pedido internacional, encaminha internamente para o financeiro
+                    if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
+                        console.log('🌍 Pedido internacional detectado:', orderId);
+                        await this.whatsAppService.forwardToFinancial(message, orderId);
                         return null;
                     }
                 }

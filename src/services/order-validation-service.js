@@ -103,6 +103,15 @@ class OrderValidationService {
                 throw new Error('Dados do pedido incompletos');
             }
 
+            // Busca código de rastreio
+            let trackingNumber = null;
+            if (order.fulfillments && order.fulfillments.length > 0) {
+                const lastFulfillment = order.fulfillments[order.fulfillments.length - 1];
+                if (lastFulfillment.tracking_number) {
+                    trackingNumber = lastFulfillment.tracking_number;
+                }
+            }
+
             const orderInfo = {
                 numero_pedido: order.number,
                 status: order.status,
@@ -113,7 +122,7 @@ class OrderValidationService {
                     quantidade: product.quantity
                 })) : [],
                 status_envio: order.shipping_status || 'Não disponível',
-                codigo_rastreio: order.shipping_tracking_number || null,
+                codigo_rastreio: trackingNumber,
                 cliente: {
                     nome: order.customer?.name || order.client_details?.name || 'Não informado',
                     telefone: order.customer?.phone || order.client_details?.phone || 'Não informado'
@@ -125,6 +134,7 @@ class OrderValidationService {
                 numero: orderInfo.numero_pedido,
                 cliente: orderInfo.cliente.nome,
                 status: orderInfo.status,
+                rastreio: orderInfo.codigo_rastreio,
                 produtos: orderInfo.produtos.length,
                 timestamp: new Date().toISOString()
             });
@@ -142,11 +152,27 @@ class OrderValidationService {
     }
 
     /**
-     * Formata mensagem de pedido para WhatsApp
-     * @param {Object} orderInfo - Informações seguras do pedido
+     * Formata mensagem de rastreamento
+     * @param {string} trackingNumber - Código de rastreio
      * @returns {string} Mensagem formatada
      */
-    async formatOrderMessage(orderInfo) {
+    formatTrackingMessage(trackingNumber) {
+        if (!trackingNumber) return null;
+
+        return `🚚 *Rastreamento do Pedido*\n\n` +
+            `📦 Código de Rastreio: ${trackingNumber}\n\n` +
+            `🔍 Acompanhe seu pedido em:\n` +
+            `https://t.17track.net/pt-br#nums=${trackingNumber}\n\n` +
+            `_Clique no link acima para ver o status atualizado da entrega_`;
+    }
+
+    /**
+     * Formata mensagem de pedido para WhatsApp
+     * @param {Object} orderInfo - Informações seguras do pedido
+     * @param {string} userPhone - Telefone do usuário
+     * @returns {string} Mensagem formatada
+     */
+    async formatOrderMessage(orderInfo, userPhone) {
         try {
             if (!orderInfo) {
                 throw new Error('Informações do pedido não disponíveis');
@@ -157,6 +183,7 @@ class OrderValidationService {
                 numero: orderInfo.numero_pedido,
                 cliente: orderInfo.cliente?.nome,
                 status: orderInfo.status,
+                rastreio: orderInfo.codigo_rastreio,
                 produtos: orderInfo.produtos?.length,
                 timestamp: new Date().toISOString()
             });
@@ -190,14 +217,23 @@ class OrderValidationService {
                 message += `\n\n_Para ver o status atual do seu pedido, digite "rastrear" ou "status da entrega"_`;
                 
                 // Armazena o código de rastreio no Redis para consulta rápida
-                if (orderInfo.cliente?.telefone) {
-                    const trackingKey = `tracking:${orderInfo.cliente.telefone}`;
-                    await this.redisStore.set(trackingKey, orderInfo.codigo_rastreio, 3600); // 1 hora de TTL
+                if (userPhone) {
+                    const trackingKey = `tracking:${userPhone}`;
+                    const orderKey = `order:${userPhone}`;
                     
-                    console.log('💾 Código de rastreio armazenado:', {
-                        codigo: orderInfo.codigo_rastreio,
-                        telefone: orderInfo.cliente.telefone,
-                        chave: trackingKey,
+                    await Promise.all([
+                        // Armazena código de rastreio
+                        this.redisStore.set(trackingKey, orderInfo.codigo_rastreio, 3600 * 24), // 24 horas
+                        // Armazena número do pedido
+                        this.redisStore.set(orderKey, orderInfo.numero_pedido, 3600 * 24)
+                    ]);
+                    
+                    console.log('💾 Informações armazenadas:', {
+                        telefone: userPhone,
+                        pedido: orderInfo.numero_pedido,
+                        rastreio: orderInfo.codigo_rastreio,
+                        chaveRastreio: trackingKey,
+                        chavePedido: orderKey,
                         timestamp: new Date().toISOString()
                     });
                 }
@@ -213,6 +249,100 @@ class OrderValidationService {
             });
             return null;
         }
+    }
+
+    /**
+     * Busca e formata status de rastreamento
+     * @param {string} trackingNumber - Código de rastreio
+     * @returns {Promise<string>} Mensagem formatada com status atual
+     */
+    async getTrackingStatus(trackingNumber) {
+        if (!trackingNumber) return null;
+
+        try {
+            console.log('🔍 Buscando status no 17track:', {
+                codigo: trackingNumber,
+                timestamp: new Date().toISOString()
+            });
+
+            // Busca status atual no 17track
+            const response = await fetch('https://api.17track.net/track/v2/gettrackinfo', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    '17token': process.env.TRACK17_TOKEN
+                },
+                body: JSON.stringify({
+                    numbers: [trackingNumber],
+                    carrier: 'correioscn'
+                })
+            });
+
+            const data = await response.json();
+            console.log('📦 Resposta do 17track:', {
+                codigo: trackingNumber,
+                status: data?.ret,
+                dados: data?.data?.[0],
+                timestamp: new Date().toISOString()
+            });
+
+            if (data?.ret === 1 && data?.data?.[0]?.track) {
+                const track = data.data[0].track;
+                const lastEvent = track.z0?.z[track.z0.z.length - 1];
+
+                if (lastEvent) {
+                    return `🚚 *Status do Rastreamento*\n\n` +
+                        `📦 Código: ${trackingNumber}\n` +
+                        `📍 Local: ${lastEvent.z || 'Não disponível'}\n` +
+                        `📅 Data: ${new Date(lastEvent.a * 1000).toLocaleString('pt-BR')}\n` +
+                        `📝 Status: ${lastEvent.c}\n\n` +
+                        `_Última atualização ${this.formatTimeAgo(lastEvent.a)}_`;
+                }
+            }
+
+            return `🚚 *Status do Rastreamento*\n\n` +
+                `📦 Código: ${trackingNumber}\n` +
+                `ℹ️ Status: Aguardando atualização da transportadora\n\n` +
+                `_O código foi registrado mas ainda não há atualizações disponíveis_`;
+
+        } catch (error) {
+            console.error('❌ Erro ao buscar rastreio:', {
+                erro: error.message,
+                stack: error.stack,
+                codigo: trackingNumber,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Formata tempo decorrido
+     * @param {number} timestamp - Timestamp em segundos
+     * @returns {string} Tempo formatado
+     */
+    formatTimeAgo(timestamp) {
+        const now = Math.floor(Date.now() / 1000);
+        const seconds = now - timestamp;
+        
+        const intervals = {
+            ano: 31536000,
+            mes: 2592000,
+            semana: 604800,
+            dia: 86400,
+            hora: 3600,
+            minuto: 60
+        };
+
+        for (const [unit, secondsInUnit] of Object.entries(intervals)) {
+            const interval = Math.floor(seconds / secondsInUnit);
+            
+            if (interval >= 1) {
+                return `há ${interval} ${unit}${interval > 1 ? 's' : ''}`;
+            }
+        }
+        
+        return 'agora mesmo';
     }
 
     formatOrderTrackingResponse(trackingInfo) {
