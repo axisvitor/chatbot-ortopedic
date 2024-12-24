@@ -222,6 +222,43 @@ class OrderValidationService {
                 timestamp: new Date().toISOString()
             });
 
+            // Busca código de rastreio
+            let trackingNumber = null;
+            if (orderInfo.fulfillments && orderInfo.fulfillments.length > 0) {
+                const lastFulfillment = orderInfo.fulfillments[orderInfo.fulfillments.length - 1];
+                if (lastFulfillment.tracking_number) {
+                    trackingNumber = lastFulfillment.tracking_number;
+                }
+            }
+
+            // Armazena informações no Redis se tiver código de rastreio
+            if (trackingNumber && userPhone) {
+                const trackingKey = `tracking:${userPhone}`;
+                const orderKey = `order:${userPhone}`;
+                
+                await Promise.all([
+                    this.redisStore.set(trackingKey, trackingNumber, 3600 * 24),
+                    this.redisStore.set(orderKey, orderInfo.numero_pedido, 3600 * 24)
+                ]);
+                
+                console.log('💾 Informações armazenadas:', {
+                    telefone: userPhone,
+                    pedido: orderInfo.numero_pedido,
+                    rastreio: trackingNumber,
+                    chaveRastreio: trackingKey,
+                    chavePedido: orderKey,
+                    ttl: '24 horas',
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            // Busca status de rastreio se tiver código
+            let trackingStatus = null;
+            if (trackingNumber) {
+                trackingStatus = await this.getTrackingStatus(trackingNumber);
+            }
+
+            // Monta mensagem base
             let message = `🛍️ *Detalhes do Pedido #${orderInfo.numero_pedido}*\n\n`;
             message += `👤 Cliente: ${orderInfo.cliente?.nome || 'Não informado'}\n`;
             message += `📅 Data: ${orderInfo.data_compra}\n`;
@@ -244,39 +281,17 @@ class OrderValidationService {
             // Status de envio
             const statusEnvio = this.nuvemshop.formatOrderStatus(orderInfo.status_envio);
             message += `\n📦 Status do Envio: ${statusEnvio}`;
-            
-            // Código de rastreio
-            if (orderInfo.codigo_rastreio) {
-                message += `\n📬 Código de Rastreio: ${orderInfo.codigo_rastreio}`;
-                message += `\n\n_Para ver o status atual da entrega, digite "rastrear" ou "status da entrega"_`;
-                
-                // Armazena o código de rastreio e número do pedido no Redis
-                if (userPhone) {
-                    const trackingKey = `tracking:${userPhone}`;
-                    const orderKey = `order:${userPhone}`;
-                    
-                    await Promise.all([
-                        // Armazena código de rastreio
-                        this.redisStore.set(trackingKey, orderInfo.codigo_rastreio, 3600 * 24), // 24 horas
-                        // Armazena número do pedido
-                        this.redisStore.set(orderKey, orderInfo.numero_pedido, 3600 * 24)
-                    ]);
-                    
-                    console.log('💾 Informações armazenadas:', {
-                        telefone: userPhone,
-                        pedido: orderInfo.numero_pedido,
-                        rastreio: orderInfo.codigo_rastreio,
-                        chaveRastreio: trackingKey,
-                        chavePedido: orderKey,
-                        ttl: '24 horas',
-                        timestamp: new Date().toISOString()
-                    });
-                }
 
-                // Busca status atual no 17track
-                const trackingStatus = await this.getTrackingStatus(orderInfo.codigo_rastreio);
+            // Adiciona informações de rastreio se disponível
+            if (trackingNumber) {
+                message += `\n\n📬 *Rastreamento:*`;
+                message += `\nCódigo: ${trackingNumber}`;
+                
                 if (trackingStatus) {
-                    message += `\n\n${trackingStatus}`;
+                    message += `\n${trackingStatus}`;
+                } else {
+                    message += `\n\nℹ️ Status: Aguardando atualização da transportadora`;
+                    message += `\n_O código foi registrado mas ainda não há atualizações disponíveis_`;
                 }
             }
 
