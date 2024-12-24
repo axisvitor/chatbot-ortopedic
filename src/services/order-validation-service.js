@@ -248,9 +248,9 @@ class OrderValidationService {
             // Código de rastreio
             if (orderInfo.codigo_rastreio) {
                 message += `\n📬 Código de Rastreio: ${orderInfo.codigo_rastreio}`;
-                message += `\n\n_Para ver o status atual do seu pedido, digite "rastrear" ou "status da entrega"_`;
+                message += `\n\n_Para ver o status atual da entrega, digite "rastrear" ou "status da entrega"_`;
                 
-                // Armazena o código de rastreio no Redis para consulta rápida
+                // Armazena o código de rastreio e número do pedido no Redis
                 if (userPhone) {
                     const trackingKey = `tracking:${userPhone}`;
                     const orderKey = `order:${userPhone}`;
@@ -268,8 +268,15 @@ class OrderValidationService {
                         rastreio: orderInfo.codigo_rastreio,
                         chaveRastreio: trackingKey,
                         chavePedido: orderKey,
+                        ttl: '24 horas',
                         timestamp: new Date().toISOString()
                     });
+                }
+
+                // Busca status atual no 17track
+                const trackingStatus = await this.getTrackingStatus(orderInfo.codigo_rastreio);
+                if (trackingStatus) {
+                    message += `\n\n${trackingStatus}`;
                 }
             }
 

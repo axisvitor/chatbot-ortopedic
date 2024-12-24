@@ -231,7 +231,7 @@ class AIServices {
                 
                 console.log('🔍 Solicitação de rastreamento detectada');
 
-                // Tenta recuperar o código de rastreio
+                // Primeiro tenta recuperar código de rastreio do cache
                 const trackingKey = `tracking:${from}`;
                 const trackingNumber = await this.redisStore.get(trackingKey);
 
@@ -250,16 +250,24 @@ class AIServices {
                     }
                 }
 
-                // Se não encontrou código de rastreio, verifica se tem pedido em cache
+                // Se não encontrou código de rastreio, verifica pedido em cache
                 const orderKey = `order:${from}`;
                 const orderNumber = await this.redisStore.get(orderKey);
 
                 if (orderNumber) {
+                    console.log('🔍 Pedido encontrado em cache:', {
+                        numero: orderNumber,
+                        de: from,
+                        timestamp: new Date().toISOString()
+                    });
+
                     const order = await this.orderValidationService.validateOrderNumber(orderNumber);
                     if (order) {
                         const orderResponse = await this.orderValidationService.formatOrderMessage(order, from);
-                        await this.sendResponse(from, orderResponse);
-                        return null;
+                        if (orderResponse) {
+                            await this.sendResponse(from, orderResponse);
+                            return null;
+                        }
                     }
                 }
 
