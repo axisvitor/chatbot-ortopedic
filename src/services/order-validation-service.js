@@ -94,24 +94,38 @@ class OrderValidationService {
      * @returns {Object} Informações seguras do pedido
      */
     formatSafeOrderInfo(order) {
-        return {
-            numero_pedido: order.number,
-            status: this.nuvemshop.formatOrderStatus(order.status),
-            data_compra: new Date(order.created_at).toLocaleString('pt-BR'),
-            valor_total: this.nuvemshop.formatPrice(order.total),
-            produtos: order.products.map(product => ({
-                nome: product.name,
-                quantidade: product.quantity
-            })),
-            status_envio: order.shipping_status ? 
-                this.nuvemshop.formatOrderStatus(order.shipping_status) : 
-                'Não disponível',
-            codigo_rastreio: order.shipping_tracking_number || null,
-            cliente: {
-                nome: order.customer?.name || 'Não informado',
-                telefone: order.customer?.phone || 'Não informado'
-            }
-        };
+        try {
+            console.log('🔄 Formatando informações do pedido:', {
+                numero: order.number,
+                cliente: order.customer?.name || order.client_details?.name,
+                status: order.status,
+                timestamp: new Date().toISOString()
+            });
+
+            return {
+                numero_pedido: order.number,
+                status: order.status,
+                data_compra: new Date(order.created_at).toLocaleString('pt-BR'),
+                valor_total: order.total,
+                produtos: order.products.map(product => ({
+                    nome: product.name,
+                    quantidade: product.quantity
+                })),
+                status_envio: order.shipping_status || 'Não disponível',
+                codigo_rastreio: order.shipping_tracking_number || null,
+                cliente: {
+                    nome: order.customer?.name || order.client_details?.name || 'Não informado',
+                    telefone: order.customer?.phone || order.client_details?.phone || 'Não informado'
+                }
+            };
+        } catch (error) {
+            console.error('❌ Erro ao formatar pedido:', {
+                erro: error.message,
+                numero: order?.number,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+        }
     }
 
     /**
@@ -120,29 +134,42 @@ class OrderValidationService {
      * @returns {string} Mensagem formatada
      */
     async formatOrderMessage(orderInfo) {
-        let message = `🛍️ *Detalhes do Pedido #${orderInfo.numero_pedido}*\n\n`;
-        message += `👤 Cliente: ${orderInfo.cliente.nome}\n`;
-        message += `📅 Data: ${orderInfo.data_compra}\n`;
-        message += `📦 Status: ${orderInfo.status}\n`;
-        message += `💰 Valor Total: ${orderInfo.valor_total}\n\n`;
-        
-        message += `*Produtos:*\n`;
-        orderInfo.produtos.forEach(produto => {
-            message += `▫️ ${produto.quantidade}x ${produto.nome}\n`;
-        });
+        try {
+            if (!orderInfo) {
+                throw new Error('Informações do pedido não disponíveis');
+            }
 
-        message += `\n📦 Status do Envio: ${orderInfo.status_envio}`;
-        
-        if (orderInfo.codigo_rastreio) {
-            message += `\n📬 Código de Rastreio: ${orderInfo.codigo_rastreio}`;
-            message += `\n\n_Para ver o status atual do seu pedido, digite "rastrear" ou "status da entrega"_`;
+            let message = `🛍️ *Detalhes do Pedido #${orderInfo.numero_pedido}*\n\n`;
+            message += `👤 Cliente: ${orderInfo.cliente.nome}\n`;
+            message += `📅 Data: ${orderInfo.data_compra}\n`;
+            message += `📦 Status: ${this.nuvemshop.formatOrderStatus(orderInfo.status)}\n`;
+            message += `💰 Valor Total: ${this.nuvemshop.formatPrice(orderInfo.valor_total)}\n\n`;
             
-            // Armazena o código de rastreio no Redis para consulta rápida
-            const trackingKey = `tracking:${orderInfo.cliente.telefone}`;
-            await this.redisStore.set(trackingKey, orderInfo.codigo_rastreio, 3600); // 1 hora de TTL
-        }
+            message += `*Produtos:*\n`;
+            orderInfo.produtos.forEach(produto => {
+                message += `▫️ ${produto.quantidade}x ${produto.nome}\n`;
+            });
 
-        return message;
+            message += `\n📦 Status do Envio: ${this.nuvemshop.formatOrderStatus(orderInfo.status_envio)}`;
+            
+            if (orderInfo.codigo_rastreio) {
+                message += `\n📬 Código de Rastreio: ${orderInfo.codigo_rastreio}`;
+                message += `\n\n_Para ver o status atual do seu pedido, digite "rastrear" ou "status da entrega"_`;
+                
+                // Armazena o código de rastreio no Redis para consulta rápida
+                const trackingKey = `tracking:${orderInfo.cliente.telefone}`;
+                await this.redisStore.set(trackingKey, orderInfo.codigo_rastreio, 3600); // 1 hora de TTL
+            }
+
+            return message;
+        } catch (error) {
+            console.error('❌ Erro ao formatar mensagem:', {
+                erro: error.message,
+                pedido: orderInfo?.numero_pedido,
+                timestamp: new Date().toISOString()
+            });
+            return 'Desculpe, houve um erro ao formatar as informações do pedido. Por favor, tente novamente.';
+        }
     }
 
     formatOrderTrackingResponse(trackingInfo) {
