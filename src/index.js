@@ -13,7 +13,9 @@ const {
     NuvemshopService,
     AudioService,
     ImageService,
-    WebhookService
+    WebhookService,
+    CacheService,
+    MediaManagerService
 } = require('./services');
 
 // Store
@@ -38,6 +40,8 @@ module.exports = {
     AudioService,
     ImageService,
     WebhookService,
+    CacheService,
+    MediaManagerService,
 
     // Store
     RedisStore,

@@ -128,15 +128,16 @@ class TrackingService {
         });
     }
 
-    async processTrackingRequest(trackingNumber, cpf, from) {
+    /**
+     * Processa uma requisição de rastreamento
+     * @param {string} trackingNumber - Número de rastreamento
+     * @param {string} from - ID do remetente (WhatsApp)
+     * @returns {Promise<string>} Mensagem formatada com status do rastreamento
+     */
+    async processTrackingRequest(trackingNumber, from) {
         try {
             if (!trackingNumber) {
                 throw new Error('Número de rastreamento é obrigatório');
-            }
-
-            // CPF é apenas para controle interno
-            if (!cpf) {
-                throw new Error('CPF é obrigatório para consulta de rastreamento');
             }
 
             // Remove espaços e caracteres especiais do número de rastreamento
@@ -145,6 +146,15 @@ class TrackingService {
             console.log('[Tracking] Iniciando consulta:', {
                 trackingNumber
             });
+
+            // Verifica cache primeiro
+            const cacheKey = `tracking:${trackingNumber}`;
+            const cachedStatus = await this.redisStore.get(cacheKey);
+            
+            if (cachedStatus) {
+                console.log('[Tracking] Usando cache para:', trackingNumber);
+                return cachedStatus;
+            }
 
             // Consultar o status diretamente
             const statusResult = await this.getTrackingStatus(trackingNumber);
@@ -164,18 +174,27 @@ class TrackingService {
 
             // Verifica se tem dados aceitos
             if (!statusResult.data?.accepted?.length) {
-                return 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
+                const message = 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
+                await this.redisStore.set(cacheKey, message, 300); // Cache por 5 minutos para evitar consultas repetidas
+                return message;
             }
 
             const trackInfo = statusResult.data.accepted[0];
 
             // Se não tem eventos
             if (!trackInfo.latest_event_info) {
-                return `📦 *Status do Rastreamento*\n\n*Código:* ${trackingNumber}\n\n_Ainda não há eventos de movimentação registrados._`;
+                const message = `📦 *Status do Rastreamento*\n\n*Código:* ${trackingNumber}\n\n_Ainda não há eventos de movimentação registrados._`;
+                await this.redisStore.set(cacheKey, message, 300); // Cache por 5 minutos
+                return message;
             }
 
             // Formata a resposta com os eventos
-            return await this._formatTrackingResponse(trackInfo, from);
+            const formattedResponse = await this._formatTrackingResponse(trackInfo, from);
+            
+            // Cache por tempo maior se já tem eventos
+            await this.redisStore.set(cacheKey, formattedResponse, 1800); // Cache por 30 minutos
+            
+            return formattedResponse;
             
         } catch (error) {
             console.error('[Tracking] Erro ao processar rastreamento:', error);

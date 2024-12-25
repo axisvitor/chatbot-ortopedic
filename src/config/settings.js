@@ -152,6 +152,18 @@ const NUVEMSHOP_CONFIG = {
     accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN'),
     userId: validateEnvVar('NUVEMSHOP_USER_ID'),
     scope: validateEnvVar('NUVEMSHOP_SCOPE').split(','),
+    apiUrl: validateEnvVar('NUVEMSHOP_API_URL'),
+    api: {
+        timeout: 30000,          // 30 segundos
+        retryAttempts: 3,
+        retryDelays: [1000, 3000, 5000], // 1s, 3s, 5s
+        rateLimit: {
+            maxRequests: 10,     // 10 requisições
+            perMilliseconds: 1000, // por segundo
+            maxRPS: 10
+        },
+        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
+    },
     cache: {
         prefix: 'nuvemshop:',
         ttl: {
@@ -167,22 +179,12 @@ const NUVEMSHOP_CONFIG = {
             inventory: 300,       // 5 minutos
             shipping: 1800,       // 30 minutos
             payments: 1800        // 30 minutos
-        },
-        invalidation: {
-            maxKeys: 1000,        // Máximo de chaves a serem invalidadas por vez
-            batchSize: 100        // Tamanho do lote para invalidação em massa
         }
     },
-    api: {
-        url: validateEnvVar('NUVEMSHOP_API_URL'),
-        timeout: 30000,
-        retryAttempts: 3,
-        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
-    },
     webhook: {
-        retryAttempts: 18, // Conforme documentação
+        retryAttempts: 18,       // Conforme documentação
         retryDelays: [0, 300, 600, 900], // 0s, 5min, 10min, 15min
-        timeout: 10000, // 10 segundos conforme documentação
+        timeout: 10000,          // 10 segundos conforme documentação
         events: {
             app: ['uninstalled', 'suspended', 'resumed'],
             category: ['created', 'updated', 'deleted'],
@@ -199,14 +201,21 @@ const NUVEMSHOP_CONFIG = {
             store: ['redact'],
             customers: ['redact', 'data_request']
         }
-    },
-    rateLimit: {
-        bucketSize: 40, // Tamanho padrão do bucket
-        leakRate: 2,    // Taxa de vazamento (requests por segundo)
-        nextPlanMultiplier: 10, // Multiplicador para planos Next/Evolution
     }
 };
 
+// FFmpeg Configuration
+const FFMPEG_CONFIG = {
+    path: process.env.FFMPEG_PATH || './node_modules/ffmpeg-static/ffmpeg',
+    options: {
+        audioFormat: 'wav',
+        sampleRate: 16000,
+        channels: 1,
+        codec: 'pcm_s16le'
+    }
+};
+
+// Rate Limit Configuration
 const RATE_LIMIT_CONFIG = {
     windowMs: 15 * 60 * 1000, // 15 minutos
     max: 100, // Limite de 100 requisiç��es por janela
@@ -240,17 +249,6 @@ const LOGGING_CONFIG = {
     redis: {
         operations: true,
         errors: true
-    }
-};
-
-// FFmpeg Configuration
-const FFMPEG_CONFIG = {
-    path: process.env.FFMPEG_PATH || './node_modules/ffmpeg-static/ffmpeg',
-    options: {
-        audioFormat: 'wav',
-        sampleRate: 16000,
-        channels: 1,
-        codec: 'pcm_s16le'
     }
 };
 

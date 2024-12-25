@@ -1,12 +1,17 @@
-const { NuvemshopService } = require('./nuvemshop-service');
+const { OrderApi } = require('./nuvemshop/api/order');
 const { RedisStore } = require('../store/redis-store');
+const { TrackingService } = require('./tracking-service');
+const { formatTimeAgo } = require('../utils/date-utils');
+const { CACHE_CONFIG } = require('../config/settings');
 
 class OrderValidationService {
     constructor() {
-        this.nuvemshop = new NuvemshopService();
+        this.orderApi = new OrderApi();
         this.redisStore = new RedisStore();
+        this.trackingService = new TrackingService();
         this.MAX_ATTEMPTS = 3;
         this.BLOCK_TIME = 1800; // 30 minutos em segundos
+        this.CACHE_TTL = CACHE_CONFIG.orderTTL || 24 * 3600; // 24 horas em segundos
     }
 
     /**
@@ -93,7 +98,7 @@ class OrderValidationService {
                 timestamp: new Date().toISOString()
             });
 
-            const order = await this.nuvemshop.getOrderByNumber(cleanNumber);
+            const order = await this.orderApi.getOrderByNumber(cleanNumber);
             
             if (!order) {
                 console.log('❌ Pedido não encontrado:', {
@@ -223,13 +228,7 @@ class OrderValidationService {
             });
 
             // Busca código de rastreio
-            let trackingNumber = null;
-            if (orderInfo.fulfillments && orderInfo.fulfillments.length > 0) {
-                const lastFulfillment = orderInfo.fulfillments[orderInfo.fulfillments.length - 1];
-                if (lastFulfillment.tracking_number) {
-                    trackingNumber = lastFulfillment.tracking_number;
-                }
-            }
+            const trackingNumber = orderInfo.codigo_rastreio;
 
             // Armazena informações no Redis se tiver código de rastreio
             if (trackingNumber && userPhone) {
@@ -237,8 +236,8 @@ class OrderValidationService {
                 const orderKey = `order:${userPhone}`;
                 
                 await Promise.all([
-                    this.redisStore.set(trackingKey, trackingNumber, 3600 * 24),
-                    this.redisStore.set(orderKey, orderInfo.numero_pedido, 3600 * 24)
+                    this.redisStore.set(trackingKey, trackingNumber, this.CACHE_TTL),
+                    this.redisStore.set(orderKey, orderInfo.numero_pedido, this.CACHE_TTL)
                 ]);
                 
                 console.log('💾 Informações armazenadas:', {
@@ -247,7 +246,7 @@ class OrderValidationService {
                     rastreio: trackingNumber,
                     chaveRastreio: trackingKey,
                     chavePedido: orderKey,
-                    ttl: '24 horas',
+                    ttl: `${this.CACHE_TTL / 3600} horas`,
                     timestamp: new Date().toISOString()
                 });
             }
@@ -255,7 +254,7 @@ class OrderValidationService {
             // Busca status de rastreio se tiver código
             let trackingStatus = null;
             if (trackingNumber) {
-                trackingStatus = await this.getTrackingStatus(trackingNumber);
+                trackingStatus = await this.trackingService.getTrackingStatus(trackingNumber);
             }
 
             // Monta mensagem base
@@ -264,11 +263,11 @@ class OrderValidationService {
             message += `📅 Data: ${orderInfo.data_compra}\n`;
             
             // Status principal do pedido
-            const statusPedido = this.nuvemshop.formatOrderStatus(orderInfo.status);
+            const statusPedido = this.orderApi.formatOrderStatusNew(orderInfo.status);
             message += `📦 Status: ${statusPedido}\n`;
             
             // Valor total
-            message += `💰 Valor Total: ${this.nuvemshop.formatPrice(orderInfo.valor_total)}\n\n`;
+            message += `💰 Valor Total: ${this.orderApi.formatPrice(orderInfo.valor_total)}\n\n`;
             
             // Lista de produtos
             if (Array.isArray(orderInfo.produtos) && orderInfo.produtos.length > 0) {
@@ -279,7 +278,7 @@ class OrderValidationService {
             }
 
             // Status de envio
-            const statusEnvio = this.nuvemshop.formatOrderStatus(orderInfo.status_envio);
+            const statusEnvio = this.orderApi.formatOrderStatusNew(orderInfo.status_envio);
             message += `\n📦 Status do Envio: ${statusEnvio}`;
 
             // Adiciona informações de rastreio se disponível
@@ -313,92 +312,7 @@ class OrderValidationService {
      * @returns {Promise<string>} Mensagem formatada com status atual
      */
     async getTrackingStatus(trackingNumber) {
-        if (!trackingNumber) return null;
-
-        try {
-            console.log('🔍 Buscando status no 17track:', {
-                codigo: trackingNumber,
-                timestamp: new Date().toISOString()
-            });
-
-            // Busca status atual no 17track
-            const response = await fetch('https://api.17track.net/track/v2/gettrackinfo', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    '17token': process.env.TRACK17_TOKEN
-                },
-                body: JSON.stringify({
-                    numbers: [trackingNumber],
-                    carrier: 'correioscn'
-                })
-            });
-
-            const data = await response.json();
-            console.log('📦 Resposta do 17track:', {
-                codigo: trackingNumber,
-                status: data?.ret,
-                dados: data?.data?.[0],
-                timestamp: new Date().toISOString()
-            });
-
-            if (data?.ret === 1 && data?.data?.[0]?.track) {
-                const track = data.data[0].track;
-                const lastEvent = track.z0?.z[track.z0.z.length - 1];
-
-                if (lastEvent) {
-                    return `🚚 *Status do Rastreamento*\n\n` +
-                        `📦 Código: ${trackingNumber}\n` +
-                        `📍 Local: ${lastEvent.z || 'Não disponível'}\n` +
-                        `📅 Data: ${new Date(lastEvent.a * 1000).toLocaleString('pt-BR')}\n` +
-                        `📝 Status: ${lastEvent.c}\n\n` +
-                        `_Última atualização ${this.formatTimeAgo(lastEvent.a)}_`;
-                }
-            }
-
-            return `🚚 *Status do Rastreamento*\n\n` +
-                `📦 Código: ${trackingNumber}\n` +
-                `ℹ️ Status: Aguardando atualização da transportadora\n\n` +
-                `_O código foi registrado mas ainda não há atualizações disponíveis_`;
-
-        } catch (error) {
-            console.error('❌ Erro ao buscar rastreio:', {
-                erro: error.message,
-                stack: error.stack,
-                codigo: trackingNumber,
-                timestamp: new Date().toISOString()
-            });
-            return null;
-        }
-    }
-
-    /**
-     * Formata tempo decorrido
-     * @param {number} timestamp - Timestamp em segundos
-     * @returns {string} Tempo formatado
-     */
-    formatTimeAgo(timestamp) {
-        const now = Math.floor(Date.now() / 1000);
-        const seconds = now - timestamp;
-        
-        const intervals = {
-            ano: 31536000,
-            mes: 2592000,
-            semana: 604800,
-            dia: 86400,
-            hora: 3600,
-            minuto: 60
-        };
-
-        for (const [unit, secondsInUnit] of Object.entries(intervals)) {
-            const interval = Math.floor(seconds / secondsInUnit);
-            
-            if (interval >= 1) {
-                return `há ${interval} ${unit}${interval > 1 ? 's' : ''}`;
-            }
-        }
-        
-        return 'agora mesmo';
+        return this.trackingService.getTrackingStatus(trackingNumber);
     }
 
     formatOrderTrackingResponse(trackingInfo) {

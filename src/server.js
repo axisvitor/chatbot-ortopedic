@@ -4,81 +4,42 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const { createClient } = require('redis');
+
+// Importa todos os serviços do arquivo centralizado
+const {
+    GroqServices,
+    WebhookService,
+    WhatsAppService,
+    AIServices,
+    AudioService,
+    WhatsAppImageService,
+    ImageService,
+    BusinessHoursService,
+    OrderValidationService,
+    NuvemshopService,
+    TrackingService,
+    CacheService,
+    MediaManagerService,
+    RedisStore
+} = require('./services');
+
+// Configurações
+const { 
+    RATE_LIMIT_CONFIG,
+    REDIS_CONFIG,
+    BUSINESS_HOURS,
+    REQUIRED_ENV_VARS
+} = require('./config/settings');
 
 // Lista de variáveis de ambiente requeridas
 const requiredEnvVars = [
-    'WAPI_URL',
-    'WAPI_TOKEN',
-    'WAPI_CONNECTION_KEY',
-    'REDIS_HOST',
-    'REDIS_PORT',
-    'REDIS_PASSWORD'
+    ...REQUIRED_ENV_VARS,
+    'PORT',
+    'NODE_ENV'
 ];
 
-// Configuração do cliente Redis
-const redisClient = createClient({
-    socket: {
-        host: process.env.REDIS_HOST,
-        port: process.env.REDIS_PORT
-    },
-    password: process.env.REDIS_PASSWORD
-});
-
-redisClient.on('error', (err) => {
-    console.error('❌ Erro no Redis:', {
-        erro: err.message,
-        stack: err.stack,
-        timestamp: new Date().toISOString()
-    });
-});
-
-redisClient.on('connect', () => {
-    console.log('✅ Redis conectado com sucesso');
-});
-
-redisClient.on('reconnecting', () => {
-    console.log('🔄 Redis reconectando...');
-});
-
-// Conecta ao Redis
-(async () => {
-    try {
-        await redisClient.connect();
-    } catch (error) {
-        console.error('❌ Erro ao conectar ao Redis:', error);
-    }
-})();
-
-const redisStore = {
-    get: async (key) => {
-        try {
-            return await redisClient.get(key);
-        } catch (error) {
-            console.error('❌ Erro ao obter valor do Redis:', {
-                key,
-                erro: error.message,
-                timestamp: new Date().toISOString()
-            });
-            return null;
-        }
-    },
-    set: async (key, value, ttl) => {
-        try {
-            const result = await redisClient.set(key, value, {
-                EX: ttl
-            });
-            return result;
-        } catch (error) {
-            console.error('❌ Erro ao definir valor no Redis:', {
-                key,
-                erro: error.message,
-                timestamp: new Date().toISOString()
-            });
-            return null;
-        }
-    }
-};
+// Inicializa o Redis Store
+const redisStore = new RedisStore();
 
 // Tratamento de erros não capturados
 process.on('uncaughtException', (error) => {
@@ -100,6 +61,7 @@ process.on('SIGTERM', async () => {
     console.log('🛑 Recebido sinal SIGTERM, encerrando graciosamente...');
     try {
         if (whatsappService) await whatsappService.close();
+        await redisStore.disconnect();
         process.exit(0);
     } catch (error) {
         console.error('❌ Erro ao encerrar servidor:', error);
@@ -108,21 +70,6 @@ process.on('SIGTERM', async () => {
 });
 
 console.log('🚀 Iniciando servidor...');
-
-// Serviços
-const { GroqServices } = require('./services/groq-services');
-const { WebhookService } = require('./services/webhook-service');
-const { WhatsAppService } = require('./services/whatsapp-service');
-const { AIServices } = require('./services/ai-services');
-const { AudioService } = require('./services/audio-service');
-const { WhatsAppImageService } = require('./services/whatsapp-image-service');
-const { ImageService } = require('./services/image-service');
-const { BusinessHoursService } = require('./services/business-hours');
-
-console.log('✅ Módulos carregados');
-
-// Configurações
-const { RATE_LIMIT_CONFIG } = require('./config/settings');
 
 // Inicializa o app
 const app = express();
@@ -142,6 +89,12 @@ let aiServices;
 let audioService;
 let imageService;
 let whatsappImageService;
+let orderValidationService;
+let nuvemshopService;
+let trackingService;
+let cacheService;
+let mediaManagerService;
+let businessHoursService;
 
 // Função de inicialização
 async function initializeServices() {
@@ -162,6 +115,13 @@ async function initializeServices() {
                     throw new Error(`Variável de ambiente ${envVar} não definida`);
                 }
             }
+
+            // Inicializa serviços base
+            redisStore.connect();
+            console.log('✅ RedisStore conectado');
+
+            cacheService = new CacheService(redisStore);
+            console.log('✅ CacheService inicializado');
             
             // Inicializa o WhatsAppService primeiro
             whatsappService = new WhatsAppService();
@@ -172,12 +132,9 @@ async function initializeServices() {
             }
             console.log('✅ WhatsAppService inicializado');
 
-            // Inicializa os outros serviços
+            // Inicializa serviços de mídia
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
-            
-            webhookService = new WebhookService();
-            console.log('✅ WebhookService inicializado');
             
             audioService = new AudioService(groqServices, whatsappService);
             console.log('✅ AudioService inicializado');
@@ -187,28 +144,48 @@ async function initializeServices() {
 
             imageService = new ImageService(groqServices, whatsappService);
             console.log('✅ ImageService inicializado');
+
+            mediaManagerService = new MediaManagerService(audioService, imageService);
+            console.log('✅ MediaManagerService inicializado');
+
+            // Inicializa serviços de negócio
+            businessHoursService = new BusinessHoursService();
+            console.log('✅ BusinessHoursService inicializado');
+
+            nuvemshopService = new NuvemshopService(cacheService);
+            console.log('✅ NuvemshopService inicializado');
+
+            trackingService = new TrackingService();
+            console.log('✅ TrackingService inicializado');
+
+            orderValidationService = new OrderValidationService();
+            console.log('✅ OrderValidationService inicializado');
+
+            webhookService = new WebhookService();
+            console.log('✅ WebhookService inicializado');
             
-            // Inicializa o AIServices passando todas as dependências
+            // Inicializa o AIServices com todas as dependências
             aiServices = new AIServices(
                 whatsappService,
                 whatsappImageService,
-                null, // redisStore
-                null, // openAIService
-                null, // trackingService
-                null, // orderValidationService
-                null, // nuvemshopService
-                audioService // passa o audioService inicializado
+                redisStore,
+                null, // openAIService não é mais usado
+                trackingService,
+                orderValidationService,
+                nuvemshopService,
+                audioService,
+                imageService,
+                businessHoursService
             );
             console.log('✅ AIServices inicializado');
-            
-            console.log('✅ Todos os serviços inicializados com sucesso');
-            isReady = true;
+
             clearTimeout(timeout);
+            isReady = true;
             resolve();
         } catch (error) {
+            clearTimeout(timeout);
             console.error('❌ Erro ao inicializar serviços:', error);
             initError = error;
-            clearTimeout(timeout);
             reject(error);
         }
     });
@@ -218,188 +195,98 @@ async function initializeServices() {
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(bodyParser.json());
 
 // Rate limiting
-const limiter = rateLimit(RATE_LIMIT_CONFIG);
-app.use(limiter);
-
-// Healthcheck mais detalhado
-app.get('/', (req, res) => {
-    try {
-        const status = {
-            status: isReady ? 'ok' : 'initializing',
-            timestamp: new Date().toISOString(),
-            services: {
-                whatsapp: whatsappService ? 'initialized' : 'pending',
-                groq: groqServices ? 'initialized' : 'pending',
-                webhook: webhookService ? 'initialized' : 'pending',
-                ai: aiServices ? 'initialized' : 'pending',
-                audio: audioService ? 'initialized' : 'pending',
-                image: imageService ? 'initialized' : 'pending'
-            },
-            error: initError ? {
-                message: initError.message,
-                stack: initError.stack
-            } : null
-        };
-
-        if (isReady) {
-            res.json(status);
-        } else {
-            res.status(503).json(status);
-        }
-    } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
+const limiter = rateLimit({
+    windowMs: RATE_LIMIT_CONFIG.windowMs,
+    max: RATE_LIMIT_CONFIG.maxRequests,
+    message: 'Muitas requisições deste IP, por favor tente novamente mais tarde.'
 });
 
-// Webhook para receber mensagens do WhatsApp
+app.use('/webhook', limiter);
+
+// Middleware de verificação de prontidão
+app.use((req, res, next) => {
+    if (!isReady && req.path !== '/health') {
+        return res.status(503).json({
+            status: 'error',
+            message: 'Serviço ainda não está pronto',
+            error: initError?.message
+        });
+    }
+    next();
+});
+
+// Rotas
+app.get('/health', (req, res) => {
+    const status = isReady ? 'ok' : 'initializing';
+    const error = initError?.message;
+    
+    res.json({
+        status,
+        error,
+        services: {
+            whatsapp: !!whatsappService,
+            redis: redisStore.isConnected(),
+            ai: !!aiServices,
+            webhook: !!webhookService
+        },
+        timestamp: new Date().toISOString()
+    });
+});
+
 app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
         console.log('📥 Webhook recebido:', {
             headers: req.headers,
             tipo: req.body?.type,
-            messageId: req.body?.body?.key?.id,
-            fromMe: req.body?.body?.key?.fromMe,
             timestamp: new Date().toISOString()
         });
 
-        const webhookData = req.body;
-
-        // Verifica se é uma mensagem válida
-        if (!webhookData || !webhookData.body) {
-            console.log('⚠️ Webhook sem body:', webhookData);
-            return res.sendStatus(200);
+        if (!webhookService) {
+            throw new Error('WebhookService não inicializado');
         }
 
-        // Ignora mensagens do próprio bot
-        if (webhookData.body.key?.fromMe === true || webhookData.fromMe === true || 
-            (webhookData.body.message && typeof webhookData.body.message === 'string' && 
-             webhookData.body.message.startsWith('{"error":false,"messageId":'))) {
-            console.log('⚠️ Ignorando mensagem do próprio bot');
-            return res.sendStatus(200);
-        }
-
-        // Extrai a mensagem usando o WebhookService
-        console.log('🔄 Tentando extrair mensagem do webhook...');
-        const message = webhookService.extractMessageFromWebhook(webhookData);
-        
-        if (!message) {
-            console.log('⚠️ Não foi possível extrair a mensagem do webhook');
-            return res.sendStatus(200);
-        }
-
-        // Verifica se já processamos esta mensagem (usando Redis)
-        const messageKey = `processed_msg:${message.messageId}`;
-        const isProcessed = await redisStore.get(messageKey);
-        
-        if (isProcessed) {
-            console.log('⚠️ Mensagem já processada anteriormente:', {
-                messageId: message.messageId,
-                timestamp: new Date().toISOString()
-            });
-            return res.sendStatus(200);
-        }
-
-        // Marca a mensagem como processada antes de continuar
-        await redisStore.set(messageKey, 'true', 3600);
-
-        console.log('📝 Mensagem extraída com sucesso:', {
-            tipo: message.type,
-            de: message.from,
-            texto: message.text?.substring(0, 100),
-            temAudio: !!message.audioMessage,
-            temImagem: !!message.imageMessage,
-            messageId: message.messageId,
-            timestamp: new Date().toISOString()
-        });
-
-        // Processa a mensagem
-        console.log('🤖 Iniciando processamento da mensagem...');
-        const response = await aiServices.handleMessage(message);
-
-        if (response) {
-            console.log('📤 Resposta gerada com sucesso:', {
-                para: message.from,
-                resposta: typeof response === 'string' ? response.substring(0, 100) : 'Objeto de resposta',
-                timestamp: new Date().toISOString()
-            });
-
-            // Envia a resposta
-            console.log('📨 Tentando enviar resposta via WhatsApp...', {
-                para: message.from,
-                resposta: typeof response === 'string' ? response.substring(0, 100) : JSON.stringify(response).substring(0, 100)
-            });
-
-            const responseText = typeof response === 'string' ? response : JSON.stringify(response);
-            const sendResult = await whatsappService.sendText(message.from, responseText);
-            console.log('✅ Resposta enviada:', {
-                resultado: sendResult,
-                timestamp: new Date().toISOString()
-            });
-        } else {
-            console.log('⚠️ Nenhuma resposta gerada');
-        }
-
+        await webhookService.handleWebhook(req.body);
+        res.status(200).send('OK');
     } catch (error) {
-        console.error('❌ Erro no webhook:', {
-            erro: error.message,
-            stack: error.stack,
-            timestamp: new Date().toISOString()
+        console.error('❌ Erro ao processar webhook:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Erro ao processar webhook',
+            error: error.message
         });
     }
-
-    res.sendStatus(200);
 });
 
 // Função para iniciar o servidor
 async function startServer(maxRetries = 3) {
-    let retryCount = 0;
-
-    async function attemptStart() {
+    let retries = 0;
+    
+    while (retries < maxRetries) {
         try {
-            console.log(`🚀 Tentativa ${retryCount + 1} de ${maxRetries} de iniciar o servidor...`);
-            
-            // Aguarda a inicialização dos serviços
             await initializeServices();
             
-            // Inicia o servidor HTTP apenas se os serviços foram inicializados com sucesso
-            if (isReady) {
-                app.listen(port, () => {
-                    console.log(`🚀 Servidor rodando na porta ${port}`);
-                });
-                return true;
-            } else {
-                throw new Error('Serviços não foram inicializados corretamente');
-            }
-        } catch (error) {
-            console.error('❌ Erro ao iniciar servidor:', {
-                tentativa: retryCount + 1,
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
+            app.listen(port, () => {
+                console.log(`🚀 Servidor rodando na porta ${port}`);
+                console.log('✅ Todos os serviços inicializados com sucesso');
             });
-
-            retryCount++;
             
-            if (retryCount < maxRetries) {
-                console.log(`⏳ Aguardando 5 segundos antes da próxima tentativa...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                return attemptStart();
-            } else {
-                console.error('❌ Número máximo de tentativas excedido');
+            return;
+        } catch (error) {
+            retries++;
+            console.error(`❌ Tentativa ${retries}/${maxRetries} falhou:`, error);
+            
+            if (retries === maxRetries) {
+                console.error('❌ Número máximo de tentativas atingido. Encerrando...');
                 process.exit(1);
             }
+            
+            // Espera 5 segundos antes da próxima tentativa
+            await new Promise(resolve => setTimeout(resolve, 5000));
         }
     }
-
-    return attemptStart();
 }
 
 // Exporta para uso em testes
@@ -407,5 +294,8 @@ module.exports = { app, startServer };
 
 // Se executado diretamente, inicia o servidor
 if (require.main === module) {
-    startServer();
+    startServer().catch(error => {
+        console.error('❌ Erro fatal ao iniciar servidor:', error);
+        process.exit(1);
+    });
 }

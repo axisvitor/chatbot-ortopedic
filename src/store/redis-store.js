@@ -1,187 +1,202 @@
-const Redis = require('ioredis');
+const { createClient } = require('redis');
 const { REDIS_CONFIG } = require('../config/settings');
 
 class RedisStore {
     constructor() {
-        this.client = new Redis({
-            host: REDIS_CONFIG.host,
-            port: REDIS_CONFIG.port,
-            password: REDIS_CONFIG.password,
-            keyPrefix: REDIS_CONFIG.prefix,
-            retryStrategy: (times) => {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
-            }
+        this.client = createClient({
+            socket: {
+                host: process.env.REDIS_HOST,
+                port: process.env.REDIS_PORT
+            },
+            password: process.env.REDIS_PASSWORD
         });
 
-        this.client.on('error', (error) => {
-            console.error('[Redis] Erro de conexão:', error);
+        this.client.on('error', (err) => {
+            console.error('[Redis] Erro no Redis:', {
+                erro: err.message,
+                stack: err.stack,
+                timestamp: new Date().toISOString()
+            });
         });
 
         this.client.on('connect', () => {
-            console.log('[Redis] Conectado com sucesso');
+            console.log('[Redis] Redis conectado com sucesso');
         });
-    }
 
-    /**
-     * Armazena um valor no Redis
-     * @param {string} key - Chave para armazenamento
-     * @param {string} value - Valor a ser armazenado
-     * @param {number} ttl - Tempo de vida em segundos
-     * @returns {Promise<void>}
-     */
-    async set(key, value, ttl = REDIS_CONFIG.ttl) {
-        try {
-            if (ttl) {
-                await this.client.set(key, value, 'EX', ttl);
-            } else {
-                await this.client.set(key, value);
+        // Conecta ao Redis
+        (async () => {
+            try {
+                await this.client.connect();
+            } catch (error) {
+                console.error('[Redis] Erro ao conectar ao Redis:', error);
             }
-        } catch (error) {
-            console.error('[Redis] Erro ao armazenar:', error);
-            throw error;
-        }
+        })();
     }
 
-    /**
-     * Recupera um valor do Redis
-     * @param {string} key - Chave para busca
-     * @returns {Promise<string|null>} Valor armazenado ou null se não encontrado
-     */
     async get(key) {
         try {
-            return await this.client.get(key);
+            const value = await this.client.get(key);
+            return value;
         } catch (error) {
-            console.error('[Redis] Erro ao recuperar:', error);
-            throw error;
+            console.error('[Redis] Erro ao buscar do cache:', {
+                key,
+                error: error.message
+            });
+            return null;
         }
     }
 
-    /**
-     * Remove um valor do Redis
-     * @param {string} key - Chave para remoção
-     * @returns {Promise<void>}
-     */
+    async set(key, value, ttl = REDIS_CONFIG.ttl) {
+        try {
+            await this.client.set(key, value, {
+                EX: ttl
+            });
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao salvar no cache:', {
+                key,
+                error: error.message
+            });
+            return false;
+        }
+    }
+
     async del(key) {
         try {
             await this.client.del(key);
+            return true;
         } catch (error) {
-            console.error('[Redis] Erro ao remover:', error);
-            throw error;
+            console.error('[Redis] Erro ao deletar do cache:', {
+                key,
+                error: error.message
+            });
+            return false;
         }
     }
 
-    /**
-     * Verifica se uma chave existe
-     * @param {string} key - Chave para verificação
-     * @returns {Promise<boolean>} true se a chave existir
-     */
-    async exists(key) {
-        try {
-            return await this.client.exists(key) === 1;
-        } catch (error) {
-            console.error('[Redis] Erro ao verificar existência:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Busca todas as chaves que correspondem a um padrão
-     * @param {string} pattern - Padrão para busca (ex: "user:*")
-     * @returns {Promise<string[]>} Lista de chaves encontradas
-     */
     async keys(pattern) {
         try {
             return await this.client.keys(pattern);
         } catch (error) {
-            console.error('[Redis] Erro ao buscar chaves:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Fecha a conexão com o Redis
-     * @returns {Promise<void>}
-     */
-    async close() {
-        try {
-            await this.client.quit();
-        } catch (error) {
-            console.error('[Redis] Erro ao fechar conexão:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Adiciona um valor ao final de uma lista
-     * @param {string} key - Chave da lista
-     * @param {string} value - Valor a ser adicionado
-     * @returns {Promise<number>} Novo tamanho da lista
-     */
-    async rpush(key, value) {
-        try {
-            return await this.client.rpush(key, value);
-        } catch (error) {
-            console.error('[Redis] Erro ao adicionar à lista:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Recupera um intervalo de elementos de uma lista
-     * @param {string} key - Chave da lista
-     * @param {number} start - Índice inicial
-     * @param {number} stop - Índice final (-1 para todos)
-     * @returns {Promise<string[]>} Lista de valores
-     */
-    async lrange(key, start, stop) {
-        try {
-            return await this.client.lrange(key, start, stop);
-        } catch (error) {
-            console.error('[Redis] Erro ao recuperar lista:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Define um tempo de expiração para uma chave
-     * @param {string} key - Chave para definir expiração
-     * @param {number} seconds - Tempo em segundos
-     * @returns {Promise<boolean>} true se definido com sucesso
-     */
-    async expire(key, seconds) {
-        try {
-            return await this.client.expire(key, seconds);
-        } catch (error) {
-            console.error('[Redis] Erro ao definir expiração:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Deleta chaves por padrão
-     * @param {string} pattern - Padrão para deletar
-     * @returns {Promise<boolean>} true se deletado com sucesso
-     */
-    async deletePattern(pattern) {
-        try {
-            const keys = await this.client.keys(pattern);
-            if (keys.length > 0) {
-                await this.client.del(keys);
-                console.log('🗑️ Chaves deletadas:', {
-                    pattern,
-                    quantidade: keys.length,
-                    timestamp: new Date().toISOString()
-                });
-            }
-            return true;
-        } catch (error) {
-            console.error('[Redis] Erro ao deletar chaves:', {
+            console.error('[Redis] Erro ao buscar chaves:', {
                 pattern,
-                erro: error.message,
-                timestamp: new Date().toISOString()
+                error: error.message
+            });
+            return [];
+        }
+    }
+
+    async exists(key) {
+        try {
+            return await this.client.exists(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao verificar existência:', {
+                key,
+                error: error.message
             });
             return false;
+        }
+    }
+
+    async ttl(key) {
+        try {
+            return await this.client.ttl(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao buscar TTL:', {
+                key,
+                error: error.message
+            });
+            return -1;
+        }
+    }
+
+    async expire(key, ttl) {
+        try {
+            return await this.client.expire(key, ttl);
+        } catch (error) {
+            console.error('[Redis] Erro ao definir TTL:', {
+                key,
+                ttl,
+                error: error.message
+            });
+            return false;
+        }
+    }
+
+    async incr(key) {
+        try {
+            return await this.client.incr(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao incrementar:', {
+                key,
+                error: error.message
+            });
+            return 0;
+        }
+    }
+
+    async decr(key) {
+        try {
+            return await this.client.decr(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao decrementar:', {
+                key,
+                error: error.message
+            });
+            return 0;
+        }
+    }
+
+    async hget(key, field) {
+        try {
+            return await this.client.hGet(key, field);
+        } catch (error) {
+            console.error('[Redis] Erro ao buscar hash:', {
+                key,
+                field,
+                error: error.message
+            });
+            return null;
+        }
+    }
+
+    async hset(key, field, value) {
+        try {
+            await this.client.hSet(key, field, value);
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao salvar hash:', {
+                key,
+                field,
+                error: error.message
+            });
+            return false;
+        }
+    }
+
+    async hdel(key, field) {
+        try {
+            await this.client.hDel(key, field);
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao deletar hash:', {
+                key,
+                field,
+                error: error.message
+            });
+            return false;
+        }
+    }
+
+    async hgetall(key) {
+        try {
+            return await this.client.hGetAll(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao buscar todos os campos do hash:', {
+                key,
+                error: error.message
+            });
+            return {};
         }
     }
 }

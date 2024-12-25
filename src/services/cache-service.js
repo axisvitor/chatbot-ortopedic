@@ -7,139 +7,71 @@ class CacheService {
         this.config = NUVEMSHOP_CONFIG.cache;
     }
 
-    /**
-     * Gera uma chave de cache
-     * @param {string} prefix - Prefixo da chave
-     * @param {string|number} identifier - Identificador único
-     * @param {Object} params - Parâmetros adicionais
-     * @returns {string} Chave de cache
-     */
-    generateKey(prefix, identifier = '', params = {}) {
-        const paramsString = Object.entries(params)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([key, value]) => `${key}=${value}`)
-            .join('&');
-
-        return `${this.config.prefix}${prefix}:${identifier}${paramsString ? `:${paramsString}` : ''}`;
+    generateKey(prefix, ...parts) {
+        return `${this.config.prefix}${prefix}:${parts.join(':')}`;
     }
 
-    /**
-     * Obtém dados do cache
-     * @param {string} key - Chave do cache
-     * @returns {Promise<any>} Dados do cache ou null
-     */
     async get(key) {
         try {
-            const data = await this.redisStore.get(key);
-            return data ? JSON.parse(data) : null;
+            const value = await this.redisStore.get(key);
+            return value ? JSON.parse(value) : null;
         } catch (error) {
-            console.error('[Cache] Erro ao obter dados:', error);
+            console.error('[Cache] Erro ao buscar do cache:', {
+                key,
+                error: error.message
+            });
             return null;
         }
     }
 
-    /**
-     * Armazena dados no cache
-     * @param {string} key - Chave do cache
-     * @param {any} data - Dados a serem armazenados
-     * @param {number} ttl - Tempo de vida em segundos
-     * @returns {Promise<boolean>} Sucesso da operação
-     */
-    async set(key, data, ttl) {
+    async set(key, value, ttl = this.config.ttl.default) {
         try {
-            await this.redisStore.set(key, JSON.stringify(data), ttl);
-            return true;
+            const serialized = JSON.stringify(value);
+            return await this.redisStore.set(key, serialized, ttl);
         } catch (error) {
-            console.error('[Cache] Erro ao armazenar dados:', error);
+            console.error('[Cache] Erro ao salvar no cache:', {
+                key,
+                error: error.message
+            });
             return false;
         }
     }
 
-    /**
-     * Invalida uma chave específica
-     * @param {string} key - Chave a ser invalidada
-     * @returns {Promise<boolean>} Sucesso da operação
-     */
-    async invalidate(key) {
+    async delete(key) {
         try {
-            await this.redisStore.del(key);
-            return true;
+            return await this.redisStore.del(key);
         } catch (error) {
-            console.error('[Cache] Erro ao invalidar chave:', error);
+            console.error('[Cache] Erro ao deletar do cache:', {
+                key,
+                error: error.message
+            });
             return false;
         }
     }
 
-    /**
-     * Invalida múltiplas chaves por padrão
-     * @param {string} pattern - Padrão de chaves a serem invalidadas
-     * @returns {Promise<number>} Número de chaves invalidadas
-     */
-    async invalidatePattern(pattern) {
+    async getTTL(key) {
         try {
-            const keys = await this.redisStore.keys(`${this.config.prefix}${pattern}*`);
-            if (keys.length === 0) return 0;
-
-            // Invalida em lotes para evitar sobrecarga
-            const batches = this.chunkArray(keys, this.config.invalidation.batchSize);
-            let invalidatedCount = 0;
-
-            for (const batch of batches) {
-                await Promise.all(batch.map(key => this.invalidate(key)));
-                invalidatedCount += batch.length;
-            }
-
-            console.log(`[Cache] Invalidadas ${invalidatedCount} chaves com padrão: ${pattern}`);
-            return invalidatedCount;
+            return await this.redisStore.ttl(key);
         } catch (error) {
-            console.error('[Cache] Erro ao invalidar padrão:', error);
-            return 0;
+            console.error('[Cache] Erro ao buscar TTL:', {
+                key,
+                error: error.message
+            });
+            return -1;
         }
     }
 
-    /**
-     * Divide um array em lotes menores
-     * @param {Array} array - Array a ser dividido
-     * @param {number} size - Tamanho de cada lote
-     * @returns {Array} Array de lotes
-     */
-    chunkArray(array, size) {
-        const chunks = [];
-        for (let i = 0; i < array.length; i += size) {
-            chunks.push(array.slice(i, i + size));
-        }
-        return chunks;
-    }
-
-    /**
-     * Obtém TTL apropriado baseado no tipo de dado
-     * @param {string} type - Tipo de dado
-     * @param {Object} context - Contexto adicional
-     * @returns {number} TTL em segundos
-     */
-    getTTL(type, context = {}) {
-        const ttl = this.config.ttl;
-
-        switch (type) {
-            case 'products':
-                return ttl.products;
-            case 'orders':
-                // Pedidos recentes têm TTL menor
-                return context.isRecent ? ttl.orders.recent : ttl.orders.old;
-            case 'categories':
-                return ttl.categories;
-            case 'customers':
-                return ttl.customers;
-            case 'inventory':
-                return ttl.inventory;
-            case 'shipping':
-                return ttl.shipping;
-            case 'payments':
-                return ttl.payments;
-            default:
-                return ttl.default;
+    async exists(key) {
+        try {
+            return await this.redisStore.exists(key);
+        } catch (error) {
+            console.error('[Cache] Erro ao verificar existência:', {
+                key,
+                error: error.message
+            });
+            return false;
         }
     }
 }
 
-module.exports = { CacheService }; 
+module.exports = { CacheService };

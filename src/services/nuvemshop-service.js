@@ -1,10 +1,14 @@
 const axios = require('axios');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
 const { CacheService } = require('./cache-service');
+const { OrderApi } = require('./nuvemshop/api/order');
+const { ProductApi } = require('./nuvemshop/api/product');
 
 class NuvemshopService {
     constructor() {
         this.client = null;
+        this.orderApi = new OrderApi();
+        this.productApi = new ProductApi();
         this.cacheService = new CacheService();
         this.initializeClient();
     }
@@ -74,6 +78,53 @@ class NuvemshopService {
     }
 
     async getOrderByNumber(orderNumber) {
+        return this.orderApi.getOrderByNumber(orderNumber);
+    }
+
+    async getOrder(orderId) {
+        return this.orderApi.getOrder(orderId);
+    }
+
+    formatOrderStatus(status) {
+        return this.orderApi.formatOrderStatus(status);
+    }
+
+    formatPrice(price) {
+        return this.orderApi.formatPrice(price);
+    }
+
+    async getProduct(productId) {
+        return this.productApi.getProduct(productId);
+    }
+
+    async searchProducts(query) {
+        return this.productApi.searchProducts(query);
+    }
+
+    async getRecentOrders(days = 7) {
+        try {
+            return await this.orderApi.getRecentOrders(days);
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao buscar pedidos recentes:', {
+                days,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    async getPendingOrders() {
+        try {
+            return await this.orderApi.getPendingOrders();
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao buscar pedidos pendentes:', {
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    async getOrderByNumber(orderNumber) {
         try {
             const cleanOrderNumber = String(orderNumber).replace(/[#\s]/g, '');
             
@@ -123,32 +174,6 @@ class NuvemshopService {
                 erro: error.message,
                 stack: error.stack,
                 resposta: error.response?.data,
-                timestamp: new Date().toISOString()
-            });
-            return null;
-        }
-    }
-
-    async getOrder(orderId) {
-        try {
-            const cacheKey = this.generateCacheKey('order', orderId);
-            return this.getCachedData(
-                cacheKey,
-                async () => {
-                    const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`);
-                    return response.data;
-                },
-                NUVEMSHOP_CONFIG.cache.ordersTtl
-            );
-        } catch (error) {
-            console.error('[Nuvemshop] Erro ao buscar detalhes do pedido:', {
-                erro: error.message,
-                stack: error.stack,
-                pedidoId: orderId,
-                status: error.response?.status,
-                data: error.response?.data,
-                url: error.config?.url,
-                storeId: NUVEMSHOP_CONFIG.userId,
                 timestamp: new Date().toISOString()
             });
             return null;
@@ -662,6 +687,210 @@ class NuvemshopService {
                 timestamp: new Date().toISOString()
             });
             return false;
+        }
+    }
+
+    async getOrder(orderId) {
+        const cacheKey = `nuvemshop:order:${orderId}`;
+        const cached = await this.cacheService.get(cacheKey);
+        
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
+        const order = await this.orderApi.getOrder(orderId);
+        if (order) {
+            await this.cacheService.set(cacheKey, JSON.stringify(order), 3600); // 1 hora
+        }
+        return order;
+    }
+
+    async getOrderByNumber(orderNumber) {
+        const cacheKey = `nuvemshop:order:number:${orderNumber}`;
+        const cached = await this.cacheService.get(cacheKey);
+        
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
+        const order = await this.orderApi.getOrderByNumber(orderNumber);
+        if (order) {
+            await this.cacheService.set(cacheKey, JSON.stringify(order), 3600);
+        }
+        return order;
+    }
+
+    async searchOrders(params) {
+        return this.orderApi.searchOrders(params);
+    }
+
+    async getProduct(productId) {
+        const cacheKey = `nuvemshop:product:${productId}`;
+        const cached = await this.cacheService.get(cacheKey);
+        
+        if (cached) {
+            return JSON.parse(cached);
+        }
+
+        const product = await this.productApi.getProduct(productId);
+        if (product) {
+            await this.cacheService.set(cacheKey, JSON.stringify(product), 3600);
+        }
+        return product;
+    }
+
+    async searchProducts(query, params = {}) {
+        return this.productApi.searchProducts(query, params);
+    }
+
+    formatOrderStatus(status) {
+        return this.orderApi.formatOrderStatus(status);
+    }
+
+    formatPrice(value) {
+        return this.orderApi.formatPrice(value);
+    }
+
+    // Métodos de Produto
+    async getProduct(productId) {
+        try {
+            return await this.productApi.getProduct(productId);
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao buscar produto:', {
+                productId,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    async searchProducts(query, params = {}) {
+        try {
+            return await this.productApi.searchProducts(query, params);
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao buscar produtos:', {
+                query,
+                params,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    async getProductsByCategory(categoryId, params = {}) {
+        try {
+            return await this.productApi.getProductsByCategory(categoryId, params);
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao buscar produtos por categoria:', {
+                categoryId,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    async getProductVariants(productId) {
+        try {
+            return await this.productApi.getProductVariants(productId);
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao buscar variantes do produto:', {
+                productId,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    // Métodos de Formatação e Utilidades
+    formatOrderStatus(status) {
+        return this.orderApi.formatOrderStatus(status);
+    }
+
+    formatShippingStatus(status) {
+        return this.orderApi.formatShippingStatus(status);
+    }
+
+    formatPrice(value, options = {}) {
+        return this.productApi.formatPrice(value, options);
+    }
+
+    formatProductDimensions(variant) {
+        return this.productApi.formatDimensions(variant);
+    }
+
+    // Métodos Auxiliares
+    calculateDeliveryEstimate(order) {
+        return this.orderApi.calculateDeliveryEstimate(order);
+    }
+
+    calculateProductDiscount(variant) {
+        return this.productApi.calculateDiscount(variant);
+    }
+
+    // Métodos de Resposta para o Chatbot
+    async formatOrderResponse(order) {
+        try {
+            const status = this.formatOrderStatus(order.status);
+            const shippingStatus = order.shipping_status ? 
+                this.formatShippingStatus(order.shipping_status) : null;
+            const deliveryEstimate = this.calculateDeliveryEstimate(order);
+
+            return {
+                number: order.number,
+                status,
+                total: this.formatPrice(order.total),
+                createdAt: new Date(order.created_at).toLocaleDateString('pt-BR'),
+                customer: order.customer?.name,
+                shipping: {
+                    status: shippingStatus,
+                    trackingNumber: order.shipping_tracking_number,
+                    estimatedDelivery: deliveryEstimate?.formatted
+                },
+                products: order.products?.map(product => ({
+                    name: product.name,
+                    quantity: product.quantity,
+                    price: this.formatPrice(product.price)
+                }))
+            };
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao formatar resposta do pedido:', {
+                orderNumber: order.number,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    async formatProductResponse(product) {
+        try {
+            const mainVariant = product.variants?.[0];
+            const mainImage = this.productApi.extractMainImage(product);
+            const discount = mainVariant ? this.calculateProductDiscount(mainVariant) : null;
+            const dimensions = mainVariant ? this.formatProductDimensions(mainVariant) : null;
+
+            return {
+                name: product.name,
+                description: product.description,
+                price: mainVariant ? this.formatPrice(mainVariant.price) : null,
+                discount: discount?.formattedPercentage,
+                stock: mainVariant?.stock || 0,
+                brand: product.brand,
+                dimensions: dimensions?.formatted,
+                image: mainImage?.url,
+                url: product.permalink,
+                variants: product.variants?.map(variant => ({
+                    name: variant.name,
+                    price: this.formatPrice(variant.price),
+                    stock: variant.stock,
+                    sku: variant.sku
+                }))
+            };
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao formatar resposta do produto:', {
+                productId: product.id,
+                error: error.message
+            });
+            throw error;
         }
     }
 }
