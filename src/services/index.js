@@ -1,12 +1,14 @@
+// Base Classes
 const { WhatsAppBase } = require('./whatsapp/base');
+const { TrackingBase } = require('./tracking/base');
+
+// Services
 const { WhatsAppService } = require('./whatsapp-service');
 const { WhatsAppImageService } = require('./whatsapp-image-service');
-const AIServices = require('./ai-services');
-const { RedisStore } = require('./redis-store');
-const { TrackingBase } = require('./tracking/base');
+const { AIServices } = require('./ai-services');
 const { TrackingService } = require('./tracking-service');
 const { GroqServices } = require('./groq-services');
-const AudioService = require('./audio-service');
+const { AudioService } = require('./audio-service');
 const { ImageService } = require('./image-service');
 const { BusinessHoursService } = require('./business-hours');
 const { NuvemshopService } = require('./nuvemshop-service');
@@ -16,14 +18,23 @@ const { WebhookService } = require('./webhook-service');
 const { CacheService } = require('./cache-service');
 const { MediaManagerService } = require('./media-manager-service');
 
+// Nuvemshop APIs
+const { 
+    NuvemshopAPIBase,
+    NuvemshopOrderAPI,
+    NuvemshopProductAPI 
+} = require('./nuvemshop/api');
+
 // Exporta todos os serviços
 module.exports = {
+    // Base Classes
     WhatsAppBase,
+    TrackingBase,
+    
+    // Services
     WhatsAppService,
     WhatsAppImageService,
     AIServices,
-    RedisStore,
-    TrackingBase,
     TrackingService,
     GroqServices,
     AudioService,
@@ -34,5 +45,10 @@ module.exports = {
     OpenAIService,
     WebhookService,
     CacheService,
-    MediaManagerService
+    MediaManagerService,
+    
+    // Nuvemshop APIs
+    NuvemshopAPIBase,
+    NuvemshopOrderAPI,
+    NuvemshopProductAPI
 };

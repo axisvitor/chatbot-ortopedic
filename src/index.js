@@ -1,51 +1,116 @@
-// Importa todos os serviços do arquivo de serviços
+// Services
 const {
-    AIServices,
+    // Base Classes
     WhatsAppBase,
+    TrackingBase,
+    
+    // Core Services
     WhatsAppService,
     WhatsAppImageService,
-    OpenAIService,
-    TrackingBase,
+    AIServices,
     TrackingService,
     OrderValidationService,
+    
+    // Integration Services
     GroqServices,
-    BusinessHoursService,
+    OpenAIService,
     NuvemshopService,
+    
+    // Media Services
     AudioService,
     ImageService,
+    MediaManagerService,
+    
+    // Utility Services
+    BusinessHoursService,
     WebhookService,
     CacheService,
-    MediaManagerService
+    
+    // Nuvemshop APIs
+    NuvemshopAPIBase,
+    NuvemshopOrderAPI,
+    NuvemshopProductAPI
 } = require('./services');
 
 // Store
 const { RedisStore } = require('./store/redis-store');
 
-// Configurações
-const { REDIS_CONFIG } = require('./config/settings');
+// Utils
+const {
+    formatTimeAgo,
+    httpClient,
+    detectImageFormatFromBuffer,
+    detectImageFormat,
+    validateImageBuffer,
+    isValidBase64Image,
+    Queue,
+    decryptMedia
+} = require('./utils');
+
+// Configurations
+const { 
+    REDIS_CONFIG,
+    OPENAI_CONFIG,
+    GROQ_CONFIG,
+    WHATSAPP_CONFIG,
+    TRACKING_CONFIG,
+    BUSINESS_HOURS,
+    MEDIA_CONFIG,
+    NUVEMSHOP_CONFIG
+} = require('./config/settings');
 
 module.exports = {
-    // Services
-    AIServices,
+    // Base Classes
     WhatsAppBase,
+    TrackingBase,
+    
+    // Core Services
     WhatsAppService,
     WhatsAppImageService,
-    OpenAIService,
-    TrackingBase,
+    AIServices,
     TrackingService,
     OrderValidationService,
+    
+    // Integration Services
     GroqServices,
-    BusinessHoursService,
+    OpenAIService,
     NuvemshopService,
+    
+    // Media Services
     AudioService,
     ImageService,
+    MediaManagerService,
+    
+    // Utility Services
+    BusinessHoursService,
     WebhookService,
     CacheService,
-    MediaManagerService,
-
+    
+    // Nuvemshop APIs
+    NuvemshopAPIBase,
+    NuvemshopOrderAPI,
+    NuvemshopProductAPI,
+    
     // Store
     RedisStore,
-
-    // Configs
-    REDIS_CONFIG
-}; 
+    
+    // Utils
+    formatTimeAgo,
+    httpClient,
+    detectImageFormatFromBuffer,
+    detectImageFormat,
+    validateImageBuffer,
+    isValidBase64Image,
+    Queue,
+    decryptMedia,
+    
+    // Configurations
+    REDIS_CONFIG,
+    OPENAI_CONFIG,
+    GROQ_CONFIG,
+    WHATSAPP_CONFIG,
+    TRACKING_CONFIG,
+    BUSINESS_HOURS,
+    MEDIA_CONFIG,
+    NUVEMSHOP_CONFIG
+};
