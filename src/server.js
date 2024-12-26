@@ -195,6 +195,16 @@ app.use(morgan('dev'));
 app.use(cors());
 app.use(bodyParser.json());
 
+// Rota de healthcheck
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        message: 'Chatbot Ortopedic API',
+        version: '1.0.0',
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Rate limiting
 const limiter = rateLimit({
     windowMs: RATE_LIMIT_CONFIG.windowMs,
