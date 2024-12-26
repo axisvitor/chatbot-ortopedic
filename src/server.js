@@ -72,7 +72,10 @@ console.log('🚀 Iniciando servidor...');
 
 // Inicializa o app
 const app = express();
-app.set('trust proxy', true);
+app.set('trust proxy', req => {
+    // Confia apenas em requisições para a rota de health check
+    return req.path === '/health';
+});
 const port = process.env.PORT || 8080;
 
 console.log(`📝 Porta configurada: ${port}`);
@@ -131,14 +134,14 @@ async function initializeServices() {
             }
             console.log('✅ WhatsAppService inicializado');
 
-            // Inicializa serviços de mídia
+            // Inicializa outros serviços
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
-            
+
             audioService = new AudioService(groqServices, whatsappService);
             console.log('✅ AudioService inicializado');
-            
-            whatsappImageService = new WhatsAppImageService();
+
+            whatsappImageService = new WhatsAppImageService(whatsappService);
             console.log('✅ WhatsAppImageService inicializado');
 
             imageService = new ImageService(groqServices, whatsappService);
@@ -147,7 +150,6 @@ async function initializeServices() {
             mediaManagerService = new MediaManagerService(audioService, imageService);
             console.log('✅ MediaManagerService inicializado');
 
-            // Inicializa serviços de negócio
             businessHoursService = new BusinessHoursService();
             console.log('✅ BusinessHoursService inicializado');
 
@@ -160,10 +162,6 @@ async function initializeServices() {
             orderValidationService = new OrderValidationService();
             console.log('✅ OrderValidationService inicializado');
 
-            webhookService = new WebhookService();
-            console.log('✅ WebhookService inicializado');
-            
-            // Inicializa o AIServices com todas as dependências
             aiServices = new AIServices(
                 whatsappService,
                 whatsappImageService,
@@ -177,6 +175,9 @@ async function initializeServices() {
                 businessHoursService
             );
             console.log('✅ AIServices inicializado');
+
+            webhookService = new WebhookService(whatsappService, aiServices);
+            console.log('✅ WebhookService inicializado');
 
             clearTimeout(timeout);
             isReady = true;
@@ -204,27 +205,6 @@ app.get('/', (req, res) => {
         version: '1.0.0',
         timestamp: new Date().toISOString()
     });
-});
-
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: RATE_LIMIT_CONFIG.windowMs,
-    max: RATE_LIMIT_CONFIG.maxRequests,
-    message: 'Muitas requisições deste IP, por favor tente novamente mais tarde.'
-});
-
-app.use('/webhook', limiter);
-
-// Middleware de verificação de prontidão
-app.use((req, res, next) => {
-    if (!isReady && req.path !== '/health') {
-        return res.status(503).json({
-            status: 'error',
-            message: 'Serviço ainda não está pronto',
-            error: initError?.message
-        });
-    }
-    next();
 });
 
 // Rotas
@@ -257,7 +237,7 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             throw new Error('WebhookService não inicializado');
         }
 
-        await webhookService.handleNuvemshopWebhook(req.body, req.headers);
+        await webhookService.handleWebhook(req.body);
         res.status(200).send('OK');
     } catch (error) {
         console.error('❌ Erro ao processar webhook:', error);

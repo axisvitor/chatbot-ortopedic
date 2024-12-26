@@ -2,8 +2,48 @@ const crypto = require('crypto');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
 
 class WebhookService {
-    constructor() {
+    constructor(whatsappService, aiServices) {
+        this.whatsappService = whatsappService;
+        this.aiServices = aiServices;
         this.userAgent = 'API Loja Ortopedic (suporte@lojaortopedic.com.br)';
+    }
+
+    async handleWebhook(data) {
+        try {
+            // Verifica se é uma mensagem do WhatsApp
+            if (data.type === 'message') {
+                return this.handleWhatsAppMessage(data);
+            }
+
+            // Se não for mensagem do WhatsApp, trata como webhook da Nuvemshop
+            return this.handleNuvemshopWebhook(data);
+        } catch (error) {
+            console.error('[Webhook] Erro ao processar webhook:', error);
+            throw error;
+        }
+    }
+
+    async handleWhatsAppMessage(data) {
+        try {
+            const { message, from } = data;
+            
+            if (!message || !from) {
+                throw new Error('Mensagem inválida: faltam campos obrigatórios');
+            }
+
+            console.log(`[WhatsApp] Mensagem recebida de ${from}:`, message);
+
+            // Processa a mensagem usando o AIServices
+            const response = await this.aiServices.processMessage(message, from);
+            
+            // Envia a resposta de volta
+            await this.whatsappService.sendMessage(from, response);
+
+            return true;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao processar mensagem:', error);
+            throw error;
+        }
     }
 
     verifyNuvemshopWebhook(data, hmacHeader) {
@@ -20,7 +60,7 @@ class WebhookService {
         }
     }
 
-    handleNuvemshopWebhook(data, headers) {
+    async handleNuvemshopWebhook(data, headers) {
         try {
             const hmacHeader = headers['x-linkedstore-hmac-sha256'];
             
@@ -186,7 +226,6 @@ class WebhookService {
         }
     }
 
-    // Métodos auxiliares
     async notifyNewOrder(data) {
         try {
             const order = await this.nuvemshopService.getOrder(data.id);
