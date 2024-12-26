@@ -252,6 +252,23 @@ const LOGGING_CONFIG = {
     }
 };
 
+// Required Environment Variables
+const REQUIRED_ENV_VARS = [
+    'OPENAI_API_KEY',
+    'ASSISTANT_ID',
+    'GROQ_API_KEY',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'REDIS_PASSWORD',
+    'WAPI_URL',
+    'WAPI_TOKEN',
+    'WAPI_CONNECTION_KEY',
+    'NUVEMSHOP_ACCESS_TOKEN',
+    'NUVEMSHOP_USER_ID',
+    'NUVEMSHOP_SCOPE',
+    'NUVEMSHOP_API_URL'
+];
+
 module.exports = {
     OPENAI_CONFIG,
     GROQ_CONFIG,
@@ -264,5 +281,6 @@ module.exports = {
     BUSINESS_HOURS,
     RATE_LIMIT_CONFIG,
     LOGGING_CONFIG,
-    validateEnvVar
+    validateEnvVar,
+    REQUIRED_ENV_VARS
 };
