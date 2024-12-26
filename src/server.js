@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const { RedisStore } = require('./store/redis-store');
 
 // Importa todos os serviços do arquivo centralizado
 const {
@@ -19,8 +20,7 @@ const {
     NuvemshopService,
     TrackingService,
     CacheService,
-    MediaManagerService,
-    RedisStore
+    MediaManagerService
 } = require('./services');
 
 // Configurações
