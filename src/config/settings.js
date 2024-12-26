@@ -252,6 +252,15 @@ const LOGGING_CONFIG = {
     }
 };
 
+// Cache Configuration
+const CACHE_CONFIG = {
+    prefix: 'cache:',
+    orderTTL: 24 * 60 * 60, // 24 horas em segundos
+    customerTTL: 7 * 24 * 60 * 60, // 7 dias em segundos
+    productTTL: 24 * 60 * 60, // 24 horas em segundos
+    trackingTTL: 12 * 60 * 60 // 12 horas em segundos
+};
+
 // Required Environment Variables
 const REQUIRED_ENV_VARS = [
     'OPENAI_API_KEY',
@@ -282,5 +291,6 @@ module.exports = {
     RATE_LIMIT_CONFIG,
     LOGGING_CONFIG,
     validateEnvVar,
-    REQUIRED_ENV_VARS
+    REQUIRED_ENV_VARS,
+    CACHE_CONFIG
 };
