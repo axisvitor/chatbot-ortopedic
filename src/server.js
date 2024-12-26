@@ -249,6 +249,32 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     }
 });
 
+// Rota para enviar mensagens de texto (W-API)
+app.post('/message/send-text', async (req, res) => {
+    try {
+        const { phoneNumber, text, messageId, message, delayMessage } = req.body;
+
+        if (!phoneNumber || !text) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'phoneNumber e text são obrigatórios'
+            });
+        }
+
+        // Envia a mensagem usando o WhatsAppService que já está configurado com as credenciais da W-API
+        const response = await whatsappService.sendText(phoneNumber, text);
+
+        res.status(200).json(response);
+    } catch (error) {
+        console.error('❌ Erro ao enviar mensagem:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Erro ao enviar mensagem',
+            error: error.message
+        });
+    }
+});
+
 // Função para iniciar o servidor
 async function startServer(maxRetries = 3) {
     let retries = 0;
