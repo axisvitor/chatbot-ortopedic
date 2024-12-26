@@ -72,6 +72,7 @@ console.log('🚀 Iniciando servidor...');
 
 // Inicializa o app
 const app = express();
+app.set('trust proxy', true);
 const port = process.env.PORT || 8080;
 
 console.log(`📝 Porta configurada: ${port}`);
@@ -256,7 +257,7 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
             throw new Error('WebhookService não inicializado');
         }
 
-        await webhookService.handleWebhook(req.body);
+        await webhookService.handleNuvemshopWebhook(req.body, req.headers);
         res.status(200).send('OK');
     } catch (error) {
         console.error('❌ Erro ao processar webhook:', error);
