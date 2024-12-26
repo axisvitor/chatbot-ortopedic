@@ -34,8 +34,7 @@ const {
 // Lista de variáveis de ambiente requeridas
 const requiredEnvVars = [
     ...REQUIRED_ENV_VARS,
-    'PORT',
-    'NODE_ENV'
+    'PORT'
 ];
 
 // Inicializa o Redis Store
