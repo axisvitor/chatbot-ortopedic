@@ -3,9 +3,15 @@ const ffmpegStatic = require('@ffmpeg-installer/ffmpeg');
 const fs = require('fs').promises;
 const fse = require('fs-extra');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const { Queue } = require('../utils/queue');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
+const crypto = require('crypto');
+const stream = require('stream');
+const { promisify } = require('util');
+const pipeline = promisify(stream.pipeline);
 
 class AudioService {
     constructor(groqServices, whatsappClient) {
