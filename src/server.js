@@ -116,8 +116,7 @@ async function initializeServices() {
             }
 
             // Inicializa serviços base
-            redisStore.connect();
-            console.log('✅ RedisStore conectado');
+            console.log('✅ RedisStore inicializado');
 
             cacheService = new CacheService(redisStore);
             console.log('✅ CacheService inicializado');
