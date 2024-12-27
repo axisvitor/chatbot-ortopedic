@@ -13,7 +13,7 @@ class WebhookService {
             console.log('📥 Webhook payload:', JSON.stringify(data, null, 2));
 
             // Verifica se é uma mensagem do WhatsApp (W-API)
-            if (data.type === 'message' || data.tipo === 'message' || data.event === 'message') {
+            if (data.type === 'message' || data.tipo === 'message') {
                 return this.handleWhatsAppMessage(data);
             }
 
@@ -25,60 +25,174 @@ class WebhookService {
         }
     }
 
+    extractMessageContent(data) {
+        try {
+            // Se for o formato da W-API
+            if (data.body?.message) {
+                const messageData = this.extractMessageFromWebhook(data);
+                if (!messageData) {
+                    throw new Error('Não foi possível extrair os dados da mensagem');
+                }
+                return messageData;
+            }
+
+            // Se for o formato antigo
+            return {
+                text: data.message || data.text,
+                from: data.from || data.phoneNumber,
+                messageId: data.messageId,
+                type: 'text'
+            };
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao extrair conteúdo da mensagem:', error);
+            throw new Error('Formato de mensagem inválido: ' + error.message);
+        }
+    }
+
     async handleWhatsAppMessage(data) {
         try {
-            // Formato da W-API
-            if (data.event === 'message') {
-                const { body, from, id } = data;
-                
-                if (!body || !from) {
-                    console.error('[WhatsApp] Mensagem inválida (W-API):', data);
-                    throw new Error('Mensagem inválida: faltam campos obrigatórios (W-API)');
-                }
-
-                console.log(`[WhatsApp] Mensagem recebida de ${from}:`, body);
-
-                // Processa a mensagem usando o AIServices
-                const response = await this.aiServices.processMessage({
-                    type: 'message',
-                    from: from,
-                    text: body,
-                    messageId: id
-                });
-                
-                // Envia a resposta de volta
-                await this.whatsappService.sendText(from, response);
-
-                return true;
-            }
+            // Extrai o conteúdo da mensagem
+            const messageData = this.extractMessageContent(data);
             
-            // Formato do webhook
-            const { message, from, text, phoneNumber } = data;
-            const messageText = message || text;
-            const fromNumber = from || phoneNumber;
-            
-            if (!messageText || !fromNumber) {
-                console.error('[WhatsApp] Mensagem inválida (webhook):', data);
-                throw new Error('Mensagem inválida: faltam campos obrigatórios (webhook)');
+            if (!messageData.from) {
+                console.error('[WhatsApp] Mensagem inválida:', { messageData, data });
+                throw new Error('Mensagem inválida: faltam campos obrigatórios');
             }
 
-            console.log(`[WhatsApp] Mensagem recebida de ${fromNumber}:`, messageText);
+            console.log(`[WhatsApp] Mensagem recebida de ${messageData.pushName || messageData.from}:`, {
+                tipo: messageData.type,
+                texto: messageData.text,
+                temImagem: messageData.type === 'image',
+                temAudio: messageData.type === 'audio',
+                temDocumento: messageData.type === 'document'
+            });
 
             // Processa a mensagem usando o AIServices
             const response = await this.aiServices.processMessage({
-                type: 'message',
-                from: fromNumber,
-                text: messageText
+                type: messageData.type,
+                from: messageData.from,
+                text: messageData.text,
+                messageId: messageData.messageId,
+                pushName: messageData.pushName,
+                rawData: messageData // Passa os dados completos para processamento específico de mídia
             });
             
             // Envia a resposta de volta
-            await this.whatsappService.sendText(fromNumber, response);
+            await this.whatsappService.sendText(messageData.from, response);
 
             return true;
         } catch (error) {
             console.error('[WhatsApp] Erro ao processar mensagem:', error);
             throw error;
         }
+    }
+
+    extractMessageFromWebhook(webhookData) {
+        try {
+            console.log('🔍 [Webhook] Dados recebidos:', {
+                tipo: webhookData?.type,
+                temBody: !!webhookData?.body,
+                temMensagem: !!webhookData?.body?.message,
+                messageStructure: {
+                    hasConversation: !!webhookData?.body?.message?.conversation,
+                    hasExtendedText: !!webhookData?.body?.message?.extendedTextMessage?.text,
+                    hasDirectText: !!webhookData?.body?.text,
+                    messageTypes: Object.keys(webhookData?.body?.message || {})
+                },
+                headers: webhookData?.headers,
+                timestamp: new Date().toISOString()
+            });
+
+            // Validações básicas
+            if (!webhookData?.body?.key?.remoteJid || !webhookData?.body?.message) {
+                console.log('⚠️ [Webhook] Dados inválidos:', {
+                    temRemoteJid: !!webhookData?.body?.key?.remoteJid,
+                    temMessage: !!webhookData?.body?.message,
+                    raw: JSON.stringify(webhookData, null, 2)
+                });
+                return null;
+            }
+
+            // Extrai o texto da mensagem
+            let text = null;
+            const messageContent = webhookData.body.message;
+            if (messageContent.conversation) {
+                text = messageContent.conversation;
+            } else if (messageContent.extendedTextMessage?.text) {
+                text = messageContent.extendedTextMessage.text;
+            } else if (webhookData.body.text) {
+                text = webhookData.body.text;
+            }
+
+            // Mantém o objeto original do Baileys e apenas adiciona campos auxiliares
+            const messageData = {
+                ...webhookData.body, // Mantém toda a estrutura original
+                type: this.getMessageType(webhookData.body),
+                from: webhookData.body.key.remoteJid.replace('@s.whatsapp.net', ''),
+                messageId: webhookData.body.key.id,
+                text: text
+            };
+
+            console.log('📝 [Webhook] Dados básicos extraídos:', {
+                tipo: messageData.type,
+                de: messageData.from,
+                messageId: messageData.messageId,
+                texto: messageData.text,
+                timestamp: new Date(messageData.messageTimestamp * 1000).toISOString()
+            });
+
+            // Logs detalhados de mídia se presente
+            if (messageContent.imageMessage) {
+                console.log('🖼️ [Webhook] Imagem detectada:', {
+                    mimetype: messageContent.imageMessage.mimetype,
+                    caption: messageContent.imageMessage.caption?.substring(0, 100),
+                    mediaKey: !!messageContent.imageMessage.mediaKey,
+                    url: !!messageContent.imageMessage.url
+                });
+            }
+            if (messageContent.audioMessage) {
+                console.log('🎵 [Webhook] Áudio detectado:', {
+                    seconds: messageContent.audioMessage.seconds,
+                    mimetype: messageContent.audioMessage.mimetype,
+                    mediaKey: !!messageContent.audioMessage.mediaKey,
+                    url: !!messageContent.audioMessage.url
+                });
+            }
+            if (messageContent.documentMessage) {
+                console.log('📄 [Webhook] Documento detectado:', {
+                    filename: messageContent.documentMessage.fileName,
+                    mimetype: messageContent.documentMessage.mimetype,
+                    mediaKey: !!messageContent.documentMessage.mediaKey,
+                    url: !!messageContent.documentMessage.url
+                });
+            }
+
+            return messageData;
+        } catch (error) {
+            console.error('❌ [Webhook] Erro ao extrair mensagem:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+        }
+    }
+
+    getMessageType(webhookBody) {
+        if (!webhookBody?.message) return 'unknown';
+
+        // Verifica primeiro o texto direto do webhook
+        if (webhookBody.text) return 'text';
+
+        // Verifica a estrutura da mensagem
+        const message = webhookBody.message;
+        if (message.conversation) return 'text';
+        if (message.extendedTextMessage) return 'text';
+        if (message.imageMessage) return 'image';
+        if (message.audioMessage) return 'audio';
+        if (message.documentMessage) return 'document';
+        
+        return 'unknown';
     }
 
     verifyNuvemshopWebhook(data, hmacHeader) {
@@ -481,119 +595,6 @@ class WebhookService {
         } catch (error) {
             console.error('[Webhook] Erro ao enviar relatório de dados:', error);
         }
-    }
-
-    extractMessageFromWebhook(webhookData) {
-        try {
-            console.log('🔍 [Webhook] Dados recebidos:', {
-                tipo: webhookData?.type,
-                temBody: !!webhookData?.body,
-                temMensagem: !!webhookData?.body?.message,
-                messageStructure: {
-                    hasConversation: !!webhookData?.body?.message?.conversation,
-                    hasExtendedText: !!webhookData?.body?.message?.extendedTextMessage?.text,
-                    hasDirectText: !!webhookData?.body?.text,
-                    messageTypes: Object.keys(webhookData?.body?.message || {})
-                },
-                headers: webhookData?.headers,
-                timestamp: new Date().toISOString()
-            });
-
-            // Validações básicas
-            if (!webhookData?.body?.key?.remoteJid || !webhookData?.body?.message) {
-                console.log('⚠️ [Webhook] Dados inválidos:', {
-                    temRemoteJid: !!webhookData?.body?.key?.remoteJid,
-                    temMessage: !!webhookData?.body?.message,
-                    raw: JSON.stringify(webhookData, null, 2)
-                });
-                return null;
-            }
-
-            // Mantém o objeto original do Baileys e apenas adiciona campos auxiliares
-            const messageData = {
-                ...webhookData.body, // Mantém toda a estrutura original
-                type: this.getMessageType(webhookData.body),
-                from: webhookData.body.key.remoteJid.replace('@s.whatsapp.net', ''),
-                messageId: webhookData.body.key.id, // Adiciona o messageId explicitamente
-                text: webhookData.body.message?.conversation || 
-                      webhookData.body.message?.extendedTextMessage?.text ||
-                      webhookData.body.text || 
-                      null
-            };
-
-            console.log('📝 [Webhook] Dados básicos extraídos:', {
-                tipo: messageData.type,
-                de: messageData.from,
-                messageId: messageData.messageId, // Usa o messageId explícito
-                texto: messageData.text,
-                timestamp: new Date(messageData.messageTimestamp * 1000).toISOString()
-            });
-
-            // Logs detalhados de mídia se presente
-            const message = webhookData.body.message;
-            if (message.imageMessage) {
-                console.log('🖼️ [Webhook] Imagem detectada:', {
-                    mimetype: message.imageMessage.mimetype,
-                    caption: message.imageMessage.caption?.substring(0, 100),
-                    mediaKey: !!message.imageMessage.mediaKey,
-                    url: !!message.imageMessage.url
-                });
-            }
-            if (message.audioMessage) {
-                console.log('🎵 [Webhook] Áudio detectado:', {
-                    seconds: message.audioMessage.seconds,
-                    mimetype: message.audioMessage.mimetype,
-                    mediaKey: !!message.audioMessage.mediaKey,
-                    url: !!message.audioMessage.url
-                });
-            }
-            if (message.documentMessage) {
-                console.log('📄 [Webhook] Documento detectado:', {
-                    filename: message.documentMessage.fileName,
-                    mimetype: message.documentMessage.mimetype,
-                    mediaKey: !!message.documentMessage.mediaKey,
-                    url: !!message.documentMessage.url
-                });
-            }
-
-            console.log('✅ [Webhook] Mensagem processada:', {
-                tipo: messageData.type,
-                de: messageData.from,
-                messageId: messageData.messageId,
-                temTexto: !!messageData.text,
-                textoPreview: messageData.text?.substring(0, 100),
-                temImagem: !!messageData.message?.imageMessage,
-                temAudio: !!messageData.message?.audioMessage,
-                temDocumento: !!messageData.message?.documentMessage,
-                isGroup: messageData.isGroup,
-                timestamp: new Date().toISOString()
-            });
-
-            return messageData;
-        } catch (error) {
-            console.error('❌ [Webhook] Erro ao extrair mensagem:', {
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
-            return null;
-        }
-    }
-
-    getMessageType(webhookBody) {
-        if (!webhookBody?.message) return 'unknown';
-
-        // Verifica primeiro o texto direto do webhook
-        if (webhookBody.text) return 'text';
-
-        // Verifica a estrutura da mensagem
-        const message = webhookBody.message;
-        if (message.conversation) return 'text';
-        if (message.imageMessage) return 'image';
-        if (message.audioMessage) return 'audio';
-        if (message.documentMessage) return 'document';
-        
-        return 'unknown';
     }
 
     async registerWebhook(event, url) {
