@@ -67,8 +67,8 @@ class WebhookService {
                 temDocumento: messageData.type === 'document'
             });
 
-            // Processa a mensagem usando o AIServices
-            const response = await this.aiServices.handleMessage({
+            // Processa a mensagem usando o AIServices (que já envia a resposta)
+            await this.aiServices.handleMessage({
                 type: messageData.type,
                 from: messageData.from,
                 text: messageData.text,
@@ -76,9 +76,6 @@ class WebhookService {
                 pushName: messageData.pushName,
                 rawData: messageData // Passa os dados completos para processamento específico de mídia
             });
-            
-            // Envia a resposta de volta
-            await this.whatsappService.sendText(messageData.from, response);
 
             return true;
         } catch (error) {
