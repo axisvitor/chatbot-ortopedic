@@ -571,6 +571,7 @@ class AIServices {
             });
 
             return result;
+
         } catch (error) {
             console.error('❌ Erro ao enviar resposta:', {
                 para: to,
