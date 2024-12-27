@@ -2,6 +2,7 @@ const axios = require('axios');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { GroqServices } = require('./groq-services');
+const { OrderValidationService } = require('./order-validation-service');
 const FormData = require('form-data');
 
 class WhatsAppService {
@@ -11,6 +12,11 @@ class WhatsAppService {
         this.retryCount = 0;
         this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
         this.paymentProofMessages = {};
+        this.pendingProofs = new Map(); // Armazena comprovantes aguardando número do pedido
+        this.orderValidationService = new OrderValidationService();
+        
+        // Limpa comprovantes antigos a cada hora
+        setInterval(() => this.cleanupPendingProofs(), 60 * 60 * 1000);
     }
 
     async init() {
@@ -178,44 +184,6 @@ class WhatsAppService {
             }
 
             throw error;
-        }
-    }
-
-    async init() {
-        try {
-            console.log('🔄 Inicializando WhatsApp Service...');
-            
-            // Reseta contadores
-            this.retryCount = 0;
-            this.connectionKey = WHATSAPP_CONFIG.connectionKey;
-
-            // Inicializa cliente HTTP
-            this.client = axios.create({
-                baseURL: WHATSAPP_CONFIG.apiUrl,
-                headers: {
-                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-            });
-
-            // Adiciona interceptors
-            this.addInterceptor();
-
-            console.log('✅ WhatsApp Service inicializado:', {
-                baseUrl: WHATSAPP_CONFIG.apiUrl,
-                chaveConexao: this.connectionKey,
-                timestamp: new Date().toISOString()
-            });
-
-            return true;
-        } catch (error) {
-            console.error('❌ Erro ao inicializar WhatsApp Service:', {
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
-            return false;
         }
     }
 
@@ -631,14 +599,15 @@ class WhatsAppService {
     async handleOrderNumber(message) {
         try {
             // Verifica se tem um comprovante pendente para este número
-            if (!this.paymentProofMessages || !this.paymentProofMessages[message.from]) {
+            const pendingProof = this.pendingProofs.get(message.from);
+            const hasLegacyProof = this.paymentProofMessages[message.from];
+
+            if (!pendingProof && !hasLegacyProof) {
                 return false;
             }
 
-            // Extrai o número do pedido da mensagem
-            const orderNumber = message.body.trim();
-
-            // Valida se é um número de pedido válido (você pode adicionar mais validações aqui)
+            // Extrai e valida o número do pedido
+            const orderNumber = this.orderValidationService.extractOrderNumber(message.body);
             if (!orderNumber) {
                 await this.sendText(
                     message.from,
@@ -647,28 +616,39 @@ class WhatsAppService {
                 return true;
             }
 
-            // Recupera a mensagem do comprovante
-            const proofMessage = this.paymentProofMessages[message.from];
+            // Valida o pedido no sistema
+            const order = await this.orderValidationService.validateOrderNumber(orderNumber);
+            if (!order) {
+                await this.sendText(
+                    message.from,
+                    `❌ Não encontrei o pedido #${orderNumber}. Por favor, verifique o número e tente novamente.`
+                );
+                return true;
+            }
 
-            // Encaminha o número do pedido para o financeiro
+            // Recupera a mensagem do comprovante (do sistema novo ou legado)
+            const proofMessage = pendingProof?.message || this.paymentProofMessages[message.from];
+
+            // Encaminha o comprovante e o número do pedido para o financeiro
             const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
             if (numeroFinanceiro) {
                 await this.sendText(
                     numeroFinanceiro,
-                    `📦 *Número do Pedido Recebido*\nPedido: #${orderNumber}\nCliente: ${message.from}`
+                    `📦 *Número do Pedido Recebido*\nPedido: #${order.number}\nCliente: ${message.from}`
                 );
             }
             
             // Confirma para o cliente
             await this.sendText(
                 message.from,
-                `✅ Recebi o número do pedido #${orderNumber}. Nossa equipe financeira já está com seu comprovante e fará a validação o mais breve possível.`
+                `✅ Recebi o número do pedido #${order.number}. Nossa equipe financeira já está com seu comprovante e fará a validação o mais breve possível.`
             );
 
-            // Limpa o comprovante da memória
+            // Limpa os comprovantes da memória
+            this.pendingProofs.delete(message.from);
             delete this.paymentProofMessages[message.from];
+            
             return true;
-
         } catch (error) {
             console.error('❌ Erro ao processar número do pedido:', error);
             throw error;
