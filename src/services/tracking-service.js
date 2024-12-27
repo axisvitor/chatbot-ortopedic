@@ -305,6 +305,19 @@ class TrackingService {
 
     async notifyFinancialDepartment(trackingNumber, trackInfo) {
         try {
+            // Checa se já notificou recentemente
+            const cacheKey = `tax_notification:${trackingNumber}`;
+            const lastNotification = await this.redisStore.get(cacheKey);
+            
+            if (lastNotification) {
+                console.log('ℹ️ Notificação já enviada recentemente:', {
+                    rastreio: trackingNumber,
+                    ultima: new Date(lastNotification).toISOString(),
+                    timestamp: new Date().toISOString()
+                });
+                return;
+            }
+
             // Busca informações do pedido relacionado
             const orderInfo = await this.nuvemshopService.getOrderByTrackingNumber(trackingNumber);
 
@@ -328,6 +341,9 @@ class TrackingService {
                 body: message,
                 from: 'SISTEMA'
             }, orderInfo?.number);
+
+            // Guarda no cache que já notificou (24 horas)
+            await this.redisStore.set(cacheKey, new Date().toISOString(), 24 * 60 * 60);
 
             console.log('✅ Notificação de taxação enviada:', {
                 pedido: orderInfo?.number,
