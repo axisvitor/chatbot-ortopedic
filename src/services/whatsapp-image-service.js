@@ -252,6 +252,54 @@ class WhatsAppImageService {
         }
     }
 
+    /**
+     * Verifica se uma imagem parece ser um comprovante de pagamento
+     * @param {Object} mediaMessage - Mensagem de mídia do WhatsApp
+     * @returns {Promise<boolean>} true se parece ser um comprovante
+     */
+    async isLikelyPaymentProof(mediaMessage) {
+        try {
+            if (!mediaMessage?.imageMessage) return false;
+
+            // Verifica o tipo MIME
+            const { mimetype } = mediaMessage.imageMessage;
+            const allowedMimes = WHATSAPP_CONFIG.departments.financial.paymentProofs.allowedTypes;
+            
+            if (!allowedMimes.includes(mimetype)) {
+                console.log('📝 Tipo MIME não compatível com comprovante:', {
+                    tipo: mimetype,
+                    permitidos: allowedMimes,
+                    timestamp: new Date().toISOString()
+                });
+                return false;
+            }
+
+            // Se tiver caption, verifica palavras-chave
+            const caption = mediaMessage.imageMessage.caption?.toLowerCase() || '';
+            const keywords = ['comprovante', 'pagamento', 'pix', 'transferência', 'ted', 'doc', 'recibo'];
+            
+            const hasKeyword = keywords.some(keyword => caption.includes(keyword));
+            if (hasKeyword) {
+                console.log('✅ Palavras-chave de comprovante detectadas:', {
+                    caption,
+                    timestamp: new Date().toISOString()
+                });
+                return true;
+            }
+
+            // Se não tiver caption, assume que pode ser comprovante
+            // O financeiro irá validar depois
+            return true;
+
+        } catch (error) {
+            console.error('❌ Erro ao verificar comprovante:', {
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            return false;
+        }
+    }
+
     async processPaymentProof(imageBuffer, orderNumber) {
         try {
             // Converte buffer para base64
