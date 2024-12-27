@@ -176,7 +176,7 @@ async function initializeServices() {
             );
             console.log('✅ AIServices inicializado');
 
-            webhookService = new WebhookService(whatsappService, aiServices);
+            webhookService = new WebhookService(whatsappService, aiServices, audioService);
             console.log('✅ WebhookService inicializado');
 
             clearTimeout(timeout);
