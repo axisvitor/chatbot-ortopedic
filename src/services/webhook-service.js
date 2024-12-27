@@ -68,7 +68,7 @@ class WebhookService {
             });
 
             // Processa a mensagem usando o AIServices
-            const response = await this.aiServices.processMessage({
+            const response = await this.aiServices.handleMessage({
                 type: messageData.type,
                 from: messageData.from,
                 text: messageData.text,
