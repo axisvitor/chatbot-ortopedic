@@ -2,16 +2,16 @@ const { OrderApi } = require('./nuvemshop/api/order');
 const { RedisStore } = require('../store/redis-store');
 const { TrackingService } = require('./tracking-service');
 const { formatTimeAgo } = require('../utils/date-utils');
-const { CACHE_CONFIG } = require('../config/settings');
+const { NUVEMSHOP_CONFIG } = require('../config/settings');
 
 class OrderValidationService {
-    constructor() {
-        this.orderApi = new OrderApi();
+    constructor(nuvemshopClient = null) {
+        this.orderApi = new OrderApi(nuvemshopClient);
         this.redisStore = new RedisStore();
         this.trackingService = new TrackingService();
-        this.MAX_ATTEMPTS = 100; // Aumentado para testes
+        this.MAX_ATTEMPTS = 5; // Limite de tentativas por usuário
         this.BLOCK_TIME = 1800; // 30 minutos em segundos
-        this.CACHE_TTL = CACHE_CONFIG.orderTTL || 24 * 3600; // 24 horas em segundos
+        this.CACHE_TTL = NUVEMSHOP_CONFIG.cache.ttl.orders.recent; // 5 minutos para pedidos recentes
     }
 
     /**
