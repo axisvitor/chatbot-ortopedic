@@ -199,6 +199,22 @@ class RedisStore {
             return {};
         }
     }
+
+    async deletePattern(pattern) {
+        try {
+            const keys = await this.client.keys(pattern);
+            if (keys.length > 0) {
+                await this.client.del(keys);
+            }
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao deletar padrão:', {
+                pattern,
+                error: error.message
+            });
+            return false;
+        }
+    }
 }
 
 module.exports = { RedisStore };
