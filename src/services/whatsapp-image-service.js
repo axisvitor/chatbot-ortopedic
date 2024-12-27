@@ -306,11 +306,6 @@ class WhatsAppImageService {
         }
     }
 
-    /**
-     * Verifica se uma imagem parece ser um comprovante de pagamento
-     * @param {Object} mediaMessage - Mensagem de mídia do WhatsApp
-     * @returns {Promise<boolean>} true se parece ser um comprovante
-     */
     async isLikelyPaymentProof(mediaMessage) {
         try {
             if (!mediaMessage?.imageMessage) return false;
@@ -330,31 +325,57 @@ class WhatsAppImageService {
 
             // Se tiver caption, verifica palavras-chave
             const caption = mediaMessage.imageMessage.caption?.toLowerCase() || '';
-            const captionKeywords = ['comprovante', 'pagamento', 'pix', 'transferência', 'ted', 'doc', 'recibo'];
             
-            const hasKeyword = captionKeywords.some(keyword => caption.includes(keyword));
-            if (hasKeyword) {
-                console.log('✅ Palavras-chave de comprovante detectadas na legenda:', {
-                    caption,
-                    timestamp: new Date().toISOString()
-                });
-                return true;
-            }
-
             // Se passou pela validação MIME, baixa e analisa com Groq
             const buffer = await this.downloadMediaMessage(mediaMessage);
             
             // Analisa com Groq
             const analysis = await this.analyzeImage(buffer);
 
-            // Verifica se a análise indica que é um comprovante
-            const analysisKeywords = ['comprovante', 'pagamento', 'pix', 'transferência', 'ted', 'doc', 'recibo', 'valor', 'data', 'transação'];
-            const analysisLower = analysis.toLowerCase();
-            
-            const isProof = analysisKeywords.some(keyword => analysisLower.includes(keyword));
+            // Palavras-chave que indicam um comprovante de pagamento
+            const paymentKeywords = [
+                'comprovante',
+                'pagamento',
+                'transferência',
+                'pix',
+                'recibo',
+                'valor', 
+                'data',
+                'transação',
+                'banco',
+                'ted',
+                'doc',
+                'payment',
+                'receipt',
+                'transfer'
+            ];
+
+            // Verifica se a legenda ou análise contém palavras-chave
+            const hasKeywordInCaption = paymentKeywords.some(keyword => 
+                caption.toLowerCase().includes(keyword.toLowerCase())
+            );
+
+            const hasKeywordInAnalysis = paymentKeywords.some(keyword =>
+                analysis.toLowerCase().includes(keyword.toLowerCase())
+            );
+
+            // Verifica se a análise menciona valores monetários
+            const hasMoneyValue = /r\$|brl|\$|\d+[.,]\d{2}/.test(analysis.toLowerCase());
+
+            // Verifica se a análise menciona datas
+            const hasDate = /\d{2}\/\d{2}\/\d{4}|\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2}/.test(analysis);
+
+            // Considera um comprovante válido se:
+            // 1. Tem palavra-chave na legenda OU na análise
+            // 2. E tem valor monetário OU data na análise
+            const isProof = (hasKeywordInCaption || hasKeywordInAnalysis) && (hasMoneyValue || hasDate);
 
             console.log('🔍 Análise de comprovante:', {
                 resultado: isProof,
+                temPalavraChaveLegenda: hasKeywordInCaption,
+                temPalavraChaveAnalise: hasKeywordInAnalysis,
+                temValor: hasMoneyValue,
+                temData: hasDate,
                 previewAnalise: analysis.substring(0, 100),
                 timestamp: new Date().toISOString()
             });

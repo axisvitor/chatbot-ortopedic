@@ -8,6 +8,32 @@ class GroqServices {
         this.axios = axios.create({
             timeout: 30000,
         });
+
+        // Adiciona estrutura chat.completions mantendo compatibilidade
+        this.chat = {
+            completions: {
+                create: async (params) => {
+                    try {
+                        const response = await this.axios.post(GROQ_CONFIG.chatUrl, params, {
+                            headers: {
+                                'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        if (response.status !== 200) {
+                            console.error('❌ Erro na API Groq:', response.status, response.data);
+                            throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
+                        }
+
+                        return response.data;
+                    } catch (error) {
+                        console.error('❌ Erro ao chamar Groq chat completions:', error.message);
+                        throw error;
+                    }
+                }
+            }
+        };
     }
 
     async generateText(messages, attempt = 1) {

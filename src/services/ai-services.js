@@ -739,16 +739,17 @@ class AIServices {
             const base64Image = buffer.toString('base64');
             const messages = [
                 {
-                    role: "user",
+                    role: "user", 
                     content: [
                         {
                             type: "text",
-                            text: "Descreva em detalhes o que você vê nesta imagem."
+                            text: "Analise esta imagem e me diga se é um comprovante de pagamento válido. Forneça detalhes como valor, data e outros dados relevantes se houver."
                         },
                         {
                             type: "image_url",
                             image_url: {
-                                url: `data:image/jpeg;base64,${base64Image}`
+                                "url": `data:image/jpeg;base64,${base64Image}`,
+                                "detail": "high"
                             }
                         }
                     ]

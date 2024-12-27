@@ -314,18 +314,53 @@ class WhatsAppService {
                 console.log('⚠️ Mensagem do tipo "ver uma vez" detectada');
             }
 
-            // Baixa a mídia
-            const buffer = await downloadMediaMessage(
-                { message: realMessage },
-                'buffer',
-                {},
+            // 1. Primeiro obtém a URL da mídia via API do WhatsApp
+            const mediaId = mediaMessage.id || message?.key?.id;
+            if (!mediaId) {
+                throw new Error('ID da mídia não encontrado');
+            }
+
+            // Faz a requisição para obter a URL
+            const response = await axios.get(
+                `${WHATSAPP_CONFIG.apiUrl}/v1/media/${mediaId}/download`,
                 {
-                    logger: console,
-                    reuploadRequest: this.reuploadRequest
+                    headers: {
+                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                    }
                 }
             );
 
-            return buffer;
+            if (!response.data?.url) {
+                throw new Error('URL da mídia não encontrada na resposta da API');
+            }
+
+            // 2. Baixa o conteúdo da URL
+            const mediaResponse = await axios.get(response.data.url, {
+                responseType: 'arraybuffer'
+            });
+
+            if (!mediaResponse.data) {
+                throw new Error('Falha ao baixar conteúdo da mídia');
+            }
+
+            const mediaBuffer = Buffer.from(mediaResponse.data);
+
+            // 3. Se necessário, descriptografa usando o Baileys
+            if (mediaMessage.mediaKey) {
+                return await downloadMediaMessage(
+                    { message: realMessage },
+                    'buffer',
+                    { mediaBuffer }, // Passa o buffer já baixado
+                    {
+                        logger: console,
+                        reuploadRequest: this.reuploadRequest
+                    }
+                );
+            }
+
+            // Se não precisar descriptografar, retorna o buffer direto
+            return mediaBuffer;
+
         } catch (error) {
             console.error('[WhatsApp] Erro ao baixar mídia:', error);
             throw error;
