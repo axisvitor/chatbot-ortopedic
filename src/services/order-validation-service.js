@@ -9,7 +9,7 @@ class OrderValidationService {
         this.orderApi = new OrderApi();
         this.redisStore = new RedisStore();
         this.trackingService = new TrackingService();
-        this.MAX_ATTEMPTS = 3;
+        this.MAX_ATTEMPTS = 100; // Aumentado para testes
         this.BLOCK_TIME = 1800; // 30 minutos em segundos
         this.CACHE_TTL = CACHE_CONFIG.orderTTL || 24 * 3600; // 24 horas em segundos
     }
