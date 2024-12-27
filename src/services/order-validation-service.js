@@ -317,20 +317,19 @@ class OrderValidationService {
             // Status de envio e rastreamento
             message += `\n📦 Status do Envio: ${orderInfo.status_envio}`;
 
-            // Adiciona informações detalhadas de rastreio se disponível
+            // Se tem código de rastreio, busca atualizações
             if (orderInfo.rastreamento?.codigo !== 'Não disponível') {
+                const trackingInfo = await this.trackingService.getTrackingInfo(orderInfo.rastreamento.codigo);
+                
                 message += `\n📬 Rastreamento: ${orderInfo.rastreamento.codigo}`;
-                
-                if (orderInfo.rastreamento.status !== 'Não disponível') {
-                    message += `\n📍 Status: ${orderInfo.rastreamento.status}`;
-                }
-                
-                if (orderInfo.rastreamento.ultima_atualizacao) {
-                    message += `\n🕒 Última Atualização: ${new Date(orderInfo.rastreamento.ultima_atualizacao).toLocaleString('pt-BR')}`;
-                }
-                
-                if (orderInfo.rastreamento.detalhes) {
-                    message += `\n📝 Detalhes: ${orderInfo.rastreamento.detalhes}`;
+
+                if (trackingInfo?.events?.length > 0) {
+                    const lastEvent = trackingInfo.events[0];
+                    message += `\n📍 Status: ${lastEvent.description}`;
+                    message += `\n🕒 Última Atualização: ${new Date(lastEvent.timestamp).toLocaleString('pt-BR')}`;
+                    if (lastEvent.location) {
+                        message += `\n📌 Local: ${lastEvent.location}`;
+                    }
                 }
             }
 
