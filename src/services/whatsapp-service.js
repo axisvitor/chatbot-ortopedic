@@ -562,6 +562,100 @@ class WhatsAppService {
             throw error;
         }
     }
+
+    /**
+     * Envia uma imagem por URL
+     * @param {string} to - Número do destinatário
+     * @param {string} imageUrl - URL da imagem
+     * @param {string} caption - Legenda opcional
+     * @returns {Promise<Object>} Resposta do servidor
+     */
+    async sendImageByUrl(to, imageUrl, caption = '') {
+        try {
+            console.log('🖼️ Enviando imagem por URL:', {
+                para: to,
+                url: imageUrl?.substring(0, 50) + '...',
+                temLegenda: !!caption,
+                timestamp: new Date().toISOString()
+            });
+
+            const response = await axios.post(
+                `${WHATSAPP_CONFIG.apiUrl}/message/sendImageUrl?connectionKey=${WHATSAPP_CONFIG.connectionKey}`,
+                {
+                    phoneNumber: to.replace(/\D/g, ''), // Remove não-dígitos
+                    url: imageUrl,
+                    caption,
+                    delayMessage: '1000'
+                },
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                    }
+                }
+            );
+
+            return response.data;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao enviar imagem por URL:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Envia uma imagem por arquivo
+     * @param {string} to - Número do destinatário
+     * @param {Buffer|Stream} file - Buffer ou Stream do arquivo
+     * @param {string} caption - Legenda opcional
+     * @returns {Promise<Object>} Resposta do servidor
+     */
+    async sendImageFile(to, file, caption = '') {
+        try {
+            console.log('🖼️ Enviando arquivo de imagem:', {
+                para: to,
+                tamanho: file.length,
+                temLegenda: !!caption,
+                timestamp: new Date().toISOString()
+            });
+
+            const formData = new FormData();
+            formData.append('phoneNumber', to.replace(/\D/g, '')); // Remove não-dígitos
+            formData.append('file', file);
+            if (caption) formData.append('caption', caption);
+            formData.append('delayMessage', '1000');
+
+            const response = await axios.post(
+                `${WHATSAPP_CONFIG.apiUrl}/message/sendImage?connectionKey=${WHATSAPP_CONFIG.connectionKey}`,
+                formData,
+                {
+                    headers: {
+                        ...formData.getHeaders(),
+                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                    }
+                }
+            );
+
+            return response.data;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao enviar arquivo de imagem:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Envia uma imagem (detecta automaticamente se é URL ou arquivo)
+     * @param {string} to - Número do destinatário
+     * @param {string|Buffer} image - URL ou Buffer da imagem
+     * @param {string} caption - Legenda opcional
+     * @returns {Promise<Object>} Resposta do servidor
+     */
+    async sendImage(to, image, caption = '') {
+        if (typeof image === 'string' && (image.startsWith('http://') || image.startsWith('https://'))) {
+            return this.sendImageByUrl(to, image, caption);
+        } else {
+            return this.sendImageFile(to, image, caption);
+        }
+    }
 }
 
 module.exports = { WhatsAppService };
