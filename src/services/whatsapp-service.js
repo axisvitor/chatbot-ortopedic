@@ -314,80 +314,16 @@ class WhatsAppService {
                 console.log('⚠️ Mensagem do tipo "ver uma vez" detectada');
             }
 
-            // Para áudios, usa direto o Baileys
-            if (realMessage.audioMessage) {
-                return await downloadMediaMessage(
-                    { message: realMessage },
-                    'buffer',
-                    {},
-                    {
-                        logger: console,
-                        reuploadRequest: this.reuploadRequest
-                    }
-                );
-            }
-
-            // Para imagens e outros tipos, usa a API
-            // Obtém o ID específico da mídia baseado no tipo
-            let mediaId;
-            if (realMessage.imageMessage) {
-                mediaId = realMessage.imageMessage.mediaKey || realMessage.imageMessage.id;
-            } else if (realMessage.videoMessage) {
-                mediaId = realMessage.videoMessage.mediaKey || realMessage.videoMessage.id;
-            } else if (realMessage.documentMessage) {
-                mediaId = realMessage.documentMessage.mediaKey || realMessage.documentMessage.id;
-            }
-
-            if (!mediaId) {
-                console.log('⚠️ Detalhes da mensagem:', {
-                    messageId: message?.key?.id,
-                    mediaTypes: Object.keys(realMessage),
-                    mediaDetails: mediaMessage,
-                    timestamp: new Date().toISOString()
-                });
-                throw new Error('ID da mídia não encontrado na mensagem');
-            }
-
-            // Faz a requisição para obter a URL
-            const response = await axios.get(
-                `${WHATSAPP_CONFIG.apiUrl}/v1/media/${mediaId}/download`,
+            // Usa o Baileys para baixar e descriptografar a mídia
+            return await downloadMediaMessage(
+                { message: realMessage },
+                'buffer',
+                {},
                 {
-                    headers: {
-                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
-                    }
+                    logger: console,
+                    reuploadRequest: this.reuploadRequest
                 }
             );
-
-            if (!response.data?.url) {
-                throw new Error('URL da mídia não encontrada na resposta da API');
-            }
-
-            // Baixa o conteúdo da URL
-            const mediaResponse = await axios.get(response.data.url, {
-                responseType: 'arraybuffer'
-            });
-
-            if (!mediaResponse.data) {
-                throw new Error('Falha ao baixar conteúdo da mídia');
-            }
-
-            const mediaBuffer = Buffer.from(mediaResponse.data);
-
-            // Se necessário, descriptografa usando o Baileys
-            if (mediaMessage.mediaKey) {
-                return await downloadMediaMessage(
-                    { message: realMessage },
-                    'buffer',
-                    { mediaBuffer }, // Passa o buffer já baixado
-                    {
-                        logger: console,
-                        reuploadRequest: this.reuploadRequest
-                    }
-                );
-            }
-
-            // Se não precisar descriptografar, retorna o buffer direto
-            return mediaBuffer;
 
         } catch (error) {
             console.error('[WhatsApp] Erro ao baixar mídia:', error);
