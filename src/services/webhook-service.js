@@ -2,9 +2,10 @@ const crypto = require('crypto');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
 
 class WebhookService {
-    constructor(whatsappService, aiServices) {
+    constructor(whatsappService, aiServices, audioService) {
         this.whatsappService = whatsappService;
         this.aiServices = aiServices;
+        this.audioService = audioService;
         this.userAgent = 'API Loja Ortopedic (suporte@lojaortopedic.com.br)';
     }
 
@@ -67,6 +68,12 @@ class WebhookService {
                 temDocumento: messageData.type === 'document'
             });
 
+            // Se for áudio, processa primeiro
+            if (messageData.type === 'audio' && this.audioService) {
+                console.log('🎤 Processando áudio...');
+                messageData.text = await this.audioService.processWhatsAppAudio(messageData);
+            }
+
             // Processa a mensagem usando o AIServices (que já envia a resposta)
             await this.aiServices.handleMessage({
                 type: messageData.type,
@@ -100,78 +107,72 @@ class WebhookService {
                 timestamp: new Date().toISOString()
             });
 
-            // Validações básicas
-            if (!webhookData?.body?.key?.remoteJid || !webhookData?.body?.message) {
-                console.log('⚠️ [Webhook] Dados inválidos:', {
-                    temRemoteJid: !!webhookData?.body?.key?.remoteJid,
-                    temMessage: !!webhookData?.body?.message,
-                    raw: JSON.stringify(webhookData, null, 2)
-                });
-                return null;
+            const message = webhookData?.body?.message;
+            if (!message) {
+                throw new Error('Mensagem não encontrada no webhook');
             }
 
-            // Extrai o texto da mensagem
-            let text = null;
-            const messageContent = webhookData.body.message;
-            if (messageContent.conversation) {
-                text = messageContent.conversation;
-            } else if (messageContent.extendedTextMessage?.text) {
-                text = messageContent.extendedTextMessage.text;
-            } else if (webhookData.body.text) {
-                text = webhookData.body.text;
-            }
-
-            // Mantém o objeto original do Baileys e apenas adiciona campos auxiliares
+            // Extrai os dados básicos
             const messageData = {
-                ...webhookData.body, // Mantém toda a estrutura original
-                type: this.getMessageType(webhookData.body),
-                from: webhookData.body.key.remoteJid.replace('@s.whatsapp.net', ''),
-                messageId: webhookData.body.key.id,
-                text: text
+                messageId: webhookData.body.key?.id,
+                from: webhookData.body.key?.remoteJid?.replace('@s.whatsapp.net', ''),
+                pushName: webhookData.body.pushName,
+                timestamp: webhookData.body.messageTimestamp,
+                type: 'text'
             };
 
+            // Detecta o tipo de mensagem e extrai o conteúdo
+            if (message.conversation) {
+                messageData.text = message.conversation;
+                messageData.type = 'text';
+            } else if (message.extendedTextMessage?.text) {
+                messageData.text = message.extendedTextMessage.text;
+                messageData.type = 'text';
+            } else if (message.imageMessage) {
+                messageData.type = 'image';
+                messageData.text = message.imageMessage.caption;
+                messageData.mediaKey = message.imageMessage.mediaKey;
+                messageData.url = message.imageMessage.url;
+                messageData.mimetype = message.imageMessage.mimetype;
+            } else if (message.audioMessage) {
+                messageData.type = 'audio';
+                messageData.mediaKey = message.audioMessage.mediaKey;
+                messageData.url = message.audioMessage.url;
+                messageData.mimetype = message.audioMessage.mimetype;
+                messageData.seconds = message.audioMessage.seconds;
+                messageData.ptt = message.audioMessage.ptt;
+            } else if (message.documentMessage) {
+                messageData.type = 'document';
+                messageData.text = message.documentMessage.caption;
+                messageData.mediaKey = message.documentMessage.mediaKey;
+                messageData.url = message.documentMessage.url;
+                messageData.mimetype = message.documentMessage.mimetype;
+                messageData.fileName = message.documentMessage.fileName;
+            }
+
+            // Log dos dados extraídos
             console.log('📝 [Webhook] Dados básicos extraídos:', {
                 tipo: messageData.type,
                 de: messageData.from,
                 messageId: messageData.messageId,
-                texto: messageData.text,
-                timestamp: new Date(messageData.messageTimestamp * 1000).toISOString()
+                ultimaMensagem: messageData.text,
+                timestamp: new Date().toISOString()
             });
 
-            // Logs detalhados de mídia se presente
-            if (messageContent.imageMessage) {
-                console.log('🖼️ [Webhook] Imagem detectada:', {
-                    mimetype: messageContent.imageMessage.mimetype,
-                    caption: messageContent.imageMessage.caption?.substring(0, 100),
-                    mediaKey: !!messageContent.imageMessage.mediaKey,
-                    url: !!messageContent.imageMessage.url
-                });
-            }
-            if (messageContent.audioMessage) {
+            // Se for áudio, adiciona log específico
+            if (messageData.type === 'audio') {
                 console.log('🎵 [Webhook] Áudio detectado:', {
-                    seconds: messageContent.audioMessage.seconds,
-                    mimetype: messageContent.audioMessage.mimetype,
-                    mediaKey: !!messageContent.audioMessage.mediaKey,
-                    url: !!messageContent.audioMessage.url
-                });
-            }
-            if (messageContent.documentMessage) {
-                console.log('📄 [Webhook] Documento detectado:', {
-                    filename: messageContent.documentMessage.fileName,
-                    mimetype: messageContent.documentMessage.mimetype,
-                    mediaKey: !!messageContent.documentMessage.mediaKey,
-                    url: !!messageContent.documentMessage.url
+                    seconds: messageData.seconds,
+                    mimetype: messageData.mimetype,
+                    mediaKey: !!messageData.mediaKey,
+                    url: !!messageData.url
                 });
             }
 
             return messageData;
         } catch (error) {
-            console.error('❌ [Webhook] Erro ao extrair mensagem:', {
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
-            return null;
+            console.error('❌ [Webhook] Erro ao extrair dados:', error);
+            throw error;
         }
     }
 
