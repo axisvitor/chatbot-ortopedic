@@ -328,9 +328,24 @@ class WhatsAppService {
             }
 
             // Para imagens e outros tipos, usa a API
-            const mediaId = mediaMessage.id || message?.key?.id;
+            // Obtém o ID específico da mídia baseado no tipo
+            let mediaId;
+            if (realMessage.imageMessage) {
+                mediaId = realMessage.imageMessage.mediaKey || realMessage.imageMessage.id;
+            } else if (realMessage.videoMessage) {
+                mediaId = realMessage.videoMessage.mediaKey || realMessage.videoMessage.id;
+            } else if (realMessage.documentMessage) {
+                mediaId = realMessage.documentMessage.mediaKey || realMessage.documentMessage.id;
+            }
+
             if (!mediaId) {
-                throw new Error('ID da mídia não encontrado');
+                console.log('⚠️ Detalhes da mensagem:', {
+                    messageId: message?.key?.id,
+                    mediaTypes: Object.keys(realMessage),
+                    mediaDetails: mediaMessage,
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error('ID da mídia não encontrado na mensagem');
             }
 
             // Faz a requisição para obter a URL
