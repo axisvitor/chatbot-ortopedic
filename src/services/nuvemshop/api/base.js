@@ -5,9 +5,18 @@ const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 const { CacheService } = require('../../cache-service');
 
 class NuvemshopApiBase {
-    constructor() {
+    constructor(cacheService = null) {
+        this.cacheService = cacheService;
         this.client = this.initializeClient();
-        this.cacheService = new CacheService();
+        this.retryDelay = 1000; // Delay inicial de 1 segundo
+        this.maxRetries = 3; // Máximo de 3 tentativas
+        this.requestCount = 0;
+        this.lastRequestTime = 0;
+        this.minRequestInterval = 1000; // Mínimo de 1 segundo entre requisições
+    }
+
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     initializeClient() {
@@ -105,10 +114,17 @@ class NuvemshopApiBase {
 
     async handleRequest(method, endpoint, options = {}, cacheOptions = null) {
         try {
+            // Verifica o intervalo entre requisições
+            const now = Date.now();
+            const timeSinceLastRequest = now - this.lastRequestTime;
+            if (timeSinceLastRequest < this.minRequestInterval) {
+                await this.sleep(this.minRequestInterval - timeSinceLastRequest);
+            }
+
             // Adiciona o user_id ao endpoint se não começar com /
             const finalEndpoint = endpoint.startsWith('/') ? 
-                `/${NUVEMSHOP_CONFIG.userId}${endpoint}` : 
-                `/${NUVEMSHOP_CONFIG.userId}/${endpoint}`;
+                endpoint : 
+                `/${endpoint}`;
 
             // Se tiver opções de cache, tenta buscar do cache primeiro
             if (cacheOptions) {
@@ -118,39 +134,71 @@ class NuvemshopApiBase {
                 }
             }
 
-            // Sanitiza a configuração para log
-            const sanitizedConfig = this.sanitizeConfig({
-                method,
-                url: finalEndpoint,
-                ...options
-            });
+            let lastError = null;
+            let currentDelay = this.retryDelay;
 
-            // Log da request
-            console.log('[Nuvemshop] Request:', sanitizedConfig);
+            for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+                try {
+                    // Sanitiza a configuração para log
+                    const sanitizedConfig = this.sanitizeConfig({
+                        method,
+                        url: finalEndpoint,
+                        ...options
+                    });
 
-            // Faz a request
-            const response = await this.client[method](finalEndpoint, options);
+                    // Log da request
+                    console.log('[Nuvemshop] Request:', {
+                        ...sanitizedConfig,
+                        attempt: attempt + 1,
+                        maxAttempts: this.maxRetries
+                    });
 
-            // Log da response
-            console.log('[Nuvemshop] Response:', {
-                status: response.status,
-                data: response.data
-            });
+                    // Faz a request
+                    const response = await this.client[method](finalEndpoint, options);
+                    
+                    // Atualiza o contador de requisições e timestamp
+                    this.requestCount++;
+                    this.lastRequestTime = Date.now();
 
-            // Se tiver opções de cache, salva no cache
-            if (cacheOptions && response.data) {
-                await this.cacheService.set(
-                    cacheOptions.key,
-                    JSON.stringify(response.data),
-                    cacheOptions.ttl
-                );
+                    // Log da response
+                    console.log('[Nuvemshop] Response:', {
+                        status: response.status,
+                        requestCount: this.requestCount
+                    });
+
+                    // Se tiver opções de cache, salva no cache
+                    if (cacheOptions && response.data) {
+                        await this.cacheService.set(
+                            cacheOptions.key,
+                            JSON.stringify(response.data),
+                            cacheOptions.ttl
+                        );
+                    }
+
+                    return response.data;
+                } catch (error) {
+                    lastError = error;
+
+                    // Se for erro de rate limit (429) ou erro de servidor (5xx)
+                    if (error.response?.status === 429 || (error.response?.status >= 500 && error.response?.status < 600)) {
+                        console.log(`[Nuvemshop] Rate limit ou erro de servidor. Tentativa ${attempt + 1}/${this.maxRetries}. Aguardando ${currentDelay}ms...`);
+                        await this.sleep(currentDelay);
+                        currentDelay *= 2; // Delay exponencial
+                        continue;
+                    }
+
+                    throw error;
+                }
             }
 
-            return response.data;
+            throw lastError;
         } catch (error) {
             // Formata e loga o erro
             const formattedError = this.formatError(error);
-            console.error('[Nuvemshop] Error:', formattedError);
+            console.error('[Nuvemshop] Error:', {
+                ...formattedError,
+                requestCount: this.requestCount
+            });
             throw error;
         }
     }

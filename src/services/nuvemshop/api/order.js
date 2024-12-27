@@ -1,28 +1,23 @@
 const { NuvemshopApiBase } = require('./base');
 const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
+const CacheService = require('./cache');
 
 class OrderApi extends NuvemshopApiBase {
     constructor() {
-        super();
+        const cacheService = new CacheService();
+        super(cacheService);
+        
         this.cachePrefix = NUVEMSHOP_CONFIG.cache.prefix + 'order:';
         this.defaultFields = [
             'id',
             'number',
             'status',
-            'total',
-            'created_at',
-            'updated_at',
-            'completed_at',
-            'cancel_reason',
-            'customer',
-            'shipping',
+            'payment_status',
             'shipping_status',
-            'shipping_tracking_number',
-            'shipping_min_days',
-            'shipping_max_days',
-            'payment_details',
+            'customer',
             'products',
-            'note'
+            'shipping_tracking_number',
+            'shipping_tracking_url'
         ].join(',');
     }
 
@@ -61,12 +56,29 @@ class OrderApi extends NuvemshopApiBase {
 
     async getOrderByNumber(orderNumber) {
         this.validateOrderNumber(orderNumber);
+        
+        // Gera a chave do cache
+        const cacheKey = `${this.cachePrefix}number:${orderNumber}`;
+        
+        // Tenta buscar do cache primeiro
+        const cachedOrder = await this.cacheService.get(cacheKey);
+        if (cachedOrder) {
+            console.log('[Nuvemshop] Pedido encontrado no cache:', {
+                numero: orderNumber,
+                id: cachedOrder.id,
+                status: cachedOrder.status,
+                rastreio: cachedOrder.shipping_tracking_number
+            });
+            return cachedOrder;
+        }
+
+        // Se não estiver no cache, busca da API
         const params = {
             q: orderNumber,
             fields: this.defaultFields
         };
 
-        console.log('[Nuvemshop] Buscando pedido:', {
+        console.log('[Nuvemshop] Buscando pedido na API:', {
             numero: orderNumber,
             params
         });
@@ -81,7 +93,10 @@ class OrderApi extends NuvemshopApiBase {
         const order = orders.find(o => String(o.number) === String(orderNumber));
         
         if (order) {
-            console.log('[Nuvemshop] Pedido encontrado:', {
+            // Salva no cache por 5 minutos
+            await this.cacheService.set(cacheKey, order, 300);
+            
+            console.log('[Nuvemshop] Pedido encontrado e salvo no cache:', {
                 numero: orderNumber,
                 id: order.id,
                 status: order.status,
