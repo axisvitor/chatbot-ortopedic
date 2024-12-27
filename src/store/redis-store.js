@@ -8,7 +8,21 @@ class RedisStore {
                 host: process.env.REDIS_HOST,
                 port: process.env.REDIS_PORT
             },
-            password: process.env.REDIS_PASSWORD
+            password: process.env.REDIS_PASSWORD,
+            retry_strategy: function(options) {
+                if (options.error && options.error.code === 'ECONNREFUSED') {
+                    console.error('[Redis] Servidor recusou conexão');
+                    return new Error('Servidor Redis indisponível');
+                }
+                if (options.total_retry_time > 1000 * 60 * 60) {
+                    return new Error('Tempo máximo de retry excedido');
+                }
+                if (options.attempt > 10) {
+                    return new Error('Máximo de tentativas excedido');
+                }
+                // Retry com exponential backoff
+                return Math.min(options.attempt * 100, 3000);
+            }
         });
 
         this.client.on('error', (err) => {
@@ -24,13 +38,22 @@ class RedisStore {
         });
 
         // Conecta ao Redis
-        (async () => {
-            try {
+        this.connect();
+    }
+
+    async connect() {
+        try {
+            if (!this.client.isOpen) {
                 await this.client.connect();
-            } catch (error) {
-                console.error('[Redis] Erro ao conectar ao Redis:', error);
             }
-        })();
+        } catch (error) {
+            console.error('[Redis] Erro ao conectar ao Redis:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
     }
 
     async get(key) {
@@ -213,6 +236,19 @@ class RedisStore {
                 error: error.message
             });
             return false;
+        }
+    }
+
+    async ping() {
+        try {
+            if (!this.client.isOpen) {
+                await this.connect();
+            }
+            const result = await this.client.ping();
+            return result === 'PONG';
+        } catch (error) {
+            console.error('[Redis] Erro ao fazer ping:', error);
+            throw error;
         }
     }
 }

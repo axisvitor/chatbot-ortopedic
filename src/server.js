@@ -195,20 +195,32 @@ async function initializeServices() {
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(cors());
-app.use(bodyParser.json({ limit: '50mb' }));
-app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
+app.use(bodyParser.json());
 
-// Rota de healthcheck
-app.get('/', (req, res) => {
-    res.status(200).json({
-        status: 'ok',
-        message: 'Chatbot Ortopedic API',
-        version: '1.0.0',
-        timestamp: new Date().toISOString()
-    });
+// Healthcheck endpoint
+app.get('/', async (req, res) => {
+    try {
+        // Verifica conexão com Redis
+        await redisStore.ping();
+        
+        res.status(200).json({
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            services: {
+                redis: 'connected'
+            }
+        });
+    } catch (error) {
+        console.error('Healthcheck falhou:', error);
+        res.status(503).json({
+            status: 'unhealthy',
+            timestamp: new Date().toISOString(),
+            error: error.message
+        });
+    }
 });
 
-// Rotas
+// Rota de healthcheck
 app.get('/health', (req, res) => {
     const status = isReady ? 'ok' : 'initializing';
     const error = initError?.message;
