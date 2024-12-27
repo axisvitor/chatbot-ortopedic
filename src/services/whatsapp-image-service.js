@@ -327,7 +327,7 @@ class WhatsAppImageService {
             const caption = mediaMessage.imageMessage.caption?.toLowerCase() || '';
             
             // Se passou pela validação MIME, baixa e analisa com Groq
-            const buffer = await this.downloadMediaMessage(mediaMessage);
+            const buffer = await this.downloadMediaMessage({ message: mediaMessage });
             
             // Analisa com Groq
             const analysis = await this.analyzeImage(buffer);
