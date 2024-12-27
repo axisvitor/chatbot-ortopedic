@@ -118,7 +118,9 @@ class WebhookService {
                 from: webhookData.body.key?.remoteJid?.replace('@s.whatsapp.net', ''),
                 pushName: webhookData.body.pushName,
                 timestamp: webhookData.body.messageTimestamp,
-                type: 'text'
+                type: 'text',
+                key: webhookData.body.key,
+                message: message // Inclui a mensagem original completa
             };
 
             // Detecta o tipo de mensagem e extrai o conteúdo
