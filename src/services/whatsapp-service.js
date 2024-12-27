@@ -410,51 +410,160 @@ class WhatsAppService {
      */
     async forwardMessage(message, to) {
         try {
-            if (!message || !to) {
-                throw new Error('Mensagem e destino são obrigatórios');
+            console.log('↪️ Encaminhando mensagem:', {
+                de: message.from,
+                para: to,
+                tipo: message.type,
+                messageId: message.messageId,
+                timestamp: new Date().toISOString()
+            });
+
+            // Extrai a mensagem real considerando todos os casos possíveis
+            const realMessage = message?.message?.ephemeralMessage?.message || // Mensagem ephemeral
+                              message?.message?.viewOnceMessage?.message ||    // Mensagem "ver uma vez"
+                              message?.message?.forwardedMessage ||           // Mensagem encaminhada
+                              message?.message;                              // Mensagem normal
+
+            if (!realMessage) {
+                throw new Error('Mensagem não contém dados para encaminhar');
             }
 
-            // Log do encaminhamento
-            console.log('🔄 Encaminhando mensagem:', {
-                messageId: message.messageId,
-                from: message.from,
-                to,
-                type: message.type,
-                timestamp: new Date().toISOString()
-            });
+            // Verifica o tipo de mídia
+            if (realMessage.imageMessage) {
+                // Baixa a imagem
+                const buffer = await this.downloadMediaMessage(message);
+                
+                // Reenvia como nova mensagem
+                await this.sendImage(
+                    to, 
+                    buffer,
+                    realMessage.imageMessage.caption || ''
+                );
+            } else if (realMessage.audioMessage) {
+                // Baixa o áudio
+                const buffer = await this.downloadMediaMessage(message);
+                
+                // Reenvia como nova mensagem
+                await this.sendAudio(to, buffer);
+            } else if (realMessage.documentMessage) {
+                // Baixa o documento
+                const buffer = await this.downloadMediaMessage(message);
+                
+                // Reenvia como nova mensagem
+                await this.sendDocument(
+                    to, 
+                    buffer,
+                    realMessage.documentMessage.fileName || 'document',
+                    realMessage.documentMessage.mimetype
+                );
+            } else if (realMessage.conversation || realMessage.extendedTextMessage) {
+                // Encaminha mensagem de texto
+                const text = realMessage.conversation || 
+                           realMessage.extendedTextMessage?.text || '';
+                
+                await this.sendText(to, text);
+            } else {
+                throw new Error('Tipo de mensagem não suportado para encaminhamento');
+            }
 
-            // Encaminha a mensagem
-            await this.client.forwardMessage(to, message);
-
-            console.log('✅ Mensagem encaminhada com sucesso:', {
-                messageId: message.messageId,
-                to,
-                timestamp: new Date().toISOString()
-            });
+            console.log('✅ Mensagem encaminhada com sucesso');
         } catch (error) {
-            console.error('❌ Erro ao encaminhar mensagem:', {
-                erro: error.message,
-                stack: error.stack,
-                messageId: message?.messageId,
-                to,
-                timestamp: new Date().toISOString()
-            });
+            console.error('[WhatsApp] Erro ao encaminhar mensagem:', error);
             throw error;
         }
     }
 
-    async close() {
+    /**
+     * Envia uma imagem por URL
+     * @param {string} to - Número do destinatário
+     * @param {string} imageUrl - URL da imagem
+     * @param {string} caption - Legenda opcional
+     * @returns {Promise<Object>} Resposta do servidor
+     */
+    async sendImageByUrl(to, imageUrl, caption = '') {
         try {
-            if (this.client) {
-                console.log('[WhatsApp] Encerrando conexão...');
-                // Limpa qualquer estado pendente
-                this.client = null;
-                this.connectionKey = null;
-                this.retryCount = 0;
-            }
+            console.log('🖼️ Enviando imagem por URL:', {
+                para: to,
+                url: imageUrl?.substring(0, 50) + '...',
+                temLegenda: !!caption,
+                timestamp: new Date().toISOString()
+            });
+
+            const response = await axios.post(
+                `${WHATSAPP_CONFIG.apiUrl}/message/sendImageUrl?connectionKey=${WHATSAPP_CONFIG.connectionKey}`,
+                {
+                    phoneNumber: to.replace(/\D/g, ''), // Remove não-dígitos
+                    url: imageUrl,
+                    caption,
+                    delayMessage: '1000'
+                },
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                    }
+                }
+            );
+
+            return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao encerrar conexão:', error);
+            console.error('[WhatsApp] Erro ao enviar imagem por URL:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Envia uma imagem por arquivo
+     * @param {string} to - Número do destinatário
+     * @param {Buffer|Stream} file - Buffer ou Stream do arquivo
+     * @param {string} caption - Legenda opcional
+     * @returns {Promise<Object>} Resposta do servidor
+     */
+    async sendImageFile(to, file, caption = '') {
+        try {
+            console.log('🖼️ Enviando arquivo de imagem:', {
+                para: to,
+                tamanho: file.length,
+                temLegenda: !!caption,
+                timestamp: new Date().toISOString()
+            });
+
+            const formData = new FormData();
+            formData.append('phoneNumber', to.replace(/\D/g, '')); // Remove não-dígitos
+            formData.append('file', file);
+            if (caption) formData.append('caption', caption);
+            formData.append('delayMessage', '1000');
+
+            const response = await axios.post(
+                `${WHATSAPP_CONFIG.apiUrl}/message/sendImage?connectionKey=${WHATSAPP_CONFIG.connectionKey}`,
+                formData,
+                {
+                    headers: {
+                        ...formData.getHeaders(),
+                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
+                    }
+                }
+            );
+
+            return response.data;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao enviar arquivo de imagem:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Envia uma imagem (detecta automaticamente se é URL ou arquivo)
+     * @param {string} to - Número do destinatário
+     * @param {string|Buffer} image - URL ou Buffer da imagem
+     * @param {string} caption - Legenda opcional
+     * @returns {Promise<Object>} Resposta do servidor
+     */
+    async sendImage(to, image, caption = '') {
+        if (typeof image === 'string' && (image.startsWith('http://') || image.startsWith('https://'))) {
+            return this.sendImageByUrl(to, image, caption);
+        } else {
+            return this.sendImageFile(to, image, caption);
         }
     }
 
@@ -563,97 +672,18 @@ class WhatsAppService {
         }
     }
 
-    /**
-     * Envia uma imagem por URL
-     * @param {string} to - Número do destinatário
-     * @param {string} imageUrl - URL da imagem
-     * @param {string} caption - Legenda opcional
-     * @returns {Promise<Object>} Resposta do servidor
-     */
-    async sendImageByUrl(to, imageUrl, caption = '') {
+    async close() {
         try {
-            console.log('🖼️ Enviando imagem por URL:', {
-                para: to,
-                url: imageUrl?.substring(0, 50) + '...',
-                temLegenda: !!caption,
-                timestamp: new Date().toISOString()
-            });
-
-            const response = await axios.post(
-                `${WHATSAPP_CONFIG.apiUrl}/message/sendImageUrl?connectionKey=${WHATSAPP_CONFIG.connectionKey}`,
-                {
-                    phoneNumber: to.replace(/\D/g, ''), // Remove não-dígitos
-                    url: imageUrl,
-                    caption,
-                    delayMessage: '1000'
-                },
-                {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
-                    }
-                }
-            );
-
-            return response.data;
+            if (this.client) {
+                console.log('[WhatsApp] Encerrando conexão...');
+                // Limpa qualquer estado pendente
+                this.client = null;
+                this.connectionKey = null;
+                this.retryCount = 0;
+            }
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar imagem por URL:', error);
+            console.error('[WhatsApp] Erro ao encerrar conexão:', error);
             throw error;
-        }
-    }
-
-    /**
-     * Envia uma imagem por arquivo
-     * @param {string} to - Número do destinatário
-     * @param {Buffer|Stream} file - Buffer ou Stream do arquivo
-     * @param {string} caption - Legenda opcional
-     * @returns {Promise<Object>} Resposta do servidor
-     */
-    async sendImageFile(to, file, caption = '') {
-        try {
-            console.log('🖼️ Enviando arquivo de imagem:', {
-                para: to,
-                tamanho: file.length,
-                temLegenda: !!caption,
-                timestamp: new Date().toISOString()
-            });
-
-            const formData = new FormData();
-            formData.append('phoneNumber', to.replace(/\D/g, '')); // Remove não-dígitos
-            formData.append('file', file);
-            if (caption) formData.append('caption', caption);
-            formData.append('delayMessage', '1000');
-
-            const response = await axios.post(
-                `${WHATSAPP_CONFIG.apiUrl}/message/sendImage?connectionKey=${WHATSAPP_CONFIG.connectionKey}`,
-                formData,
-                {
-                    headers: {
-                        ...formData.getHeaders(),
-                        'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
-                    }
-                }
-            );
-
-            return response.data;
-        } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar arquivo de imagem:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Envia uma imagem (detecta automaticamente se é URL ou arquivo)
-     * @param {string} to - Número do destinatário
-     * @param {string|Buffer} image - URL ou Buffer da imagem
-     * @param {string} caption - Legenda opcional
-     * @returns {Promise<Object>} Resposta do servidor
-     */
-    async sendImage(to, image, caption = '') {
-        if (typeof image === 'string' && (image.startsWith('http://') || image.startsWith('https://'))) {
-            return this.sendImageByUrl(to, image, caption);
-        } else {
-            return this.sendImageFile(to, image, caption);
         }
     }
 }
