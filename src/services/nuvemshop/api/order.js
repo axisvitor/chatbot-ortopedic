@@ -360,7 +360,7 @@ class OrderApi extends NuvemshopApiBase {
             ...options,
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)',
                 ...options.headers
             }
@@ -371,7 +371,7 @@ class OrderApi extends NuvemshopApiBase {
                 ...requestConfig,
                 headers: {
                     ...requestConfig.headers,
-                    Authorization: '[REDACTED]'
+                    Authentication: '[REDACTED]'
                 }
             });
 

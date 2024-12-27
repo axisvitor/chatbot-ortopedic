@@ -22,10 +22,10 @@ class NuvemshopApiBase {
     initializeClient() {
         // Configuração base do axios
         const client = axios.create({
-            baseURL: NUVEMSHOP_CONFIG.apiUrl,
+            baseURL: NUVEMSHOP_CONFIG.apiUrl, // Remove /v1 da baseURL
             timeout: NUVEMSHOP_CONFIG.api.timeout,
             headers: {
-                'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'Authentication': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'Content-Type': 'application/json',
                 'User-Agent': NUVEMSHOP_CONFIG.api.userAgent
             }
