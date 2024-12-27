@@ -16,9 +16,9 @@ class NuvemshopApiBase {
             baseURL: NUVEMSHOP_CONFIG.apiUrl,
             timeout: NUVEMSHOP_CONFIG.api.timeout,
             headers: {
-                'User-Agent': NUVEMSHOP_CONFIG.api.userAgent,
-                'Authentication': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`,
-                'Content-Type': 'application/json'
+                'X-Auth-Token': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'Content-Type': 'application/json',
+                'User-Agent': NUVEMSHOP_CONFIG.api.userAgent
             }
         });
 
@@ -88,8 +88,8 @@ class NuvemshopApiBase {
 
     sanitizeConfig(config) {
         const sanitized = { ...config };
-        if (sanitized.headers && sanitized.headers.Authentication) {
-            sanitized.headers.Authentication = '[REDACTED]';
+        if (sanitized.headers && sanitized.headers['X-Auth-Token']) {
+            sanitized.headers['X-Auth-Token'] = '[REDACTED]';
         }
         return sanitized;
     }
@@ -104,59 +104,53 @@ class NuvemshopApiBase {
     }
 
     async handleRequest(method, endpoint, options = {}, cacheOptions = null) {
-        const cacheKey = cacheOptions?.key || `nuvemshop:${method}:${endpoint}`;
-        const cacheTTL = cacheOptions?.ttl || NUVEMSHOP_CONFIG.cache.ttl.default;
-
-        // Tenta buscar do cache primeiro se for GET
-        if (method.toLowerCase() === 'get' && cacheOptions !== null) {
-            const cachedData = await this.cacheService.get(cacheKey);
-            if (cachedData) {
-                console.log(' [Cache] Hit:', {
-                    key: cacheKey,
-                    method,
-                    endpoint
-                });
-                return cachedData;
-            }
-        }
-
         try {
-            const startTime = new Date();
-            const response = await this.client[method](endpoint, options);
-            const duration = new Date() - startTime;
+            // Adiciona o user_id ao endpoint se não começar com /
+            const finalEndpoint = endpoint.startsWith('/') ? 
+                `/${NUVEMSHOP_CONFIG.userId}${endpoint}` : 
+                `/${NUVEMSHOP_CONFIG.userId}/${endpoint}`;
 
-            // Log de sucesso detalhado
-            console.log(` [Nuvemshop] ${method.toUpperCase()} Success:`, {
-                endpoint,
-                duration: `${duration}ms`,
-                status: response.status,
-                timestamp: new Date().toISOString()
+            // Se tiver opções de cache, tenta buscar do cache primeiro
+            if (cacheOptions) {
+                const cached = await this.cacheService.get(cacheOptions.key);
+                if (cached) {
+                    return JSON.parse(cached);
+                }
+            }
+
+            // Sanitiza a configuração para log
+            const sanitizedConfig = this.sanitizeConfig({
+                method,
+                url: finalEndpoint,
+                ...options
             });
 
-            // Salva no cache se for GET
-            if (method.toLowerCase() === 'get' && cacheOptions !== null) {
-                await this.cacheService.set(cacheKey, response.data, cacheTTL);
-                console.log(' [Cache] Saved:', {
-                    key: cacheKey,
-                    ttl: cacheTTL
-                });
+            // Log da request
+            console.log('[Nuvemshop] Request:', sanitizedConfig);
+
+            // Faz a request
+            const response = await this.client[method](finalEndpoint, options);
+
+            // Log da response
+            console.log('[Nuvemshop] Response:', {
+                status: response.status,
+                data: response.data
+            });
+
+            // Se tiver opções de cache, salva no cache
+            if (cacheOptions && response.data) {
+                await this.cacheService.set(
+                    cacheOptions.key,
+                    JSON.stringify(response.data),
+                    cacheOptions.ttl
+                );
             }
 
             return response.data;
         } catch (error) {
-            // Log de erro detalhado
-            console.error(` [Nuvemshop] ${method.toUpperCase()} Error:`, {
-                endpoint,
-                error: error.message,
-                status: error.response?.status,
-                data: error.response?.data,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
-
-            // Adicionar informações úteis ao erro
-            error.endpoint = endpoint;
-            error.requestTime = new Date().toISOString();
+            // Formata e loga o erro
+            const formattedError = this.formatError(error);
+            console.error('[Nuvemshop] Error:', formattedError);
             throw error;
         }
     }

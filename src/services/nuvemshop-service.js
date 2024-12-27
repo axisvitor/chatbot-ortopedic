@@ -15,7 +15,7 @@ class NuvemshopService {
 
     initializeClient() {
         // Garantir que a URL base está correta e inclui /v1
-        const baseURL = 'https://api.nuvemshop.com.br/v1';
+        const baseURL = NUVEMSHOP_CONFIG.apiUrl;
 
         // Validar o token de acesso
         if (!NUVEMSHOP_CONFIG.accessToken) {
@@ -29,7 +29,7 @@ class NuvemshopService {
 
         // Configurar headers padrão
         const headers = {
-            'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+            'X-Auth-Token': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
             'Content-Type': 'application/json',
             'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)',
             'Accept': 'application/json'
@@ -51,7 +51,7 @@ class NuvemshopService {
                 headers: {
                     'Content-Type': request.headers['Content-Type'],
                     'User-Agent': request.headers['User-Agent'],
-                    'Authentication': 'bearer ' + NUVEMSHOP_CONFIG.accessToken.substring(0, 6) + '...'
+                    'X-Auth-Token': 'bearer ' + NUVEMSHOP_CONFIG.accessToken.substring(0, 6) + '...'
                 }
             });
             return request;
@@ -78,53 +78,6 @@ class NuvemshopService {
     }
 
     async getOrderByNumber(orderNumber) {
-        return this.orderApi.getOrderByNumber(orderNumber);
-    }
-
-    async getOrder(orderId) {
-        return this.orderApi.getOrder(orderId);
-    }
-
-    formatOrderStatus(status) {
-        return this.orderApi.formatOrderStatus(status);
-    }
-
-    formatPrice(price) {
-        return this.orderApi.formatPrice(price);
-    }
-
-    async getProduct(productId) {
-        return this.productApi.getProduct(productId);
-    }
-
-    async searchProducts(query) {
-        return this.productApi.searchProducts(query);
-    }
-
-    async getRecentOrders(days = 7) {
-        try {
-            return await this.orderApi.getRecentOrders(days);
-        } catch (error) {
-            console.error('[NuvemshopService] Erro ao buscar pedidos recentes:', {
-                days,
-                error: error.message
-            });
-            throw error;
-        }
-    }
-
-    async getPendingOrders() {
-        try {
-            return await this.orderApi.getPendingOrders();
-        } catch (error) {
-            console.error('[NuvemshopService] Erro ao buscar pedidos pendentes:', {
-                error: error.message
-            });
-            throw error;
-        }
-    }
-
-    async getOrderByNumber(orderNumber) {
         try {
             const cleanOrderNumber = String(orderNumber).replace(/[#\s]/g, '');
             
@@ -146,37 +99,29 @@ class NuvemshopService {
                 const order = response.data.find(o => String(o.number) === cleanOrderNumber);
                 
                 if (order) {
-                    // Log detalhado do pedido encontrado
                     console.log('[Nuvemshop] Pedido encontrado:', {
                         numero: cleanOrderNumber,
-                        pedidoId: order.id,
+                        id: order.id,
                         status: order.status,
-                        cliente: order.customer?.name || order.client_details?.name || 'Não informado',
-                        produtos: order.products?.length || 0,
                         timestamp: new Date().toISOString()
                     });
-
-                    // Log do pedido completo para debug
-                    console.log('[Nuvemshop] Dados completos do pedido:', JSON.stringify(order, null, 2));
-
                     return order;
                 }
             }
-            
-            console.log('[Nuvemshop] Pedido não encontrado:', { 
+
+            console.log('[Nuvemshop] Pedido não encontrado:', {
                 numero: cleanOrderNumber,
                 timestamp: new Date().toISOString()
             });
             return null;
+
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
                 numero: orderNumber,
                 erro: error.message,
-                stack: error.stack,
-                resposta: error.response?.data,
                 timestamp: new Date().toISOString()
             });
-            return null;
+            throw error;
         }
     }
 
@@ -747,8 +692,103 @@ class NuvemshopService {
         return this.orderApi.formatOrderStatus(status);
     }
 
-    formatPrice(value) {
-        return this.orderApi.formatPrice(value);
+    formatPrice(price) {
+        return this.orderApi.formatPrice(price);
+    }
+
+    async getOrderByNumber(orderNumber) {
+        try {
+            const cleanOrderNumber = String(orderNumber).replace(/[#\\s]/g, '');
+            
+            console.log('[Nuvemshop] Buscando pedido:', {
+                numero: cleanOrderNumber,
+                storeId: NUVEMSHOP_CONFIG.userId,
+                timestamp: new Date().toISOString()
+            });
+
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: {
+                    q: cleanOrderNumber,
+                    per_page: 50,
+                    created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+                }
+            });
+
+            if (response.data && Array.isArray(response.data)) {
+                const order = response.data.find(o => String(o.number) === cleanOrderNumber);
+                
+                if (order) {
+                    console.log('[Nuvemshop] Pedido encontrado:', {
+                        numero: cleanOrderNumber,
+                        id: order.id,
+                        status: order.status,
+                        cliente: order.customer?.name || order.client_details?.name || 'Não informado',
+                        produtos: order.products?.length || 0,
+                        timestamp: new Date().toISOString()
+                    });
+                    return order;
+                }
+            }
+
+            console.log('[Nuvemshop] Pedido não encontrado:', {
+                numero: cleanOrderNumber,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao buscar pedido:', {
+                numero: orderNumber,
+                erro: error.message,
+                stack: error.stack,
+                resposta: error.response?.data,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    async getOrder(orderId) {
+        return this.orderApi.getOrder(orderId);
+    }
+
+    formatOrderStatus(status) {
+        return this.orderApi.formatOrderStatus(status);
+    }
+
+    formatPrice(price) {
+        return this.orderApi.formatPrice(price);
+    }
+
+    async getProduct(productId) {
+        return this.productApi.getProduct(productId);
+    }
+
+    async searchProducts(query) {
+        return this.productApi.searchProducts(query);
+    }
+
+    async getRecentOrders(days = 7) {
+        try {
+            return await this.orderApi.getRecentOrders(days);
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao buscar pedidos recentes:', {
+                days,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
+    async getPendingOrders() {
+        try {
+            return await this.orderApi.getPendingOrders();
+        } catch (error) {
+            console.error('[NuvemshopService] Erro ao buscar pedidos pendentes:', {
+                error: error.message
+            });
+            throw error;
+        }
     }
 
     // Métodos de Produto

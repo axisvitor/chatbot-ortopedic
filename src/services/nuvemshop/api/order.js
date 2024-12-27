@@ -54,7 +54,7 @@ class OrderApi extends NuvemshopApiBase {
     // Métodos principais
     async getOrder(orderId) {
         this.validateOrderId(orderId);
-        return this.handleRequest('get', `/orders/${orderId}`, {
+        return this.handleRequest('get', `${NUVEMSHOP_CONFIG.endpoint}/orders/${orderId}`, {
             params: { fields: this.defaultFields }
         });
     }
@@ -66,7 +66,7 @@ class OrderApi extends NuvemshopApiBase {
             fields: this.defaultFields
         };
 
-        const orders = await this.handleRequest('get', '/orders', { params });
+        const orders = await this.handleRequest('get', `${NUVEMSHOP_CONFIG.endpoint}/orders`, { params });
         return orders.find(order => order.number === orderNumber);
     }
 
@@ -82,7 +82,7 @@ class OrderApi extends NuvemshopApiBase {
             searchParams.created_at_max = params.endDate?.toISOString();
         }
 
-        return this.handleRequest('get', '/orders', { params: searchParams });
+        return this.handleRequest('get', `${NUVEMSHOP_CONFIG.endpoint}/orders`, { params: searchParams });
     }
 
     // Métodos de atualização
@@ -97,7 +97,7 @@ class OrderApi extends NuvemshopApiBase {
             ...options
         };
 
-        return this.handleRequest('put', `/orders/${orderId}`, { data });
+        return this.handleRequest('put', `${NUVEMSHOP_CONFIG.endpoint}/orders/${orderId}`, { data });
     }
 
     async updateShippingInfo(orderId, trackingNumber, carrier = null) {
@@ -111,7 +111,7 @@ class OrderApi extends NuvemshopApiBase {
             ...(carrier && { shipping_carrier: carrier })
         };
 
-        return this.handleRequest('put', `/orders/${orderId}`, { data });
+        return this.handleRequest('put', `${NUVEMSHOP_CONFIG.endpoint}/orders/${orderId}`, { data });
     }
 
     async addOrderNote(orderId, note) {
@@ -121,7 +121,7 @@ class OrderApi extends NuvemshopApiBase {
         }
 
         const data = { note };
-        return this.handleRequest('put', `/orders/${orderId}`, { data });
+        return this.handleRequest('put', `${NUVEMSHOP_CONFIG.endpoint}/orders/${orderId}`, { data });
     }
 
     // Métodos de consulta específicos
@@ -194,7 +194,7 @@ class OrderApi extends NuvemshopApiBase {
                 return cachedOrder;
             }
 
-            const response = await this.get(`${this.endpoint}/${orderNumber}`);
+            const response = await this.get(`${NUVEMSHOP_CONFIG.endpoint}/${orderNumber}`);
             if (response && response.data) {
                 await this.cacheService.set(cacheKey, response.data, 3600); // Cache por 1 hora
                 return response.data;
