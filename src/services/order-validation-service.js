@@ -369,6 +369,115 @@ class OrderValidationService {
             `📍 Status: ${trackingInfo.status}\n` +
             `Última atualização: ${new Date().toLocaleString('pt-BR')}`;
     }
+
+    async validatePaymentProof(orderNumber, imageBuffer) {
+        try {
+            console.log('🔍 Iniciando validação de comprovante:', {
+                pedido: orderNumber,
+                timestamp: new Date().toISOString()
+            });
+
+            // 1. Busca o pedido na Nuvemshop
+            const order = await this.orderApi.getOrderByNumber(orderNumber);
+            if (!order) {
+                throw new Error(`Pedido #${orderNumber} não encontrado`);
+            }
+
+            // 2. Analisa o comprovante com Groq
+            const imageService = new WhatsAppImageService();
+            const proofAnalysis = await imageService.processPaymentProof(imageBuffer, orderNumber);
+
+            // 3. Valida as informações
+            const validation = this.validatePaymentInfo(order, proofAnalysis.analysis);
+
+            // 4. Se validação ok, notifica o financeiro
+            if (validation.isValid) {
+                await this.notifyFinancialDepartment(order, proofAnalysis);
+            }
+
+            return validation;
+
+        } catch (error) {
+            console.error('❌ Erro na validação do comprovante:', {
+                erro: error.message,
+                pedido: orderNumber,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    validatePaymentInfo(order, proofAnalysis) {
+        const validation = {
+            isValid: true,
+            errors: [],
+            warnings: []
+        };
+
+        // Extrai valor do pedido
+        const orderAmount = parseFloat(order.total);
+
+        // Extrai valor do comprovante usando regex
+        const amountMatch = proofAnalysis.match(/R\$\s*(\d+(?:\.\d{2})?)/);
+        const proofAmount = amountMatch ? parseFloat(amountMatch[1]) : null;
+
+        // 1. Valida valor
+        if (!proofAmount) {
+            validation.errors.push('Não foi possível identificar o valor no comprovante');
+            validation.isValid = false;
+        } else if (proofAmount < orderAmount) {
+            validation.errors.push(`Valor do comprovante (R$ ${proofAmount}) é menor que o valor do pedido (R$ ${orderAmount})`);
+            validation.isValid = false;
+        } else if (proofAmount > orderAmount) {
+            validation.warnings.push(`Valor do comprovante (R$ ${proofAmount}) é maior que o valor do pedido (R$ ${orderAmount})`);
+        }
+
+        // 2. Valida data
+        const dateMatch = proofAnalysis.match(/\d{2}\/\d{2}\/\d{4}/);
+        if (!dateMatch) {
+            validation.warnings.push('Não foi possível identificar a data no comprovante');
+        } else {
+            const proofDate = new Date(dateMatch[0].split('/').reverse().join('-'));
+            const orderDate = new Date(order.created_at);
+            
+            // Se comprovante é de antes do pedido
+            if (proofDate < orderDate) {
+                validation.errors.push('Comprovante é anterior à data do pedido');
+                validation.isValid = false;
+            }
+            
+            // Se comprovante é muito antigo (mais de 24h)
+            const hoursDiff = Math.abs(proofDate - orderDate) / 36e5;
+            if (hoursDiff > 24) {
+                validation.warnings.push('Comprovante tem mais de 24 horas de diferença do pedido');
+            }
+        }
+
+        // 3. Valida tipo de transação
+        if (!proofAnalysis.match(/pix|ted|doc|transferência|depósito/i)) {
+            validation.warnings.push('Tipo de transação não identificado claramente no comprovante');
+        }
+
+        // 4. Valida status
+        if (!proofAnalysis.match(/concluíd|aprovad|efetivad|realizada|confirmad/i)) {
+            validation.errors.push('Não foi possível confirmar que a transação foi concluída');
+            validation.isValid = false;
+        }
+
+        return validation;
+    }
+
+    async notifyFinancialDepartment(order, proofAnalysis) {
+        const message = `💰 *Novo Comprovante de Pagamento*\n\n` +
+                       `📦 Pedido: #${order.number}\n` +
+                       `👤 Cliente: ${order.customer.name}\n` +
+                       `💵 Valor do Pedido: R$ ${order.total}\n\n` +
+                       `*Análise do Comprovante:*\n${proofAnalysis.analysis}\n\n` +
+                       `✅ Comprovante validado automaticamente`;
+
+        const whatsapp = new WhatsAppService();
+        await whatsapp.forwardToFinancial({ body: message }, order.number);
+    }
 }
 
 module.exports = { OrderValidationService }; 

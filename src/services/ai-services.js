@@ -172,15 +172,7 @@ class AIServices {
             // Se for imagem, processa primeiro
             if (type === 'image') {
                 console.log('🖼️ Processando imagem...');
-                await this.whatsAppService.handleImageMessage({
-                    type,
-                    from,
-                    text,
-                    messageId: message.messageId,
-                    pushName: message.pushName,
-                    message: message.message, // Inclui a mensagem original do WhatsApp
-                    key: message.key // Inclui a chave original
-                });
+                await this.handleImageMessage(message);
                 return null;
             }
 
@@ -405,6 +397,55 @@ class AIServices {
                         return null;
                     }
                 }
+            }
+
+            // Verifica se está esperando número do pedido
+            const waitingFor = await this.redisStore.get(`waiting_order:${message.from}`);
+            if (waitingFor === 'payment_proof') {
+                const orderNumber = this.extractOrderNumber(message.text);
+                
+                if (!orderNumber) {
+                    await this.whatsAppService.sendMessage({
+                        to: message.from,
+                        body: `❌ Número do pedido inválido. Por favor, envie apenas o número do pedido (exemplo: 2913).`
+                    });
+                    return;
+                }
+
+                // Recupera o comprovante salvo
+                const proofKey = `payment_proof:${message.from}`;
+                const savedProof = await this.redisStore.get(proofKey);
+                
+                if (!savedProof) {
+                    await this.whatsAppService.sendMessage({
+                        to: message.from,
+                        body: `❌ Desculpe, não encontrei mais o comprovante. Por favor, envie o comprovante novamente.`
+                    });
+                    return;
+                }
+
+                // Encaminha para o financeiro
+                await this.whatsAppService.forwardToFinancial({
+                    body: `💰 *Novo Comprovante de Pagamento*\n\n` +
+                          `📦 Pedido: #${orderNumber}\n` +
+                          `👤 Cliente: ${message.pushName || 'Não identificado'}\n` +
+                          `📱 Telefone: ${message.from}\n\n` +
+                          `🔍 Por favor, verifique o pagamento na conta.`,
+                    image: savedProof
+                }, orderNumber);
+
+                // Limpa o cache
+                await this.redisStore.del(proofKey);
+                await this.redisStore.del(`waiting_order:${message.from}`);
+
+                // Confirma para o cliente
+                await this.whatsAppService.sendMessage({
+                    to: message.from,
+                    body: `✅ Comprovante encaminhado com sucesso para análise!\n\n` +
+                          `O departamento financeiro irá verificar o pagamento e atualizar o status do seu pedido.`
+                });
+
+                return;
             }
 
             // Adiciona a mensagem ao thread
@@ -651,6 +692,30 @@ class AIServices {
                 throw new Error('Objeto de imagem não encontrado na mensagem');
             }
 
+            // Verifica se parece ser um comprovante
+            const imageService = new WhatsAppImageService();
+            const isPaymentProof = await imageService.isLikelyPaymentProof(message.message);
+
+            if (isPaymentProof) {
+                // Salva a imagem temporariamente
+                const cacheKey = `payment_proof:${message.from}`;
+                await this.redisStore.set(cacheKey, message.message, 30 * 60); // 30 minutos
+
+                // Pede o número do pedido
+                const response = `Recebi seu comprovante! 🧾\n\n` +
+                               `Para que eu possa encaminhar ao financeiro, por favor me informe o *número do pedido* que este comprovante pertence.`;
+
+                await this.whatsAppService.sendMessage({
+                    to: message.from,
+                    body: response
+                });
+
+                // Marca o usuário como esperando número do pedido
+                await this.redisStore.set(`waiting_order:${message.from}`, 'payment_proof', 30 * 60);
+                
+                return;
+            }
+
             console.log('🎯 Baixando imagem:', {
                 messageId,
                 mimetype: message.message.imageMessage.mimetype,
@@ -672,51 +737,15 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            // Analisa a imagem com o Groq
-            const result = await this.groqServices.processImage(buffer, message);
-
-            if (!result) {
-                throw new Error('Análise da imagem falhou');
-            }
-
-            console.log('🔍 Análise da imagem:', {
-                messageId,
-                tipo: result.type,
-                isPaymentProof: result.isPaymentProof,
-                timestamp: new Date().toISOString()
-            });
-
-            // Se for um comprovante, pede informações adicionais
-            if (result.isPaymentProof) {
-                console.log('💳 Comprovante detectado:', {
-                    messageId,
-                    from,
-                    timestamp: new Date().toISOString()
-                });
-
-                // Salva informações do comprovante no Redis
-                const info = {
-                    messageId,
-                    timestamp: new Date().toISOString()
-                };
-
-                await this.redisStore.set(`receipt:${from}`, JSON.stringify(info));
-                
-                // Envia mensagem pedindo o número do pedido
-                await this.sendResponse(
-                    from,
-                    'Por favor, me informe o número do pedido relacionado a este comprovante para que eu possa validá-lo.'
-                );
-
-                return null;
-            }
-
-            // Se não for comprovante, processa normalmente
+            // Se não for comprovante, processa com OpenAI
             const thread = await this.openAIService.createThread();
+
+            // Analisa a imagem
+            const analysis = await this.openAIService.analyzeImage(buffer);
 
             await this.openAIService.addMessage(thread.id, {
                 role: 'user',
-                content: `Analise esta imagem e forneça uma resposta detalhada e profissional:\n${result.analysis}`
+                content: `Analise esta imagem e forneça uma resposta detalhada e profissional:\n${analysis}`
             });
 
             const run = await this.openAIService.runAssistant(thread.id);
@@ -738,7 +767,7 @@ class AIServices {
                 chatHistory.messages.unshift(
                     {
                         role: 'user',
-                        content: result.analysis,
+                        content: analysis,
                         type: 'image',
                         timestamp: new Date().toISOString()
                     },
@@ -827,98 +856,6 @@ class AIServices {
                 'Desculpe, não consegui processar sua mensagem de voz. Por favor, tente novamente ou envie uma mensagem de texto.'
             );
             return null;
-        }
-    }
-
-    async handleReceiptInfo(message) {
-        try {
-            const { from, text, messageId } = message;
-
-            // Busca dados do comprovante no Redis
-            const receiptKey = await this.redisStore.keys(`receipt:*`);
-            if (!receiptKey || receiptKey.length === 0) {
-                await this.sendResponse(
-                    from,
-                    'Desculpe, não encontrei nenhum comprovante pendente. Por favor, envie o comprovante novamente.'
-                );
-                return;
-            }
-
-            const receipt = await this.redisStore.get(receiptKey[0]);
-            if (!receipt) {
-                await this.sendResponse(
-                    from,
-                    'Desculpe, não encontrei os dados do seu comprovante. Por favor, envie o comprovante novamente.'
-                );
-                return;
-            }
-
-            // Tenta extrair número do pedido e nome
-            const orderMatch = text.match(/#?(\d{6,})/);
-            const orderNumber = orderMatch?.[1];
-
-            if (!orderNumber) {
-                await this.sendResponse(
-                    from,
-                    'Por favor, inclua o número do pedido começando com # (exemplo: #123456).'
-                );
-                return;
-            }
-
-            // Remove o número do pedido para pegar o nome
-            const name = text.replace(/#?\d+/, '').trim();
-
-            if (!name || name.length < 5) {
-                await this.sendResponse(
-                    from,
-                    'Por favor, inclua o nome completo do titular da compra.'
-                );
-                return;
-            }
-
-            // Encaminha para o financeiro
-            const { number: financialNumber } = settings.WHATSAPP_CONFIG.departments.financial;
-
-            // Encaminha a imagem original
-            await this.whatsAppService.forwardMessage(receipt.originalMessage, financialNumber);
-
-            // Envia contexto para o financeiro
-            const context = `*Comprovante Recebido*
-📱 De: ${from}
-🛍️ Pedido: #${orderNumber}
-👤 Nome: ${name}
-💳 Valor: ${receipt.info.valor || 'Não identificado'}
-📅 Data: ${receipt.info.data || 'Não identificada'}
-🏦 Banco: ${receipt.info.banco || 'Não identificado'}
-👤 Beneficiário: ${receipt.info.beneficiario || 'Não identificado'}
-🔄 Tipo: ${receipt.info.pix ? 'PIX' : 'Não especificado'}`;
-
-            await this.whatsAppService.sendMessage(financialNumber, context);
-
-            console.log('💼 Comprovante encaminhado para o financeiro:', {
-                messageId: receipt.messageId,
-                from,
-                to: financialNumber,
-                orderNumber,
-                name,
-                timestamp: new Date().toISOString()
-            });
-
-            // Remove o comprovante do Redis
-            await this.redisStore.del(receiptKey[0]);
-
-            // Confirma para o cliente
-            await this.sendResponse(
-                from,
-                '✅ Obrigado! Seu comprovante foi encaminhado para nossa equipe financeira. Em breve faremos a confirmação do pagamento.'
-            );
-
-        } catch (error) {
-            console.error('❌ Erro ao processar informações do comprovante:', error);
-            await this.sendResponse(
-                message.from,
-                'Desculpe, ocorreu um erro ao processar as informações. Por favor, tente novamente.'
-            );
         }
     }
 
