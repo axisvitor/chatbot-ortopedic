@@ -10,8 +10,10 @@ class WebhookService {
 
     async handleWebhook(data) {
         try {
-            // Verifica se é uma mensagem do WhatsApp
-            if (data.type === 'message') {
+            console.log('📥 Webhook payload:', JSON.stringify(data, null, 2));
+
+            // Verifica se é uma mensagem do WhatsApp (W-API)
+            if (data.type === 'message' || data.tipo === 'message' || data.event === 'message') {
                 return this.handleWhatsAppMessage(data);
             }
 
@@ -25,19 +27,52 @@ class WebhookService {
 
     async handleWhatsAppMessage(data) {
         try {
-            const { message, from } = data;
+            // Formato da W-API
+            if (data.event === 'message') {
+                const { body, from, id } = data;
+                
+                if (!body || !from) {
+                    console.error('[WhatsApp] Mensagem inválida (W-API):', data);
+                    throw new Error('Mensagem inválida: faltam campos obrigatórios (W-API)');
+                }
+
+                console.log(`[WhatsApp] Mensagem recebida de ${from}:`, body);
+
+                // Processa a mensagem usando o AIServices
+                const response = await this.aiServices.processMessage({
+                    type: 'message',
+                    from: from,
+                    text: body,
+                    messageId: id
+                });
+                
+                // Envia a resposta de volta
+                await this.whatsappService.sendText(from, response);
+
+                return true;
+            }
             
-            if (!message || !from) {
-                throw new Error('Mensagem inválida: faltam campos obrigatórios');
+            // Formato do webhook
+            const { message, from, text, phoneNumber } = data;
+            const messageText = message || text;
+            const fromNumber = from || phoneNumber;
+            
+            if (!messageText || !fromNumber) {
+                console.error('[WhatsApp] Mensagem inválida (webhook):', data);
+                throw new Error('Mensagem inválida: faltam campos obrigatórios (webhook)');
             }
 
-            console.log(`[WhatsApp] Mensagem recebida de ${from}:`, message);
+            console.log(`[WhatsApp] Mensagem recebida de ${fromNumber}:`, messageText);
 
             // Processa a mensagem usando o AIServices
-            const response = await this.aiServices.processMessage(message, from);
+            const response = await this.aiServices.processMessage({
+                type: 'message',
+                from: fromNumber,
+                text: messageText
+            });
             
             // Envia a resposta de volta
-            await this.whatsappService.sendMessage(from, response);
+            await this.whatsappService.sendText(fromNumber, response);
 
             return true;
         } catch (error) {
