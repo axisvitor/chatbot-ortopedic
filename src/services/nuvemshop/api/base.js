@@ -5,9 +5,12 @@ const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 const { CacheService } = require('../../../services/cache-service');
 
 class NuvemshopApiBase {
-    constructor(cacheService = null) {
-        this.cacheService = cacheService;
-        this.client = this.initializeClient();
+    constructor(client = null, cacheService = null) {
+        this.cacheService = cacheService || new CacheService();
+        this.client = client;
+        if (!this.client) {
+            this.initializeClient();
+        }
         this.retryDelay = 1000; // Delay inicial de 1 segundo
         this.maxRetries = 3; // Máximo de 3 tentativas
         this.requestCount = 0;
@@ -21,18 +24,18 @@ class NuvemshopApiBase {
 
     initializeClient() {
         // Configuração base do axios
-        const client = axios.create({
-            baseURL: NUVEMSHOP_CONFIG.apiUrl, // Remove /v1 da baseURL
+        this.client = axios.create({
+            baseURL: 'https://api.nuvemshop.com.br',
             timeout: NUVEMSHOP_CONFIG.api.timeout,
             headers: {
-                'Authentication': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'Content-Type': 'application/json',
-                'User-Agent': NUVEMSHOP_CONFIG.api.userAgent
+                'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
             }
         });
 
         // Configuração de retry
-        axiosRetry(client, {
+        axiosRetry(this.client, {
             retries: NUVEMSHOP_CONFIG.api.retryAttempts,
             retryDelay: (retryCount) => {
                 const delay = NUVEMSHOP_CONFIG.api.retryDelays[retryCount - 1] || 
@@ -54,45 +57,37 @@ class NuvemshopApiBase {
         });
 
         // Configuração de rate limit
-        const rateLimitedClient = rateLimit(client, NUVEMSHOP_CONFIG.api.rateLimit);
+        const rateLimitedClient = rateLimit(this.client, NUVEMSHOP_CONFIG.api.rateLimit);
 
-        // Interceptor para logging
-        rateLimitedClient.interceptors.request.use(
-            (config) => {
-                const sanitizedConfig = this.sanitizeConfig(config);
-                console.log('[Nuvemshop] Request:', sanitizedConfig);
-                config.metadata = { startTime: new Date() };
-                return config;
-            },
-            (error) => {
-                console.error('[Nuvemshop] Erro no request:', error);
-                return Promise.reject(error);
-            }
-        );
+        // Adiciona interceptors para logs
+        rateLimitedClient.interceptors.request.use(request => {
+            console.log('[Nuvemshop] Request:', {
+                url: request.url,
+                method: request.method,
+                params: request.params
+            });
+            return request;
+        });
 
         rateLimitedClient.interceptors.response.use(
-            (response) => {
-                const duration = new Date() - response.config.metadata.startTime;
-                console.log('[Nuvemshop] Response:', {
+            response => {
+                console.log('[Nuvemshop] Response Success:', {
                     status: response.status,
-                    url: response.config.url,
-                    duration: `${duration}ms`
+                    url: response.config.url
                 });
                 return response;
             },
-            (error) => {
-                if (error.response) {
-                    console.error('[Nuvemshop] Erro na response:', {
-                        status: error.response.status,
-                        data: error.response.data,
-                        url: error.config.url
-                    });
-                }
-                return Promise.reject(error);
+            error => {
+                console.error('[Nuvemshop] Response Error:', {
+                    status: error.response?.status,
+                    url: error.config?.url,
+                    message: error.message
+                });
+                throw error;
             }
         );
 
-        return rateLimitedClient;
+        this.client = rateLimitedClient;
     }
 
     sanitizeConfig(config) {

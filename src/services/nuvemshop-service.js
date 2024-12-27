@@ -7,10 +7,11 @@ const { CacheService } = require('./cache-service');
 class NuvemshopService {
     constructor() {
         this.client = null;
-        this.orderApi = new OrderApi();
-        this.productApi = new ProductApi();
         this.cacheService = new CacheService();
         this.initializeClient();
+        // Inicializa as APIs com o cliente compartilhado
+        this.orderApi = new OrderApi(this.client);
+        this.productApi = new ProductApi(this.client);
     }
 
     initializeClient() {
@@ -29,7 +30,7 @@ class NuvemshopService {
 
         // Configurar headers padrão
         const headers = {
-            'X-Auth-Token': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+            'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
             'Content-Type': 'application/json',
             'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)',
             'Accept': 'application/json'
@@ -51,7 +52,7 @@ class NuvemshopService {
                 headers: {
                     'Content-Type': request.headers['Content-Type'],
                     'User-Agent': request.headers['User-Agent'],
-                    'X-Auth-Token': 'bearer ' + NUVEMSHOP_CONFIG.accessToken.substring(0, 6) + '...'
+                    'Authentication': request.headers['Authentication']
                 }
             });
             return request;
@@ -87,32 +88,12 @@ class NuvemshopService {
             });
 
             // Usar a API do OrderApi que já tem toda a lógica implementada
-            const order = await this.orderApi.getOrderByNumber(cleanOrderNumber);
-            
-            if (order) {
-                console.log('[Nuvemshop] Pedido encontrado:', {
-                    numero: cleanOrderNumber,
-                    id: order.id,
-                    status: order.status,
-                    cliente: order.customer?.name || order.client_details?.name || 'Não informado',
-                    produtos: order.products?.length || 0,
-                    timestamp: new Date().toISOString()
-                });
-                return order;
-            }
-
-            console.log('[Nuvemshop] Pedido não encontrado:', {
-                numero: cleanOrderNumber,
-                timestamp: new Date().toISOString()
-            });
-            return null;
-
+            return await this.orderApi.getOrderByNumber(cleanOrderNumber);
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
-                numero: orderNumber,
+                numero: cleanOrderNumber,
                 erro: error.message,
-                stack: error.stack,
-                resposta: error.response?.data,
+                status: error.response?.status,
                 timestamp: new Date().toISOString()
             });
             throw error;

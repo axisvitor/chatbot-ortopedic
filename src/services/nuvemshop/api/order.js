@@ -3,9 +3,9 @@ const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 const { CacheService } = require('../../../services/cache-service');
 
 class OrderApi extends NuvemshopApiBase {
-    constructor() {
+    constructor(client = null) {
         const cacheService = new CacheService();
-        super(cacheService);
+        super(client, cacheService);
         
         this.cachePrefix = NUVEMSHOP_CONFIG.cache.prefix + 'order:';
         this.defaultFields = [
@@ -74,6 +74,12 @@ class OrderApi extends NuvemshopApiBase {
         }
 
         try {
+            console.log('🔍 Buscando pedido:', {
+                numero: orderNumber,
+                textoOriginal: orderNumber,
+                timestamp: new Date().toISOString()
+            });
+
             // Tenta buscar o ID do pedido do cache
             const orderId = await this.cacheService.get(idMapKey);
             
@@ -114,21 +120,27 @@ class OrderApi extends NuvemshopApiBase {
             }
 
             // Se não encontrou pelo ID, busca pelo número
-            const orders = await this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders`, {
-                params: { 
+            const endpoint = `/v1/${NUVEMSHOP_CONFIG.userId}/orders`;
+            const response = await this.handleRequest('get', endpoint, {
+                params: {
                     q: orderNumber,
                     fields: this.defaultFields
                 }
             });
-            
-            if (!orders || !Array.isArray(orders)) {
-                console.log('[Nuvemshop] Resposta inválida:', orders);
+
+            if (!response) {
+                console.log('[Nuvemshop] Pedido não encontrado:', {
+                    numero: orderNumber,
+                    timestamp: new Date().toISOString()
+                });
                 return null;
             }
 
-            // Encontra o pedido com o número exato
-            const order = orders.find(o => String(o.number) === String(orderNumber));
-            
+            // Se encontrou pedidos, procura pelo número exato
+            const order = Array.isArray(response) ? 
+                response.find(o => o.number.toString() === orderNumber.toString()) : 
+                (response.number.toString() === orderNumber.toString() ? response : null);
+
             if (order) {
                 // Salva o pedido no cache por 5 minutos
                 await this.cacheService.set(cacheKey, order, 300);
@@ -148,10 +160,11 @@ class OrderApi extends NuvemshopApiBase {
 
             console.log('[Nuvemshop] Pedido não encontrado:', {
                 numero: orderNumber,
-                resultados: orders.length
+                resultados: Array.isArray(response) ? response.length : 0
             });
             
             return null;
+
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
                 numero: orderNumber,
