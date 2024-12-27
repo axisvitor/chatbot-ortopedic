@@ -49,7 +49,7 @@ class OrderApi extends NuvemshopApiBase {
     // Métodos principais
     async getOrder(orderId) {
         this.validateOrderId(orderId);
-        return this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, {
+        return this.handleRequest('get', `/orders/${orderId}`, {
             params: { fields: this.defaultFields }
         });
     }
@@ -74,8 +74,8 @@ class OrderApi extends NuvemshopApiBase {
 
         // Se não estiver no cache, busca da API
         const params = {
-            q: orderNumber,
-            fields: this.defaultFields
+            fields: this.defaultFields,
+            per_page: 50 // Aumentamos para ter mais chances de encontrar o pedido
         };
 
         console.log('[Nuvemshop] Buscando pedido na API:', {
@@ -83,33 +83,82 @@ class OrderApi extends NuvemshopApiBase {
             params
         });
 
-        const orders = await this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders`, { params });
-        
-        if (!orders || !Array.isArray(orders)) {
-            console.log('[Nuvemshop] Resposta inválida:', orders);
-            return null;
-        }
-
-        const order = orders.find(o => String(o.number) === String(orderNumber));
-        
-        if (order) {
-            // Salva no cache por 5 minutos
-            await this.cacheService.set(cacheKey, order, 300);
+        try {
+            // Busca os pedidos mais recentes primeiro
+            const orders = await this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders`, { params });
             
-            console.log('[Nuvemshop] Pedido encontrado e salvo no cache:', {
-                numero: orderNumber,
-                id: order.id,
-                status: order.status,
-                rastreio: order.shipping_tracking_number
-            });
-        } else {
-            console.log('[Nuvemshop] Pedido não encontrado:', {
-                numero: orderNumber,
-                resultados: orders.length
-            });
-        }
+            if (!orders || !Array.isArray(orders)) {
+                console.log('[Nuvemshop] Resposta inválida:', orders);
+                return null;
+            }
 
-        return order;
+            // Filtra pelo número do pedido
+            const order = orders.find(o => String(o.number) === String(orderNumber));
+            
+            if (order) {
+                // Salva no cache por 5 minutos
+                await this.cacheService.set(cacheKey, order, 300);
+                
+                console.log('[Nuvemshop] Pedido encontrado e salvo no cache:', {
+                    numero: orderNumber,
+                    id: order.id,
+                    status: order.status,
+                    rastreio: order.shipping_tracking_number
+                });
+                
+                return order;
+            }
+
+            // Se não encontrou na primeira página, tenta buscar em páginas subsequentes
+            let page = 2;
+            const maxPages = 5; // Limita a busca a 5 páginas para evitar muitas requisições
+
+            while (page <= maxPages) {
+                params.page = page;
+                
+                console.log('[Nuvemshop] Buscando pedido na página:', {
+                    numero: orderNumber,
+                    pagina: page
+                });
+
+                const moreOrders = await this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders`, { params });
+                
+                if (!moreOrders || !Array.isArray(moreOrders) || moreOrders.length === 0) {
+                    break; // Não há mais pedidos para buscar
+                }
+
+                const orderInPage = moreOrders.find(o => String(o.number) === String(orderNumber));
+                
+                if (orderInPage) {
+                    // Salva no cache por 5 minutos
+                    await this.cacheService.set(cacheKey, orderInPage, 300);
+                    
+                    console.log('[Nuvemshop] Pedido encontrado na página', page, ':', {
+                        numero: orderNumber,
+                        id: orderInPage.id,
+                        status: orderInPage.status,
+                        rastreio: orderInPage.shipping_tracking_number
+                    });
+                    
+                    return orderInPage;
+                }
+
+                page++;
+            }
+
+            console.log('[Nuvemshop] Pedido não encontrado após buscar', maxPages, 'páginas:', {
+                numero: orderNumber
+            });
+            
+            return null;
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao buscar pedido:', {
+                numero: orderNumber,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
     }
 
     async searchOrders(params = {}) {
