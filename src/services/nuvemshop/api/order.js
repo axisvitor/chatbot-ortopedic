@@ -54,7 +54,7 @@ class OrderApi extends NuvemshopApiBase {
     // Métodos principais
     async getOrder(orderId) {
         this.validateOrderId(orderId);
-        return this.handleRequest('get', `${NUVEMSHOP_CONFIG.endpoint}/orders/${orderId}`, {
+        return this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, {
             params: { fields: this.defaultFields }
         });
     }
@@ -66,8 +66,35 @@ class OrderApi extends NuvemshopApiBase {
             fields: this.defaultFields
         };
 
-        const orders = await this.handleRequest('get', `${NUVEMSHOP_CONFIG.endpoint}/orders`, { params });
-        return orders.find(order => order.number === orderNumber);
+        console.log('[Nuvemshop] Buscando pedido:', {
+            numero: orderNumber,
+            params
+        });
+
+        const orders = await this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders`, { params });
+        
+        if (!orders || !Array.isArray(orders)) {
+            console.log('[Nuvemshop] Resposta inválida:', orders);
+            return null;
+        }
+
+        const order = orders.find(o => String(o.number) === String(orderNumber));
+        
+        if (order) {
+            console.log('[Nuvemshop] Pedido encontrado:', {
+                numero: orderNumber,
+                id: order.id,
+                status: order.status,
+                rastreio: order.shipping_tracking_number
+            });
+        } else {
+            console.log('[Nuvemshop] Pedido não encontrado:', {
+                numero: orderNumber,
+                resultados: orders.length
+            });
+        }
+
+        return order;
     }
 
     async searchOrders(params = {}) {
@@ -82,7 +109,7 @@ class OrderApi extends NuvemshopApiBase {
             searchParams.created_at_max = params.endDate?.toISOString();
         }
 
-        return this.handleRequest('get', `${NUVEMSHOP_CONFIG.endpoint}/orders`, { params: searchParams });
+        return this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders`, { params: searchParams });
     }
 
     // Métodos de atualização

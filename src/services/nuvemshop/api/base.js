@@ -16,7 +16,7 @@ class NuvemshopApiBase {
             baseURL: NUVEMSHOP_CONFIG.apiUrl,
             timeout: NUVEMSHOP_CONFIG.api.timeout,
             headers: {
-                'X-Auth-Token': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'Content-Type': 'application/json',
                 'User-Agent': NUVEMSHOP_CONFIG.api.userAgent
             }
@@ -88,8 +88,8 @@ class NuvemshopApiBase {
 
     sanitizeConfig(config) {
         const sanitized = { ...config };
-        if (sanitized.headers && sanitized.headers['X-Auth-Token']) {
-            sanitized.headers['X-Auth-Token'] = '[REDACTED]';
+        if (sanitized.headers && sanitized.headers['Authentication']) {
+            sanitized.headers['Authentication'] = '[REDACTED]';
         }
         return sanitized;
     }
