@@ -12,7 +12,7 @@ const { AudioService } = require('./audio-service');
 class AIServices {
     constructor(whatsAppService, whatsAppImageService, redisStore, openAIService, trackingService, orderValidationService, nuvemshopService) {
         this.whatsAppService = whatsAppService || new WhatsAppService();
-        this.whatsAppImageService = whatsAppImageService || new WhatsAppImageService();
+        this.whatsAppImageService = whatsAppImageService || new WhatsAppImageService(this.whatsAppService, new GroqServices());
         this.redisStore = redisStore || new RedisStore();
         this.openAIService = openAIService || new OpenAIService();
         this.trackingService = trackingService || new TrackingService();
@@ -694,7 +694,7 @@ class AIServices {
             }
 
             // Verifica se parece ser um comprovante
-            const imageService = new WhatsAppImageService();
+            const imageService = new WhatsAppImageService(this.whatsAppService, this.groqServices);
             const isPaymentProof = await imageService.isLikelyPaymentProof(message.message);
 
             if (isPaymentProof) {
@@ -706,10 +706,7 @@ class AIServices {
                 const response = `Recebi seu comprovante! 🧾\n\n` +
                                `Para que eu possa encaminhar ao financeiro, por favor me informe o *número do pedido* que este comprovante pertence.`;
 
-                await this.whatsAppService.sendMessage({
-                    to: message.from,
-                    body: response
-                });
+                await this.sendResponse(message.from, response);
 
                 // Marca o usuário como esperando número do pedido
                 await this.redisStore.set(`waiting_order:${message.from}`, 'payment_proof', 30 * 60);
@@ -738,25 +735,40 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            // Se não for comprovante, processa com OpenAI
-            const thread = await this.openAIService.createThread();
+            // Se não for comprovante, analisa com Groq
+            const base64Image = buffer.toString('base64');
+            const messages = [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: "Descreva em detalhes o que você vê nesta imagem."
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: `data:image/jpeg;base64,${base64Image}`
+                            }
+                        }
+                    ]
+                }
+            ];
 
-            // Analisa a imagem
-            const analysis = await this.openAIService.analyzeImage(buffer);
-
-            await this.openAIService.addMessage(thread.id, {
-                role: 'user',
-                content: `Analise esta imagem e forneça uma resposta detalhada e profissional:\n${analysis}`
+            const response = await this.groqServices.chat.completions.create({
+                model: "llama-3.2-11b-vision-preview",
+                messages: messages,
+                temperature: 0.7,
+                max_tokens: 1024,
+                stream: false
             });
 
-            const run = await this.openAIService.runAssistant(thread.id);
-            const response = await this.openAIService.waitForResponse(thread.id, run.id);
-
-            if (!response) {
-                throw new Error('Resposta do OpenAI inválida');
+            if (!response?.choices?.[0]?.message?.content) {
+                throw new Error('Resposta inválida da Groq');
             }
 
-            const formattedResponse = `🖼️ *Análise da imagem:*\n\n${response}`;
+            const analysis = response.choices[0].message.content;
+            const formattedResponse = `🖼️ *Análise da imagem:*\n\n${analysis}`;
             
             // Atualiza o histórico com a mensagem e resposta
             const threadKey = `chat:${from}`;
@@ -768,13 +780,13 @@ class AIServices {
                 chatHistory.messages.unshift(
                     {
                         role: 'user',
-                        content: analysis,
+                        content: messages[0].content[0].text,
                         type: 'image',
                         timestamp: new Date().toISOString()
                     },
                     {
                         role: 'assistant',
-                        content: response,
+                        content: analysis,
                         timestamp: new Date().toISOString()
                     }
                 );

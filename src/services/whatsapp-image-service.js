@@ -3,7 +3,9 @@ const crypto = require('crypto');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 
 class WhatsAppImageService {
-    constructor() {
+    constructor(whatsAppService, groqService) {
+        this.whatsAppService = whatsAppService;
+        this.groqService = groqService;
         this.axios = axios.create({
             timeout: 30000,
             maxContentLength: 10 * 1024 * 1024, // 10MB
@@ -368,6 +370,10 @@ class WhatsAppImageService {
         }
     }
 
+    async downloadMediaMessage(message) {
+        return this.whatsAppService.downloadMediaMessage(message);
+    }
+
     async processPaymentProof(imageBuffer, orderNumber) {
         try {
             // Converte buffer para base64
@@ -397,7 +403,7 @@ class WhatsAppImageService {
                 }
             ];
 
-            const analysis = await this.groqServices.generateText(messages);
+            const analysis = await this.groqService.generateText(messages);
             
             console.log('✅ Análise do comprovante:', {
                 pedido: orderNumber,
