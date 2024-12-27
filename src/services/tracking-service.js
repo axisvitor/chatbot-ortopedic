@@ -202,6 +202,147 @@ class TrackingService {
         }
     }
 
+    async getTrackingInfo(trackingNumber) {
+        try {
+            // Consultar o status diretamente
+            const statusResult = await this.getTrackingStatus(trackingNumber);
+            
+            console.log('[Tracking] Resultado da consulta:', JSON.stringify(statusResult, null, 2));
+
+            if (statusResult.code !== 0) {
+                throw new Error(`Erro ao consultar status: ${statusResult.message || 'Erro desconhecido'}`);
+            }
+
+            // Se tem erros na resposta
+            if (statusResult.data?.errors?.length > 0) {
+                const error = statusResult.data.errors[0];
+                console.log('[Tracking] Erro na consulta:', JSON.stringify(error, null, 2));
+                throw new Error(`Erro na consulta: ${error.message || 'Erro desconhecido'}`);
+            }
+
+            // Verifica se tem dados aceitos
+            if (!statusResult.data?.accepted?.length) {
+                const message = 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
+                return message;
+            }
+
+            const trackInfo = statusResult.data.accepted[0];
+
+            // Verifica se há eventos de taxação (apenas para uso interno)
+            const taxationEvents = [
+                'taxa a pagar',
+                'aguardando pagamento',
+                'pagamento de taxas',
+                'tributos',
+                'imposto',
+                'darf'
+            ];
+
+            // Verifica eventos apenas internamente, não expõe ao cliente
+            const hasTaxation = trackInfo.events?.some(event => 
+                taxationEvents.some(term => 
+                    event.description?.toLowerCase().includes(term)
+                )
+            );
+
+            // Se detectar taxação, notifica o financeiro
+            if (hasTaxation) {
+                await this.notifyFinancialDepartment(trackingNumber, trackInfo);
+            }
+
+            // Remove informações de taxação antes de retornar ao cliente
+            const safeTrackInfo = this.removeTaxationInfo(trackInfo);
+
+            return safeTrackInfo;
+        } catch (error) {
+            console.error('❌ Erro ao buscar rastreamento:', {
+                codigo: trackingNumber,
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+        }
+    }
+
+    removeTaxationInfo(trackInfo) {
+        if (!trackInfo || !trackInfo.events) return trackInfo;
+
+        // Palavras que indicam taxação para filtrar
+        const taxationTerms = [
+            'taxa',
+            'imposto',
+            'darf',
+            'tributo',
+            'pagamento',
+            'recolhimento'
+        ];
+
+        // Filtra eventos removendo menções a taxação
+        const safeEvents = trackInfo.events.map(event => {
+            if (!event.description) return event;
+
+            const hasTaxationTerm = taxationTerms.some(term => 
+                event.description.toLowerCase().includes(term)
+            );
+
+            if (hasTaxationTerm) {
+                // Substitui por mensagem genérica
+                return {
+                    ...event,
+                    description: 'Em processamento na unidade'
+                };
+            }
+
+            return event;
+        });
+
+        return {
+            ...trackInfo,
+            events: safeEvents
+        };
+    }
+
+    async notifyFinancialDepartment(trackingNumber, trackInfo) {
+        try {
+            // Busca informações do pedido relacionado
+            const orderInfo = await this.nuvemshopService.getOrderByTrackingNumber(trackingNumber);
+
+            const taxationEvent = trackInfo.events.find(event => 
+                event.description?.toLowerCase().includes('taxa') ||
+                event.description?.toLowerCase().includes('tributo')
+            );
+
+            // Monta mensagem para o financeiro
+            const message = `*🚨 Pedido Taxado - Ação Necessária*\n\n` +
+                `*Pedido:* #${orderInfo?.number || 'N/A'}\n` +
+                `*Rastreamento:* ${trackingNumber}\n` +
+                `*Status:* ${taxationEvent?.description || 'Taxação detectada'}\n` +
+                `*Data:* ${new Date(taxationEvent?.timestamp || Date.now()).toLocaleString('pt-BR')}\n` +
+                `*Local:* ${taxationEvent?.location || 'Não informado'}\n\n` +
+                `*Ação Necessária:* Verificar valor da taxa e providenciar pagamento`;
+
+            // Envia notificação via WhatsApp
+            const whatsapp = new WhatsAppService();
+            await whatsapp.forwardToFinancial({ 
+                body: message,
+                from: 'SISTEMA'
+            }, orderInfo?.number);
+
+            console.log('✅ Notificação de taxação enviada:', {
+                pedido: orderInfo?.number,
+                rastreio: trackingNumber,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            console.error('❌ Erro ao notificar taxação:', {
+                rastreio: trackingNumber,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
     async _formatTrackingResponse(trackInfo, from) {
         try {
             // Formata a resposta com os eventos disponíveis

@@ -908,6 +908,44 @@ class NuvemshopService {
             throw error;
         }
     }
+
+    async getOrderByTrackingNumber(trackingNumber) {
+        try {
+            // Busca pedidos recentes primeiro
+            const recentOrders = await this.orderApi.getOrders({
+                per_page: 50,
+                fields: [
+                    'id',
+                    'number',
+                    'status',
+                    'shipping_tracking_number'
+                ].join(',')
+            });
+
+            // Encontra o pedido com o código de rastreio
+            const order = recentOrders.find(order => 
+                order.shipping_tracking_number === trackingNumber
+            );
+
+            if (!order) {
+                console.log('❌ Pedido não encontrado para rastreio:', {
+                    rastreio: trackingNumber,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+
+            // Busca detalhes completos do pedido
+            return await this.orderApi.getOrder(order.id);
+        } catch (error) {
+            console.error('❌ Erro ao buscar pedido por rastreio:', {
+                rastreio: trackingNumber,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+        }
+    }
 }
 
 module.exports = { NuvemshopService };
