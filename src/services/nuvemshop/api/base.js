@@ -17,7 +17,7 @@ class NuvemshopApiBase {
             timeout: NUVEMSHOP_CONFIG.api.timeout,
             headers: {
                 'User-Agent': NUVEMSHOP_CONFIG.api.userAgent,
-                'Authentication': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'Authorization': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -88,8 +88,8 @@ class NuvemshopApiBase {
 
     sanitizeConfig(config) {
         const sanitized = { ...config };
-        if (sanitized.headers && sanitized.headers.Authentication) {
-            sanitized.headers.Authentication = '[REDACTED]';
+        if (sanitized.headers && sanitized.headers.Authorization) {
+            sanitized.headers.Authorization = '[REDACTED]';
         }
         return sanitized;
     }
