@@ -92,6 +92,16 @@ class OrderValidationService {
             // Remove caracteres especiais e espaços
             const cleanNumber = String(orderNumber).replace(/[^0-9]/g, '');
             
+            // Valida o formato do número
+            if (!this.isValidOrderNumber(cleanNumber)) {
+                console.log('❌ Número de pedido inválido:', {
+                    numero: cleanNumber,
+                    numeroOriginal: orderNumber,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+            
             console.log('🔍 Validando pedido:', {
                 numero: cleanNumber,
                 numeroOriginal: orderNumber,
@@ -103,6 +113,16 @@ class OrderValidationService {
             if (!order) {
                 console.log('❌ Pedido não encontrado:', {
                     numero: cleanNumber,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+
+            // Valida dados mínimos do pedido
+            if (!order.number || !order.status) {
+                console.log('❌ Dados do pedido incompletos:', {
+                    numero: cleanNumber,
+                    dados: order,
                     timestamp: new Date().toISOString()
                 });
                 return null;
@@ -121,6 +141,7 @@ class OrderValidationService {
             console.error('❌ Erro ao validar pedido:', {
                 erro: error.message,
                 numero: orderNumber,
+                stack: error.stack,
                 timestamp: new Date().toISOString()
             });
             return null;
@@ -142,30 +163,66 @@ class OrderValidationService {
                 throw new Error('Dados do pedido incompletos');
             }
 
-            // Busca código de rastreio
-            let trackingNumber = null;
-            if (order.fulfillments && order.fulfillments.length > 0) {
+            // Busca código de rastreio e status de envio
+            let trackingInfo = {
+                number: null,
+                url: null,
+                status: 'Não disponível'
+            };
+
+            if (order.shipping_tracking_number) {
+                trackingInfo.number = order.shipping_tracking_number;
+                trackingInfo.url = order.shipping_tracking_url;
+            } else if (order.fulfillments && order.fulfillments.length > 0) {
                 const lastFulfillment = order.fulfillments[order.fulfillments.length - 1];
-                if (lastFulfillment.tracking_number) {
-                    trackingNumber = lastFulfillment.tracking_number;
+                if (lastFulfillment.tracking_info?.code) {
+                    trackingInfo.number = lastFulfillment.tracking_info.code;
+                }
+                if (lastFulfillment.status) {
+                    trackingInfo.status = lastFulfillment.status.toLowerCase();
                 }
             }
+
+            // Formata status de pagamento
+            const paymentStatus = order.payment_status === 'pending' ? 'Pendente' :
+                                order.payment_status === 'paid' ? 'Pago' :
+                                order.payment_status === 'voided' ? 'Cancelado' :
+                                'Não disponível';
 
             const orderInfo = {
                 numero_pedido: order.number,
                 status: order.status,
+                status_pagamento: paymentStatus,
                 data_compra: order.created_at ? new Date(order.created_at).toLocaleString('pt-BR') : 'Não disponível',
-                valor_total: order.total || 0,
+                valor_total: new Intl.NumberFormat('pt-BR', { 
+                    style: 'currency', 
+                    currency: order.currency || 'BRL' 
+                }).format(order.total || 0),
                 produtos: Array.isArray(order.products) ? order.products.map(product => ({
                     nome: product.name,
-                    quantidade: product.quantity
+                    quantidade: parseInt(product.quantity) || 1,
+                    preco: new Intl.NumberFormat('pt-BR', { 
+                        style: 'currency', 
+                        currency: order.currency || 'BRL' 
+                    }).format(product.price || 0)
                 })) : [],
-                status_envio: order.shipping_status || 'Não disponível',
-                codigo_rastreio: trackingNumber,
+                status_envio: trackingInfo.status,
+                codigo_rastreio: trackingInfo.number,
+                url_rastreio: trackingInfo.url,
                 cliente: {
                     nome: order.customer?.name || order.client_details?.name || 'Não informado',
-                    telefone: order.customer?.phone || order.client_details?.phone || 'Não informado'
-                }
+                    telefone: order.customer?.phone || order.client_details?.phone || 'Não informado',
+                    email: order.customer?.email || order.contact_email || 'Não informado'
+                },
+                endereco_entrega: order.shipping_address ? {
+                    rua: order.shipping_address.address || '',
+                    numero: order.shipping_address.number || '',
+                    complemento: order.shipping_address.floor || '',
+                    bairro: order.shipping_address.locality || '',
+                    cidade: order.shipping_address.city || '',
+                    estado: order.shipping_address.province || '',
+                    cep: order.shipping_address.zipcode || ''
+                } : null
             };
 
             // Log das informações formatadas

@@ -61,19 +61,19 @@ class OrderApi extends NuvemshopApiBase {
         const cacheKey = `${this.cachePrefix}number:${orderNumber}`;
         const idMapKey = `${this.cachePrefix}number_to_id:${orderNumber}`;
         
-        // Tenta buscar do cache primeiro
-        const cachedOrder = await this.cacheService.get(cacheKey);
-        if (cachedOrder) {
-            console.log('[Nuvemshop] Pedido encontrado no cache:', {
-                numero: orderNumber,
-                id: cachedOrder.id,
-                status: cachedOrder.status,
-                rastreio: cachedOrder.shipping_tracking_number
-            });
-            return cachedOrder;
-        }
-
         try {
+            // Tenta buscar do cache primeiro
+            const cachedOrder = await this.cacheService.get(cacheKey);
+            if (cachedOrder) {
+                console.log('[Nuvemshop] Pedido encontrado no cache:', {
+                    numero: orderNumber,
+                    id: cachedOrder.id,
+                    status: cachedOrder.status,
+                    rastreio: cachedOrder.shipping_tracking_number
+                });
+                return cachedOrder;
+            }
+
             // Tenta buscar o ID do pedido do cache
             const orderId = await this.cacheService.get(idMapKey);
             
@@ -83,34 +83,25 @@ class OrderApi extends NuvemshopApiBase {
                     id: orderId
                 });
 
-                try {
-                    // Busca direta pelo ID
-                    const order = await this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`);
+                // Busca direta pelo ID
+                const order = await this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`);
+                
+                if (order && String(order.number) === String(orderNumber)) {
+                    // Salva no cache por 5 minutos
+                    await this.cacheService.set(cacheKey, order, 300);
                     
-                    if (order && String(order.number) === String(orderNumber)) {
-                        // Salva no cache por 5 minutos
-                        await this.cacheService.set(cacheKey, order, 300);
-                        
-                        console.log('[Nuvemshop] Pedido encontrado pelo ID:', {
-                            numero: orderNumber,
-                            id: order.id,
-                            status: order.status,
-                            rastreio: order.shipping_tracking_number
-                        });
-                        
-                        return order;
-                    } else {
-                        // Remove o ID inválido do cache
-                        await this.cacheService.delete(idMapKey);
-                    }
-                } catch (error) {
-                    if (error.response?.status === 404) {
-                        // Remove o ID inválido do cache
-                        await this.cacheService.delete(idMapKey);
-                    } else {
-                        throw error;
-                    }
+                    console.log('[Nuvemshop] Pedido encontrado pelo ID:', {
+                        numero: orderNumber,
+                        id: order.id,
+                        status: order.status,
+                        rastreio: order.shipping_tracking_number
+                    });
+                    
+                    return order;
                 }
+                
+                // Remove o ID inválido do cache
+                await this.cacheService.delete(idMapKey);
             }
 
             // Se não encontrou pelo ID, busca pelo número
@@ -121,8 +112,15 @@ class OrderApi extends NuvemshopApiBase {
                 }
             });
             
-            if (!orders || !Array.isArray(orders)) {
-                console.log('[Nuvemshop] Resposta inválida:', orders);
+            if (!orders) {
+                console.log('[Nuvemshop] Pedido não encontrado:', {
+                    numero: orderNumber
+                });
+                return null;
+            }
+
+            if (!Array.isArray(orders)) {
+                console.error('[Nuvemshop] Resposta inválida:', orders);
                 return null;
             }
 
@@ -351,6 +349,53 @@ class OrderApi extends NuvemshopApiBase {
             max: maxDeliveryDate,
             formatted: `${minDeliveryDate.toLocaleDateString('pt-BR')} - ${maxDeliveryDate.toLocaleDateString('pt-BR')}`
         };
+    }
+
+    async handleRequest(method, endpoint, options = {}) {
+        const requestConfig = {
+            method,
+            url: endpoint,
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${NUVEMSHOP_CONFIG.accessToken}`,
+                'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)',
+                ...options.headers
+            }
+        };
+
+        try {
+            console.log('[Nuvemshop] Request:', {
+                ...requestConfig,
+                headers: {
+                    ...requestConfig.headers,
+                    Authorization: '[REDACTED]'
+                }
+            });
+
+            const response = await this.axiosInstance(requestConfig);
+            return response.data;
+        } catch (error) {
+            // Log detalhado do erro
+            console.log('[Nuvemshop] Erro na response:', {
+                status: error.response?.status,
+                data: error.response?.data,
+                url: endpoint
+            });
+
+            // Trata erros específicos
+            if (error.response?.status === 401) {
+                console.error('[Nuvemshop] Erro de autenticação. Verifique o token de acesso.');
+                throw new Error('Erro de autenticação na API da Nuvemshop');
+            }
+
+            if (error.response?.status === 404) {
+                return null;
+            }
+
+            // Propaga outros erros
+            throw error;
+        }
     }
 }
 
