@@ -279,55 +279,54 @@ class WhatsAppService {
      */
     async downloadMediaMessage(message) {
         try {
-            if (!message) {
-                throw new Error('Objeto de mensagem inválido');
-            }
-
             console.log('📥 Baixando mídia:', {
-                messageId: message.messageId,
-                tipo: message.type,
+                messageId: message?.key?.id,
+                from: message?.key?.remoteJid,
+                type: message?.type,
+                hasMessage: !!message?.message,
+                messageTypes: message?.message ? Object.keys(message.message) : [],
                 timestamp: new Date().toISOString()
             });
 
-            // Usa o Baileys para baixar e descriptografar a mídia
+            // Extrai a mensagem real considerando todos os casos possíveis
+            const realMessage = message?.message?.ephemeralMessage?.message || // Mensagem ephemeral
+                              message?.message?.viewOnceMessage?.message ||    // Mensagem "ver uma vez"
+                              message?.message?.forwardedMessage ||           // Mensagem encaminhada
+                              message?.message;                              // Mensagem normal
+
+            if (!realMessage) {
+                throw new Error('Mensagem não contém dados de mídia');
+            }
+
+            // Extrai a mídia específica (imagem, áudio, etc)
+            const mediaMessage = realMessage.imageMessage ||
+                               realMessage.audioMessage ||
+                               realMessage.documentMessage ||
+                               realMessage.videoMessage;
+
+            if (!mediaMessage) {
+                throw new Error('Tipo de mídia não suportado ou não encontrado');
+            }
+
+            // Se for "ver uma vez", loga para debug
+            if (message?.message?.viewOnceMessage) {
+                console.log('⚠️ Mensagem do tipo "ver uma vez" detectada');
+            }
+
+            // Baixa a mídia
             const buffer = await downloadMediaMessage(
-                message,
+                { message: realMessage },
                 'buffer',
                 {},
                 {
                     logger: console,
-                    reuploadRequest: async (media) => {
-                        const { mediaUrl } = media;
-                        // Baixa a mídia com o token de autorização
-                        const response = await axios.get(mediaUrl, {
-                            responseType: 'arraybuffer',
-                            headers: {
-                                'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
-                            }
-                        });
-                        return response.data;
-                    },
+                    reuploadRequest: this.reuploadRequest
                 }
             );
 
-            if (!buffer || buffer.length === 0) {
-                throw new Error('Download resultou em buffer vazio');
-            }
-
-            console.log('✅ Mídia baixada com sucesso:', {
-                messageId: message.messageId,
-                tamanho: buffer.length,
-                timestamp: new Date().toISOString()
-            });
-
             return buffer;
-
         } catch (error) {
-            console.error('❌ Erro ao baixar mídia:', {
-                erro: error.message,
-                messageId: message?.messageId,
-                timestamp: new Date().toISOString()
-            });
+            console.error('[WhatsApp] Erro ao baixar mídia:', error);
             throw error;
         }
     }
