@@ -81,9 +81,7 @@ class WebhookService {
                 text: messageData.text,
                 messageId: messageData.messageId,
                 pushName: messageData.pushName,
-                rawData: messageData, // Passa os dados completos para processamento específico de mídia
-                key: data.body.key,
-                message: data.body.message // Inclui a mensagem original do WhatsApp
+                rawData: messageData // Passa os dados completos para processamento específico de mídia
             });
 
             return true;

@@ -205,7 +205,7 @@ class ImageService {
             console.log('📥 Baixando e descriptografando imagem...');
             
             const buffer = await downloadMediaMessage(
-                { message: { imageMessage } },
+                imageMessage,
                 'buffer',
                 {},
                 {

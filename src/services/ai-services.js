@@ -184,40 +184,6 @@ class AIServices {
                 return null;
             }
 
-            // Se for mensagem de imagem, processa com Vision
-            if (message.imageMessage) {
-                const imageResponse = await this.handleImageMessage(message);
-                if (imageResponse) {
-                    // Atualiza o histórico com a mensagem e resposta
-                    chatHistory.messages = chatHistory.messages || [];
-                    chatHistory.messages.unshift(
-                        {
-                            role: 'user',
-                            content: 'Imagem enviada',
-                            type: 'image',
-                            timestamp: new Date().toISOString()
-                        },
-                        {
-                            role: 'assistant',
-                            content: imageResponse,
-                            timestamp: new Date().toISOString()
-                        }
-                    );
-
-                    chatHistory.lastUpdate = new Date().toISOString();
-                    console.log('💾 Salvando histórico de imagem:', {
-                        key: threadKey,
-                        threadId,
-                        mensagens: chatHistory.messages.length,
-                        timestamp: new Date().toISOString()
-                    });
-                    await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
-
-                    await this.sendResponse(from, imageResponse);
-                }
-                return null;
-            }
-
             // Verifica se é um comando especial
             if (text?.toLowerCase() === '#resetid') {
                 const response = await this.handleResetCommand(message);
