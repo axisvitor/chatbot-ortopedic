@@ -169,6 +169,21 @@ class AIServices {
                 return null;
             }
 
+            // Se for imagem, processa primeiro
+            if (type === 'image') {
+                console.log('🖼️ Processando imagem...');
+                await this.whatsAppService.handleImageMessage({
+                    type,
+                    from,
+                    text,
+                    messageId: message.messageId,
+                    pushName: message.pushName,
+                    message: message.message, // Inclui a mensagem original do WhatsApp
+                    key: message.key // Inclui a chave original
+                });
+                return null;
+            }
+
             // Se for mensagem de imagem, processa com Vision
             if (message.imageMessage) {
                 const imageResponse = await this.handleImageMessage(message);

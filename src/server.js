@@ -195,7 +195,8 @@ async function initializeServices() {
 app.use(helmet());
 app.use(morgan('dev'));
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 
 // Rota de healthcheck
 app.get('/', (req, res) => {
