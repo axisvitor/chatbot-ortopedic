@@ -252,6 +252,58 @@ class WhatsAppImageService {
         }
     }
 
+    async analyzeImage(buffer) {
+        try {
+            if (!buffer) {
+                throw new Error('Buffer inválido');
+            }
+
+            // Converte buffer para base64
+            const base64Image = buffer.toString('base64');
+
+            // Configura a requisição para a Groq
+            const messages = [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: "Analise esta imagem em detalhes e me diga se parece ser um comprovante de pagamento. Se for um comprovante, extraia informações como valor, data, tipo de transação (PIX, TED, etc). Se não for um comprovante, descreva o que você vê na imagem."
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: `data:image/jpeg;base64,${base64Image}`
+                            }
+                        }
+                    ]
+                }
+            ];
+
+            const response = await this.groqService.chat.completions.create({
+                model: "llama-3.2-11b-vision-preview",
+                messages: messages,
+                temperature: 0.5,
+                max_tokens: 1024,
+                stream: false
+            });
+
+            if (!response?.choices?.[0]?.message?.content) {
+                throw new Error('Resposta inválida da Groq');
+            }
+
+            return response.choices[0].message.content;
+
+        } catch (error) {
+            console.error('❌ Erro ao analisar imagem com Groq:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
     /**
      * Verifica se uma imagem parece ser um comprovante de pagamento
      * @param {Object} mediaMessage - Mensagem de mídia do WhatsApp
@@ -261,7 +313,7 @@ class WhatsAppImageService {
         try {
             if (!mediaMessage?.imageMessage) return false;
 
-            // Verifica o tipo MIME
+            // Primeiro verifica o tipo MIME
             const { mimetype } = mediaMessage.imageMessage;
             const allowedMimes = WHATSAPP_CONFIG.departments.financial.paymentProofs.allowedTypes;
             
@@ -276,20 +328,36 @@ class WhatsAppImageService {
 
             // Se tiver caption, verifica palavras-chave
             const caption = mediaMessage.imageMessage.caption?.toLowerCase() || '';
-            const keywords = ['comprovante', 'pagamento', 'pix', 'transferência', 'ted', 'doc', 'recibo'];
+            const captionKeywords = ['comprovante', 'pagamento', 'pix', 'transferência', 'ted', 'doc', 'recibo'];
             
-            const hasKeyword = keywords.some(keyword => caption.includes(keyword));
+            const hasKeyword = captionKeywords.some(keyword => caption.includes(keyword));
             if (hasKeyword) {
-                console.log('✅ Palavras-chave de comprovante detectadas:', {
+                console.log('✅ Palavras-chave de comprovante detectadas na legenda:', {
                     caption,
                     timestamp: new Date().toISOString()
                 });
                 return true;
             }
 
-            // Se não tiver caption, assume que pode ser comprovante
-            // O financeiro irá validar depois
-            return true;
+            // Se passou pela validação MIME, baixa e analisa com Groq
+            const buffer = await this.downloadMediaMessage(mediaMessage);
+            
+            // Analisa com Groq
+            const analysis = await this.analyzeImage(buffer);
+
+            // Verifica se a análise indica que é um comprovante
+            const analysisKeywords = ['comprovante', 'pagamento', 'pix', 'transferência', 'ted', 'doc', 'recibo', 'valor', 'data', 'transação'];
+            const analysisLower = analysis.toLowerCase();
+            
+            const isProof = analysisKeywords.some(keyword => analysisLower.includes(keyword));
+
+            console.log('🔍 Análise de comprovante:', {
+                resultado: isProof,
+                previewAnalise: analysis.substring(0, 100),
+                timestamp: new Date().toISOString()
+            });
+
+            return isProof;
 
         } catch (error) {
             console.error('❌ Erro ao verificar comprovante:', {
