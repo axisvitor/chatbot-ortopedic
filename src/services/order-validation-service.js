@@ -323,12 +323,19 @@ class OrderValidationService {
                 
                 message += `\n📬 Rastreamento: ${orderInfo.rastreamento.codigo}`;
 
-                if (trackingInfo?.events?.length > 0) {
-                    const lastEvent = trackingInfo.events[0];
-                    message += `\n📍 Status: ${lastEvent.description}`;
-                    message += `\n🕒 Última Atualização: ${new Date(lastEvent.timestamp).toLocaleString('pt-BR')}`;
-                    if (lastEvent.location) {
-                        message += `\n📌 Local: ${lastEvent.location}`;
+                if (trackingInfo?.latest_event_info) {
+                    message += `\n📍 Status: ${trackingInfo.latest_event_info}`;
+                    
+                    if (trackingInfo.latest_event_time) {
+                        message += `\n🕒 Última Atualização: ${new Date(trackingInfo.latest_event_time).toLocaleString('pt-BR')}`;
+                    }
+
+                    // Se foi entregue, destaca isso
+                    if (trackingInfo.package_status === 'Delivered') {
+                        message += `\n\n✅ *Pedido Entregue*`;
+                        if (trackingInfo.delievery_time) {
+                            message += `\n📅 Data de Entrega: ${new Date(trackingInfo.delievery_time).toLocaleString('pt-BR')}`;
+                        }
                     }
                 }
             }
