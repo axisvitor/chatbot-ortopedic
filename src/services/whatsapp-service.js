@@ -2,6 +2,7 @@ const axios = require('axios');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { GroqServices } = require('./groq-services');
+const FormData = require('form-data');
 
 class WhatsAppService {
     constructor() {
@@ -528,18 +529,21 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            const formData = new FormData();
-            formData.append('phoneNumber', to.replace(/\D/g, '')); // Remove não-dígitos
-            formData.append('file', file);
-            if (caption) formData.append('caption', caption);
-            formData.append('delayMessage', '1000');
+            const form = new FormData();
+            form.append('phoneNumber', to.replace(/\D/g, '')); // Remove não-dígitos
+            form.append('file', file, {
+                filename: 'image.jpg',
+                contentType: 'image/jpeg'
+            });
+            if (caption) form.append('caption', caption);
+            form.append('delayMessage', '1000');
 
             const response = await axios.post(
                 `${WHATSAPP_CONFIG.apiUrl}/message/sendImage?connectionKey=${WHATSAPP_CONFIG.connectionKey}`,
-                formData,
+                form,
                 {
                     headers: {
-                        ...formData.getHeaders(),
+                        ...form.getHeaders(),
                         'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
                     }
                 }
