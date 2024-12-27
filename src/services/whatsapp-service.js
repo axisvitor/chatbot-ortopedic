@@ -314,7 +314,20 @@ class WhatsAppService {
                 console.log('⚠️ Mensagem do tipo "ver uma vez" detectada');
             }
 
-            // 1. Primeiro obtém a URL da mídia via API do WhatsApp
+            // Para áudios, usa direto o Baileys
+            if (realMessage.audioMessage) {
+                return await downloadMediaMessage(
+                    { message: realMessage },
+                    'buffer',
+                    {},
+                    {
+                        logger: console,
+                        reuploadRequest: this.reuploadRequest
+                    }
+                );
+            }
+
+            // Para imagens e outros tipos, usa a API
             const mediaId = mediaMessage.id || message?.key?.id;
             if (!mediaId) {
                 throw new Error('ID da mídia não encontrado');
@@ -334,7 +347,7 @@ class WhatsAppService {
                 throw new Error('URL da mídia não encontrada na resposta da API');
             }
 
-            // 2. Baixa o conteúdo da URL
+            // Baixa o conteúdo da URL
             const mediaResponse = await axios.get(response.data.url, {
                 responseType: 'arraybuffer'
             });
@@ -345,7 +358,7 @@ class WhatsAppService {
 
             const mediaBuffer = Buffer.from(mediaResponse.data);
 
-            // 3. Se necessário, descriptografa usando o Baileys
+            // Se necessário, descriptografa usando o Baileys
             if (mediaMessage.mediaKey) {
                 return await downloadMediaMessage(
                     { message: realMessage },
