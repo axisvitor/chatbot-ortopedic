@@ -1,8 +1,8 @@
 const axios = require('axios');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
-const { CacheService } = require('./cache-service');
 const { OrderApi } = require('./nuvemshop/api/order');
 const { ProductApi } = require('./nuvemshop/api/product');
+const { CacheService } = require('./cache-service');
 
 class NuvemshopService {
     constructor() {

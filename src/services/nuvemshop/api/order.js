@@ -1,6 +1,6 @@
 const { NuvemshopApiBase } = require('./base');
 const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
-const CacheService = require('./cache');
+const { CacheService } = require('../../../services/cache-service');
 
 class OrderApi extends NuvemshopApiBase {
     constructor() {

@@ -2,7 +2,7 @@ const axios = require('axios');
 const axiosRetry = require('axios-retry');
 const rateLimit = require('axios-rate-limit');
 const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
-const { CacheService } = require('../../cache-service');
+const { CacheService } = require('../../../services/cache-service');
 
 class NuvemshopApiBase {
     constructor(cacheService = null) {
