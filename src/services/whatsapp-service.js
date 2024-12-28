@@ -2,7 +2,6 @@ const axios = require('axios');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { container } = require('./service-container');
-const { TrackingService } = require('./tracking-service');
 const FormData = require('form-data');
 
 class WhatsAppService {
@@ -17,9 +16,6 @@ class WhatsAppService {
         // Registra este serviço no container
         container.register('whatsapp', this);
         
-        // Inicializa o serviço de rastreamento
-        this.trackingService = new TrackingService(this);
-        
         // Limpa comprovantes antigos a cada hora
         setInterval(() => this._cleanupPendingProofs(), 60 * 60 * 1000);
     }
@@ -30,6 +26,14 @@ class WhatsAppService {
      */
     get _orderValidationService() {
         return container.get('orderValidation');
+    }
+
+    /**
+     * Obtém o serviço de rastreamento
+     * @private
+     */
+    get _trackingService() {
+        return container.get('tracking');
     }
 
     /**

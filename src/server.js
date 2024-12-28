@@ -127,7 +127,13 @@ async function initializeServices() {
             
             // Inicializa os serviços principais
             const whatsappService = new WhatsAppService();
-            const orderValidationService = new OrderValidationService();
+            console.log('✅ WhatsAppService criado');
+
+            const trackingService = new TrackingService(whatsappService);
+            console.log('✅ TrackingService criado');
+
+            const orderValidationService = new OrderValidationService(null, whatsappService);
+            console.log('✅ OrderValidationService criado');
 
             // Inicializa o WhatsApp e aguarda conexão
             await whatsappService.init();
@@ -154,9 +160,6 @@ async function initializeServices() {
 
             mediaManagerService = new MediaManagerService(audioService, imageService);
             console.log('✅ MediaManagerService inicializado');
-
-            trackingService = new TrackingService(whatsappService);
-            console.log('✅ TrackingService inicializado');
 
             businessHoursService = new BusinessHoursService();
             console.log('✅ BusinessHoursService inicializado');

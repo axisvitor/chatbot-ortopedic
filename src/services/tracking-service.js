@@ -4,7 +4,7 @@ const https = require('https');
 const { TRACKING_CONFIG } = require('../config/settings');
 const { RedisStore } = require('../store/redis-store');
 const { NuvemshopService } = require('./nuvemshop-service');
-const { WhatsAppService } = require('./whatsapp-service');
+const { container } = require('./service-container');
 
 class TrackingService {
     constructor(whatsAppService = null) {
@@ -12,6 +12,17 @@ class TrackingService {
         this.redisStore = new RedisStore();
         this.nuvemshopService = new NuvemshopService();
         this.whatsAppService = whatsAppService;
+        
+        // Registra este serviço no container
+        container.register('tracking', this);
+    }
+
+    /**
+     * Obtém o serviço WhatsApp
+     * @private
+     */
+    get _whatsAppService() {
+        return this.whatsAppService || container.get('whatsapp');
     }
 
     async registerTracking(trackingNumber) {
@@ -336,7 +347,7 @@ class TrackingService {
                 `*Ação Necessária:* Verificar valor da taxa e providenciar pagamento`;
 
             // Envia notificação via WhatsApp
-            const whatsapp = new WhatsAppService();
+            const whatsapp = this._whatsAppService;
             await whatsapp.forwardToFinancial({ 
                 body: message,
                 from: 'SISTEMA'
@@ -408,7 +419,7 @@ class TrackingService {
                         `📅 Atualização: ${new Date(trackInfo.latest_event_time).toLocaleString('pt-BR')}\n` +
                         `📝 Status Original: ${trackInfo.latest_event_info}`;
                     
-                    await this.whatsAppService.forwardToFinancial(financialMessage, financialNotification);
+                    await this._whatsAppService.forwardToFinancial(financialMessage, financialNotification);
                     
                     console.log('💰 Notificação enviada ao financeiro:', {
                         rastreio: trackInfo.number,

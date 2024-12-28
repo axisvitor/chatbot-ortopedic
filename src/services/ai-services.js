@@ -873,6 +873,30 @@ class AIServices {
         }
     }
 
+    async handleOrderMessage(message) {
+        console.log('🔄 Processando mensagem de pedido:', message.body);
+
+        try {
+            // Busca pedido de forma inteligente
+            const order = await this.orderValidationService.findOrderSmart(
+                message.body,
+                message.from
+            );
+
+            if (!order) {
+                return this.orderValidationService.formatOrderNotFoundMessage(message.body);
+            }
+
+            // Formata resposta com informações do pedido
+            const orderInfo = await this.orderValidationService.formatSafeOrderInfo(order);
+            return this.orderValidationService.formatOrderMessage(orderInfo, message.from);
+
+        } catch (error) {
+            console.error('❌ Erro ao processar mensagem de pedido:', error);
+            return `Desculpe, ocorreu um erro ao buscar seu pedido. Por favor, tente novamente em alguns minutos.`;
+        }
+    }
+
     formatProductResponse(product) {
         if (!product) return 'Produto não encontrado.';
         

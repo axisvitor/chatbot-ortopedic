@@ -503,6 +503,84 @@ class OrderValidationService {
         const whatsapp = this._whatsAppService;
         await whatsapp.forwardToFinancial({ body: message }, order.number);
     }
+
+    /**
+     * Busca pedido de forma inteligente usando diferentes estratégias
+     * @param {string} input - Texto do usuário
+     * @param {string} phone - Telefone do usuário
+     * @returns {Promise<Object>} Pedido encontrado ou null
+     */
+    async findOrderSmart(input, phone) {
+        console.log('🔍 Iniciando busca inteligente de pedido:', { input, phone });
+
+        // 1. Tenta extrair número do pedido direto
+        let orderNumber = this.extractOrderNumber(input);
+        if (orderNumber) {
+            console.log('✨ Número de pedido encontrado no texto:', orderNumber);
+            const order = await this.validateOrderNumber(orderNumber);
+            if (order) return order;
+        }
+
+        // 2. Busca pedidos recentes do usuário
+        const recentOrders = await this.nuvemshopService.getRecentOrdersByPhone(phone);
+        if (recentOrders?.length) {
+            console.log('📦 Encontrados pedidos recentes:', recentOrders.length);
+
+            // 2.1 Procura por pedidos pendentes
+            const pendingOrder = recentOrders.find(order => 
+                order.payment_status === 'pending' || 
+                order.status === 'open'
+            );
+            if (pendingOrder) {
+                console.log('💡 Encontrado pedido pendente:', pendingOrder.number);
+                return pendingOrder;
+            }
+
+            // 2.2 Procura por pedidos em processamento
+            const processingOrder = recentOrders.find(order => 
+                order.status === 'processing' || 
+                order.status === 'shipped'
+            );
+            if (processingOrder) {
+                console.log('📬 Encontrado pedido em processamento:', processingOrder.number);
+                return processingOrder;
+            }
+
+            // 2.3 Retorna o pedido mais recente
+            console.log('🕒 Retornando pedido mais recente:', recentOrders[0].number);
+            return recentOrders[0];
+        }
+
+        // 3. Tenta extrair número do pedido de forma mais flexível
+        const matches = input.match(/\d{5,7}/g);
+        if (matches) {
+            for (const match of matches) {
+                console.log('🔄 Tentando validar possível número:', match);
+                const order = await this.validateOrderNumber(match);
+                if (order) {
+                    console.log('✅ Pedido encontrado com número alternativo:', order.number);
+                    return order;
+                }
+            }
+        }
+
+        console.log('❌ Nenhum pedido encontrado');
+        return null;
+    }
+
+    /**
+     * Formata mensagem de pedido não encontrado
+     * @param {string} input - Texto original do usuário
+     * @returns {string} Mensagem formatada
+     */
+    formatOrderNotFoundMessage(input) {
+        return `❌ Não encontrei nenhum pedido${input ? ` com o número "${input}"` : ''}.\n\n` +
+               `Por favor, verifique se o número está correto e tente novamente.\n\n` +
+               `💡 Dicas:\n` +
+               `- Digite apenas o número do pedido (ex: 12345)\n` +
+               `- Verifique no seu email de confirmação\n` +
+               `- Se acabou de fazer o pedido, aguarde alguns minutos`;
+    }
 }
 
 module.exports = { OrderValidationService }; 
