@@ -1,22 +1,35 @@
 const axios = require('axios');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
-const { GroqServices } = require('./groq-services');
-const { OrderValidationService } = require('./order-validation-service');
+const { container } = require('./service-container');
+const { TrackingService } = require('./tracking-service');
 const FormData = require('form-data');
 
 class WhatsAppService {
-    constructor(orderValidationService = null) {
+    constructor() {
         this.client = null;
         this.connectionKey = null;
         this.retryCount = 0;
         this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
         this.paymentProofMessages = {};
         this.pendingProofs = new Map(); // Armazena comprovantes aguardando número do pedido
-        this.orderValidationService = orderValidationService || new OrderValidationService(null, this);
+        
+        // Registra este serviço no container
+        container.register('whatsapp', this);
+        
+        // Inicializa o serviço de rastreamento
+        this.trackingService = new TrackingService(this);
         
         // Limpa comprovantes antigos a cada hora
         setInterval(() => this._cleanupPendingProofs(), 60 * 60 * 1000);
+    }
+
+    /**
+     * Obtém o serviço de validação de pedidos
+     * @private
+     */
+    get _orderValidationService() {
+        return container.get('orderValidation');
     }
 
     /**
@@ -614,7 +627,7 @@ class WhatsAppService {
                                   this.paymentProofMessages[message.from];
 
             // Extrai e valida o número do pedido
-            const orderNumber = this.orderValidationService.extractOrderNumber(message.body);
+            const orderNumber = this._orderValidationService.extractOrderNumber(message.body);
             if (!orderNumber) {
                 await this.sendText(
                     message.from, 
@@ -624,7 +637,7 @@ class WhatsAppService {
             }
 
             // Valida o pedido
-            const order = await this.orderValidationService.validateOrderNumber(orderNumber);
+            const order = await this._orderValidationService.validateOrderNumber(orderNumber);
             if (!order) {
                 await this.sendText(
                     message.from, 
@@ -667,7 +680,7 @@ class WhatsAppService {
             const buffer = await this.downloadMediaMessage(message);
 
             // Processa a imagem com o Groq
-            const groqService = new GroqServices();
+            const groqService = new (require('./groq-services').GroqServices)();
             const result = await groqService.processImage(buffer, message);
 
             // Se for um comprovante, pede o número do pedido

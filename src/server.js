@@ -125,24 +125,19 @@ async function initializeServices() {
             cacheService = new CacheService(redisStore);
             console.log('✅ CacheService inicializado');
             
-            // Inicializa serviços em ordem correta
-            whatsappService = new WhatsAppService();
-            console.log('✅ WhatsAppService criado');
+            // Inicializa os serviços principais
+            const whatsappService = new WhatsAppService();
+            const orderValidationService = new OrderValidationService();
 
-            orderValidationService = new OrderValidationService(null, whatsappService);
-            console.log('✅ OrderValidationService criado');
-
-            // Atualiza a referência no WhatsAppService
-            whatsappService.orderValidationService = orderValidationService;
-            console.log('✅ Dependências configuradas');
-
-            // Inicializa WhatsApp
+            // Inicializa o WhatsApp e aguarda conexão
             await whatsappService.init();
+            console.log('✅ WhatsAppService inicializado');
+
+            // Verifica se o cliente está conectado
             const client = await whatsappService.getClient();
             if (!client) {
                 throw new Error('WhatsAppService não inicializou corretamente');
             }
-            console.log('✅ WhatsAppService inicializado');
 
             // Inicializa outros serviços
             groqServices = new GroqServices();

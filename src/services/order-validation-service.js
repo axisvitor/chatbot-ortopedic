@@ -3,16 +3,40 @@ const { RedisStore } = require('../store/redis-store');
 const { TrackingService } = require('./tracking-service');
 const { formatTimeAgo } = require('../utils/date-utils');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
+const { NuvemshopService } = require('./nuvemshop-service');
+const { container } = require('./service-container');
 
 class OrderValidationService {
     constructor(nuvemshopClient = null, whatsAppService = null) {
-        this.orderApi = new OrderApi(nuvemshopClient);
+        this.nuvemshopService = new NuvemshopService();
+        this.orderApi = new OrderApi(nuvemshopClient || this.nuvemshopService.client);
         this.redisStore = new RedisStore();
-        this.trackingService = new TrackingService(whatsAppService);
-        this.whatsAppService = whatsAppService;
         this.MAX_ATTEMPTS = 5; // Limite de tentativas por usuário
         this.BLOCK_TIME = 1800; // 30 minutos em segundos
         this.CACHE_TTL = NUVEMSHOP_CONFIG.cache.ttl.orders.recent; // 5 minutos para pedidos recentes
+
+        // Configura WhatsApp e Tracking
+        this.whatsAppService = whatsAppService;
+        this.trackingService = whatsAppService ? new TrackingService(whatsAppService) : null;
+        
+        // Registra este serviço no container
+        container.register('orderValidation', this);
+    }
+
+    /**
+     * Obtém o serviço WhatsApp
+     * @private
+     */
+    get _whatsAppService() {
+        return this.whatsAppService || container.get('whatsapp');
+    }
+
+    /**
+     * Obtém o serviço de rastreamento
+     * @private
+     */
+    get _trackingService() {
+        return this.trackingService || this._whatsAppService?.trackingService;
     }
 
     /**
@@ -129,7 +153,7 @@ class OrderValidationService {
                         timestamp: new Date().toISOString()
                     });
                     
-                    trackingDetails = await this.trackingService.getTrackingInfo(order.shipping_tracking_number);
+                    trackingDetails = await this._trackingService.getTrackingInfo(order.shipping_tracking_number);
                     
                     if (trackingDetails?.success) {
                         console.log('✅ Rastreamento encontrado:', {
@@ -320,7 +344,7 @@ class OrderValidationService {
 
             // Se tem código de rastreio, busca atualizações
             if (orderInfo.rastreamento?.codigo !== 'Não disponível') {
-                const trackingInfo = await this.trackingService.getTrackingInfo(orderInfo.rastreamento.codigo);
+                const trackingInfo = await this._trackingService.getTrackingInfo(orderInfo.rastreamento.codigo);
                 
                 message += `\n📬 Rastreamento: ${orderInfo.rastreamento.codigo}`;
 
@@ -328,14 +352,14 @@ class OrderValidationService {
                     message += `\n📍 Status: ${trackingInfo.latest_event_info}`;
                     
                     if (trackingInfo.latest_event_time) {
-                        message += `\n🕒 Última Atualização: ${new Date(trackingInfo.latest_event_time).toLocaleString('pt-BR')}`;
+                        message += `\n🕒 Última Atualização: ${formatTimeAgo(trackingInfo.latest_event_time)}`;
                     }
 
                     // Se foi entregue, destaca isso
                     if (trackingInfo.package_status === 'Delivered') {
                         message += `\n\n✅ *Pedido Entregue*`;
                         if (trackingInfo.delievery_time) {
-                            message += `\n📅 Data de Entrega: ${new Date(trackingInfo.delievery_time).toLocaleString('pt-BR')}`;
+                            message += `\n📅 Data de Entrega: ${formatTimeAgo(trackingInfo.delievery_time)}`;
                         }
                     }
                 }
@@ -354,7 +378,7 @@ class OrderValidationService {
      * @returns {Promise<string>} Mensagem formatada com status atual
      */
     async getTrackingStatus(trackingNumber) {
-        return this.trackingService.getTrackingStatus(trackingNumber);
+        return this._trackingService.getTrackingStatus(trackingNumber);
     }
 
     formatOrderTrackingResponse(trackingInfo) {
@@ -368,7 +392,7 @@ class OrderValidationService {
         return `🚚 *Status do Rastreamento*\n\n` +
             `📦 Código: ${trackingInfo.code}\n` +
             `📍 Status: ${trackingInfo.status}\n` +
-            `Última atualização: ${new Date().toLocaleString('pt-BR')}`;
+            `Última atualização: ${formatTimeAgo(trackingInfo.time)}`;
     }
 
     async validatePaymentProof(orderNumber, imageBuffer) {
@@ -476,7 +500,7 @@ class OrderValidationService {
                        `*Análise do Comprovante:*\n${proofAnalysis.analysis}\n\n` +
                        `✅ Comprovante validado automaticamente`;
 
-        const whatsapp = new WhatsAppService();
+        const whatsapp = this._whatsAppService;
         await whatsapp.forwardToFinancial({ body: message }, order.number);
     }
 }
