@@ -7,11 +7,11 @@ const { NuvemshopService } = require('./nuvemshop-service');
 const { WhatsAppService } = require('./whatsapp-service');
 
 class TrackingService {
-    constructor() {
+    constructor(whatsAppService = null) {
         this.config = TRACKING_CONFIG;
         this.redisStore = new RedisStore();
         this.nuvemshopService = new NuvemshopService();
-        this.whatsAppService = new WhatsAppService();
+        this.whatsAppService = whatsAppService;
     }
 
     async registerTracking(trackingNumber) {

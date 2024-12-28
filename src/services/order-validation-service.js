@@ -5,10 +5,11 @@ const { formatTimeAgo } = require('../utils/date-utils');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
 
 class OrderValidationService {
-    constructor(nuvemshopClient = null) {
+    constructor(nuvemshopClient = null, whatsAppService = null) {
         this.orderApi = new OrderApi(nuvemshopClient);
         this.redisStore = new RedisStore();
-        this.trackingService = new TrackingService();
+        this.trackingService = new TrackingService(whatsAppService);
+        this.whatsAppService = whatsAppService;
         this.MAX_ATTEMPTS = 5; // Limite de tentativas por usuário
         this.BLOCK_TIME = 1800; // 30 minutos em segundos
         this.CACHE_TTL = NUVEMSHOP_CONFIG.cache.ttl.orders.recent; // 5 minutos para pedidos recentes

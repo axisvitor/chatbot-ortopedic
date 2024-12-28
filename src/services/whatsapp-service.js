@@ -6,21 +6,28 @@ const { OrderValidationService } = require('./order-validation-service');
 const FormData = require('form-data');
 
 class WhatsAppService {
-    constructor() {
+    constructor(orderValidationService = null) {
         this.client = null;
         this.connectionKey = null;
         this.retryCount = 0;
         this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
         this.paymentProofMessages = {};
         this.pendingProofs = new Map(); // Armazena comprovantes aguardando número do pedido
-        this.orderValidationService = new OrderValidationService();
+        this.orderValidationService = orderValidationService || new OrderValidationService(null, this);
         
         // Limpa comprovantes antigos a cada hora
         setInterval(() => this.cleanupPendingProofs(), 60 * 60 * 1000);
     }
 
+    /**
+     * Inicializa o serviço WhatsApp
+     * @returns {Promise<Object>} Cliente HTTP inicializado
+     * @throws {Error} Se falhar a inicialização
+     */
     async init() {
         try {
+            console.log(' Inicializando WhatsApp Service...');
+            
             if (!WHATSAPP_CONFIG.token) {
                 throw new Error('Token não configurado');
             }
@@ -29,24 +36,32 @@ class WhatsAppService {
                 throw new Error('Connection Key não configurada');
             }
 
-            console.log('[WhatsApp] Iniciando cliente...', {
-                apiUrl: WHATSAPP_CONFIG.apiUrl,
-                connectionKey: WHATSAPP_CONFIG.connectionKey,
-                timestamp: new Date().toISOString()
+            // Reseta contadores
+            this.retryCount = 0;
+            this.connectionKey = WHATSAPP_CONFIG.connectionKey;
+
+            // Inicializa cliente HTTP
+            this.client = axios.create({
+                baseURL: WHATSAPP_CONFIG.apiUrl,
+                headers: {
+                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
             });
 
-            this.client = await this.createClient();
-            this.connectionKey = WHATSAPP_CONFIG.connectionKey;
+            // Adiciona interceptors
             this.addInterceptor();
 
-            console.log('[WhatsApp] Cliente inicializado com sucesso:', { 
-                connectionKey: this.connectionKey,
+            console.log(' WhatsApp Service inicializado:', {
+                baseUrl: WHATSAPP_CONFIG.apiUrl,
+                chaveConexao: this.connectionKey,
                 timestamp: new Date().toISOString()
             });
 
             return this.client;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao inicializar cliente:', {
+            console.error(' Erro ao inicializar WhatsApp Service:', {
                 erro: error.message,
                 stack: error.stack,
                 timestamp: new Date().toISOString()
@@ -153,7 +168,7 @@ class WhatsAppService {
 
             // Verifica erro de conta
             if (response.data?.error && response.data?.message?.includes('conta')) {
-                console.log('🔄 Erro de conta, reinicializando conexão...');
+                console.log(' Erro de conta, reinicializando conexão...');
                 await this.init();
                 return this.sendText(to, text);
             }
@@ -167,7 +182,7 @@ class WhatsAppService {
 
             return response.data;
         } catch (error) {
-            console.error('❌ Erro ao enviar mensagem:', {
+            console.error(' Erro ao enviar mensagem:', {
                 para: to,
                 erro: error.message,
                 status: error.response?.status,
@@ -178,7 +193,7 @@ class WhatsAppService {
 
             // Verifica erro de conta no catch
             if (error.response?.data?.error && error.response?.data?.message?.includes('conta')) {
-                console.log('🔄 Erro de conta no catch, reinicializando conexão...');
+                console.log(' Erro de conta no catch, reinicializando conexão...');
                 await this.init();
                 return this.sendText(to, text);
             }
@@ -187,9 +202,6 @@ class WhatsAppService {
         }
     }
 
-    /**
-     * Envia uma imagem
-     */
     async sendImage(to, image, caption = '') {
         try {
             const isBase64 = this._isBase64(image);
@@ -248,7 +260,7 @@ class WhatsAppService {
      */
     async downloadMediaMessage(message) {
         try {
-            console.log('📥 Baixando mídia:', {
+            console.log(' Baixando mídia:', {
                 messageId: message?.key?.id,
                 from: message?.key?.remoteJid,
                 type: message?.type,
@@ -279,7 +291,7 @@ class WhatsAppService {
 
             // Se for "ver uma vez", loga para debug
             if (message?.message?.viewOnceMessage) {
-                console.log('⚠️ Mensagem do tipo "ver uma vez" detectada');
+                console.log(' Mensagem do tipo "ver uma vez" detectada');
             }
 
             // Usa o Baileys para baixar e descriptografar a mídia
@@ -378,7 +390,7 @@ class WhatsAppService {
      */
     async forwardMessage(message, to) {
         try {
-            console.log('↪️ Encaminhando mensagem:', {
+            console.log(' Encaminhando mensagem:', {
                 de: message.from,
                 para: to,
                 tipo: message.type,
@@ -434,7 +446,7 @@ class WhatsAppService {
                 throw new Error('Tipo de mensagem não suportado para encaminhamento');
             }
 
-            console.log('✅ Mensagem encaminhada com sucesso');
+            console.log(' Mensagem encaminhada com sucesso');
         } catch (error) {
             console.error('[WhatsApp] Erro ao encaminhar mensagem:', error);
             throw error;
@@ -450,7 +462,7 @@ class WhatsAppService {
      */
     async sendImageByUrl(to, imageUrl, caption = '') {
         try {
-            console.log('🖼️ Enviando imagem por URL:', {
+            console.log(' Enviando imagem por URL:', {
                 para: to,
                 url: imageUrl?.substring(0, 50) + '...',
                 temLegenda: !!caption,
@@ -489,7 +501,7 @@ class WhatsAppService {
      */
     async sendImageFile(to, file, caption = '') {
         try {
-            console.log('🖼️ Enviando arquivo de imagem:', {
+            console.log(' Enviando arquivo de imagem:', {
                 para: to,
                 tamanho: file.length,
                 temLegenda: !!caption,
@@ -538,9 +550,111 @@ class WhatsAppService {
         }
     }
 
+    /**
+     * Processa comprovante de pagamento com número do pedido
+     * @param {string} from - Número do remetente
+     * @param {Object} order - Dados do pedido validado
+     * @returns {Promise<void>}
+     */
+    async handlePaymentProof(from, order) {
+        try {
+            // Recupera a mensagem do comprovante (novo ou legado)
+            const pendingProof = this.pendingProofs.get(from);
+            const proofMessage = pendingProof?.message || this.paymentProofMessages[from];
+
+            if (!proofMessage) {
+                console.error(' Mensagem do comprovante não encontrada:', {
+                    from,
+                    orderNumber: order.number,
+                    timestamp: new Date().toISOString()
+                });
+                return;
+            }
+
+            // Encaminha para o financeiro
+            const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
+            if (numeroFinanceiro) {
+                await this.forwardMessage(proofMessage, numeroFinanceiro);
+                await this.sendText(
+                    numeroFinanceiro,
+                    ` *Número do Pedido Recebido*\nPedido: #${order.number}\nCliente: ${from}`
+                );
+            }
+
+            // Confirma para o cliente
+            await this.sendText(
+                from,
+                ` Recebi o número do pedido #${order.number}. Nossa equipe financeira já está com seu comprovante e fará a validação o mais breve possível.`
+            );
+
+            // Limpa os comprovantes da memória
+            this.pendingProofs.delete(from);
+            delete this.paymentProofMessages[from];
+
+            console.log(' Comprovante processado com sucesso:', {
+                from,
+                orderNumber: order.number,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            console.error(' Erro ao processar comprovante:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Processa número do pedido recebido
+     * @param {Object} message - Mensagem recebida
+     * @returns {Promise<boolean>} True se for fluxo de comprovante, false para consulta
+     */
+    async handleOrderNumber(message) {
+        try {
+            // Verifica se tem comprovante pendente
+            const hasPendingProof = this.pendingProofs.get(message.from) || 
+                                  this.paymentProofMessages[message.from];
+
+            // Extrai e valida o número do pedido
+            const orderNumber = this.orderValidationService.extractOrderNumber(message.body);
+            if (!orderNumber) {
+                await this.sendText(
+                    message.from, 
+                    ' Por favor, me envie um número de pedido válido.'
+                );
+                return hasPendingProof; // Retorna true se tiver comprovante pendente
+            }
+
+            // Valida o pedido
+            const order = await this.orderValidationService.validateOrderNumber(orderNumber);
+            if (!order) {
+                await this.sendText(
+                    message.from, 
+                    ` Não encontrei o pedido #${orderNumber}. Por favor, verifique o número.`
+                );
+                return hasPendingProof;
+            }
+
+            if (hasPendingProof) {
+                // Fluxo de comprovante
+                await this.handlePaymentProof(message.from, order);
+                return true;
+            }
+
+            // Se chegou aqui é fluxo de consulta normal
+            console.log(' Consulta de pedido:', {
+                from: message.from,
+                orderNumber: order.number,
+                timestamp: new Date().toISOString()
+            });
+            return false;
+        } catch (error) {
+            console.error(' Erro ao processar número do pedido:', error);
+            throw error;
+        }
+    }
+
     async handleImageMessage(message) {
         try {
-            console.log('🖼️ Mensagem de imagem recebida:', {
+            console.log(' Mensagem de imagem recebida:', {
                 messageId: message.messageId,
                 from: message.from,
                 type: message.type,
@@ -568,14 +682,14 @@ class WhatsAppService {
                     await this.forwardMessage(message, numeroFinanceiro);
                     await this.sendText(
                         numeroFinanceiro,
-                        `⚠️ *Novo Comprovante Recebido*\nCliente: ${message.from}\nData: ${new Date().toLocaleString('pt-BR')}`
+                        ` *Novo Comprovante Recebido*\nCliente: ${message.from}\nData: ${new Date().toLocaleString('pt-BR')}`
                     );
                 }
 
                 // Solicita o número do pedido ao cliente
                 await this.sendText(
                     message.from, 
-                    '✅ Recebi seu comprovante e já encaminhei para nossa equipe financeira! ' + 
+                    ' Recebi seu comprovante e já encaminhei para nossa equipe financeira! ' + 
                     'Para agilizar o processo, por favor me informe o número do seu pedido.'
                 );
                 
@@ -583,7 +697,7 @@ class WhatsAppService {
             }
 
             // Se não for um comprovante, continua com o fluxo normal
-            console.log('🔍 Análise da imagem:', {
+            console.log(' Análise da imagem:', {
                 messageId: message.messageId,
                 tipo: result.type,
                 isPaymentProof: result.isPaymentProof,
@@ -591,66 +705,7 @@ class WhatsAppService {
             });
 
         } catch (error) {
-            console.error('❌ Erro ao processar mensagem de imagem:', error);
-            throw error;
-        }
-    }
-
-    async handleOrderNumber(message) {
-        try {
-            // Verifica se tem um comprovante pendente para este número
-            const pendingProof = this.pendingProofs.get(message.from);
-            const hasLegacyProof = this.paymentProofMessages[message.from];
-
-            if (!pendingProof && !hasLegacyProof) {
-                return false;
-            }
-
-            // Extrai e valida o número do pedido
-            const orderNumber = this.orderValidationService.extractOrderNumber(message.body);
-            if (!orderNumber) {
-                await this.sendText(
-                    message.from,
-                    '❌ Por favor, me envie um número de pedido válido.'
-                );
-                return true;
-            }
-
-            // Valida o pedido no sistema
-            const order = await this.orderValidationService.validateOrderNumber(orderNumber);
-            if (!order) {
-                await this.sendText(
-                    message.from,
-                    `❌ Não encontrei o pedido #${orderNumber}. Por favor, verifique o número e tente novamente.`
-                );
-                return true;
-            }
-
-            // Recupera a mensagem do comprovante (do sistema novo ou legado)
-            const proofMessage = pendingProof?.message || this.paymentProofMessages[message.from];
-
-            // Encaminha o comprovante e o número do pedido para o financeiro
-            const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
-            if (numeroFinanceiro) {
-                await this.sendText(
-                    numeroFinanceiro,
-                    `📦 *Número do Pedido Recebido*\nPedido: #${order.number}\nCliente: ${message.from}`
-                );
-            }
-            
-            // Confirma para o cliente
-            await this.sendText(
-                message.from,
-                `✅ Recebi o número do pedido #${order.number}. Nossa equipe financeira já está com seu comprovante e fará a validação o mais breve possível.`
-            );
-
-            // Limpa os comprovantes da memória
-            this.pendingProofs.delete(message.from);
-            delete this.paymentProofMessages[message.from];
-            
-            return true;
-        } catch (error) {
-            console.error('❌ Erro ao processar número do pedido:', error);
+            console.error(' Erro ao processar mensagem de imagem:', error);
             throw error;
         }
     }

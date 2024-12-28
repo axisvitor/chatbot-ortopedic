@@ -125,8 +125,18 @@ async function initializeServices() {
             cacheService = new CacheService(redisStore);
             console.log('✅ CacheService inicializado');
             
-            // Inicializa o WhatsAppService primeiro
+            // Inicializa serviços em ordem correta
             whatsappService = new WhatsAppService();
+            console.log('✅ WhatsAppService criado');
+
+            orderValidationService = new OrderValidationService(null, whatsappService);
+            console.log('✅ OrderValidationService criado');
+
+            // Atualiza a referência no WhatsAppService
+            whatsappService.orderValidationService = orderValidationService;
+            console.log('✅ Dependências configuradas');
+
+            // Inicializa WhatsApp
             await whatsappService.init();
             const client = await whatsappService.getClient();
             if (!client) {
@@ -150,17 +160,14 @@ async function initializeServices() {
             mediaManagerService = new MediaManagerService(audioService, imageService);
             console.log('✅ MediaManagerService inicializado');
 
+            trackingService = new TrackingService(whatsappService);
+            console.log('✅ TrackingService inicializado');
+
             businessHoursService = new BusinessHoursService();
             console.log('✅ BusinessHoursService inicializado');
 
             nuvemshopService = new NuvemshopService(cacheService);
             console.log('✅ NuvemshopService inicializado');
-
-            trackingService = new TrackingService();
-            console.log('✅ TrackingService inicializado');
-
-            orderValidationService = new OrderValidationService();
-            console.log('✅ OrderValidationService inicializado');
 
             aiServices = new AIServices(
                 whatsappService,
