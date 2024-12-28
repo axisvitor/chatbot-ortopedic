@@ -16,7 +16,7 @@ class WhatsAppService {
         this.orderValidationService = orderValidationService || new OrderValidationService(null, this);
         
         // Limpa comprovantes antigos a cada hora
-        setInterval(() => this.cleanupPendingProofs(), 60 * 60 * 1000);
+        setInterval(() => this._cleanupPendingProofs(), 60 * 60 * 1000);
     }
 
     /**
@@ -707,6 +707,44 @@ class WhatsAppService {
         } catch (error) {
             console.error(' Erro ao processar mensagem de imagem:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Limpa comprovantes antigos da memória
+     * @private
+     */
+    async _cleanupPendingProofs() {
+        try {
+            console.log('Iniciando limpeza de comprovantes antigos...');
+            const now = Date.now();
+            const MAX_AGE = 24 * 60 * 60 * 1000; // 24 horas em milissegundos
+
+            // Limpa proofs pendentes
+            for (const [key, proof] of this.pendingProofs.entries()) {
+                if (now - proof.timestamp > MAX_AGE) {
+                    console.log('Removendo comprovante antigo:', {
+                        key,
+                        idade: Math.round((now - proof.timestamp) / (60 * 60 * 1000)) + ' horas'
+                    });
+                    this.pendingProofs.delete(key);
+                }
+            }
+
+            // Limpa mensagens de comprovante antigas
+            for (const [from, message] of Object.entries(this.paymentProofMessages)) {
+                if (now - message.timestamp > MAX_AGE) {
+                    console.log('Removendo mensagem antiga:', {
+                        from,
+                        idade: Math.round((now - message.timestamp) / (60 * 60 * 1000)) + ' horas'
+                    });
+                    delete this.paymentProofMessages[from];
+                }
+            }
+
+            console.log('Limpeza de comprovantes concluída');
+        } catch (error) {
+            console.error('Erro ao limpar comprovantes:', error);
         }
     }
 
