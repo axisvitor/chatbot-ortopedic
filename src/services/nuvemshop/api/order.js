@@ -75,11 +75,11 @@ class OrderApi extends NuvemshopApiBase {
                 timestamp: new Date().toISOString()
             });
 
-            // Busca direta pelo número do pedido
-            const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders`, {
+            // Busca pelo endpoint correto de busca
+            const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders/search`, {
                 params: {
-                    fields: this.defaultFields,
-                    number: orderNumber
+                    q: orderNumber,
+                    fields: this.defaultFields
                 }
             });
 
