@@ -360,7 +360,7 @@ class OpenAIService {
                         if (!parsedArgs.order_number) {
                             output = JSON.stringify({
                                 error: true,
-                                message: 'Número do pedido não fornecido'
+                                message: 'Por favor, me informe o número do pedido que você quer consultar.'
                             });
                             break;
                         }
@@ -368,37 +368,52 @@ class OpenAIService {
                         if (!order) {
                             output = JSON.stringify({
                                 error: true,
-                                message: 'Pedido não encontrado'
+                                message: `Desculpe, não encontrei nenhum pedido com o número ${parsedArgs.order_number}. Poderia verificar se o número está correto?`
                             });
                         } else {
-                            // Se tiver código de rastreio, busca o status
-                            let trackingStatus = null;
+                            let deliveryStatus = '';
                             if (order.shipping_tracking_number) {
                                 try {
-                                    trackingStatus = await this.trackingService.getTrackingStatus(order.shipping_tracking_number);
+                                    const tracking = await this.trackingService.getTrackingStatus(order.shipping_tracking_number);
+                                    if (tracking) {
+                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}` +
+                                                       `\n📍 Status: ${tracking.location},${tracking.status}` +
+                                                       `\n🕒 Última Atualização: ${tracking.last_update}`;
+
+                                        // Adiciona status de entrega se estiver entregue
+                                        if (tracking.status.toLowerCase().includes('entregue')) {
+                                            deliveryStatus += `\n\n✅ Pedido Entregue` +
+                                                            `\n📅 Data de Entrega: ${tracking.last_update}`;
+                                        }
+                                    }
                                 } catch (error) {
                                     console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
                                 }
                             }
 
+                            // Lista de produtos
+                            const products = order.products.map(product => 
+                                `▫ ${product.quantity}x ${product.name}` + 
+                                `${product.variant_name ? ` (${product.variant_name})` : ''}` +
+                                ` - R$ ${product.price.toFixed(2)}`
+                            ).join('\n');
+
                             output = JSON.stringify({
                                 error: false,
-                                order: {
-                                    number: order.number,
-                                    status: order.status,
-                                    created_at: order.created_at,
-                                    total: order.total,
-                                    shipping_status: order.shipping_status,
-                                    tracking_number: order.shipping_tracking_number,
-                                    tracking_url: order.shipping_tracking_url,
-                                    tracking_status: trackingStatus ? {
-                                        code: trackingStatus.code,
-                                        status: trackingStatus.status,
-                                        last_update: trackingStatus.last_update,
-                                        location: trackingStatus.location,
-                                        message: trackingStatus.message
-                                    } : null
-                                }
+                                message: `🛍 Detalhes do Pedido #${order.number}\n\n` +
+                                        `👤 Cliente: ${order.customer.name}\n` +
+                                        `📅 Data: ${new Date(order.created_at).toLocaleString('pt-BR', { 
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        })}\n` +
+                                        `📦 Status: ${order.status}\n` +
+                                        `💰 Valor Total: R$ ${order.total.toFixed(2)}\n\n` +
+                                        `Produtos:\n${products}` +
+                                        `${deliveryStatus}`
                             });
                         }
                         break;
