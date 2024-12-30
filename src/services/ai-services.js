@@ -165,13 +165,17 @@ class AIServices {
                 }
 
                 // Adiciona a mensagem ao thread
-                await this.openAIService.addMessage(chatHistory.threadId, {
+                // await this.openAIService.addMessage(chatHistory.threadId, {
+                //     role: 'user',
+                //     content: text
+                // });
+
+                // Processa a mensagem e deixa o Assistant decidir o que fazer
+                const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
                     role: 'user',
                     content: text
                 });
-
-                // Processa a mensagem e deixa o Assistant decidir o que fazer
-                const response = await this.openAIService.processMessage(chatHistory.threadId);
+                
                 if (response) {
                     await this.sendResponse(from, response);
                 }
@@ -197,7 +201,7 @@ class AIServices {
         } catch (error) {
             console.error('[AI] Erro fatal ao processar mensagem:', error);
             try {
-                await this.sendResponse(from, 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente mais tarde.');
+                await this.sendResponse(from, 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente ou envie uma mensagem de texto.');
             } catch (sendError) {
                 console.error('❌ Erro ao enviar mensagem de fallback:', sendError);
             }
