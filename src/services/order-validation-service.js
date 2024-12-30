@@ -111,9 +111,17 @@ class OrderValidationService {
             }
             // Se for texto
             else if (typeof input === 'string') {
-                // Tenta extrair número do texto
-                const match = input.match(/\d{8}/);
+                // Tenta extrair número do texto - aceita números de 1-8 dígitos
+                const match = input.match(/\b\d{1,8}\b/);
                 orderNumber = match ? match[0] : null;
+                
+                if (orderNumber) {
+                    console.log('[OrderValidation] Número do pedido extraído:', {
+                        input,
+                        numero: orderNumber,
+                        timestamp: new Date().toISOString()
+                    });
+                }
             } else {
                 console.log('[OrderValidation] Input inválido:', typeof input);
                 return null;
@@ -121,6 +129,12 @@ class OrderValidationService {
 
             if (!orderNumber) {
                 console.log('[OrderValidation] Número do pedido não encontrado no input');
+                return null;
+            }
+
+            // Valida o número
+            if (!/^\d+$/.test(orderNumber)) {
+                console.log('[OrderValidation] Número do pedido inválido:', orderNumber);
                 return null;
             }
 
