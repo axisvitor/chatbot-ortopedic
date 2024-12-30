@@ -378,7 +378,7 @@ class OpenAIService {
                                     if (tracking) {
                                         deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
                                                        `\n📬 Rastreamento: ${order.shipping_tracking_number}` +
-                                                       `\n📍 Status: ${tracking.location},${tracking.status}` +
+                                                       `\n📍 Status: ${tracking.status}` +
                                                        `\n🕒 Última Atualização: ${tracking.last_update}`;
 
                                         // Adiciona status de entrega se estiver entregue
@@ -422,7 +422,7 @@ class OpenAIService {
                         if (!parsedArgs.tracking_code) {
                             output = JSON.stringify({
                                 error: true,
-                                message: 'Código de rastreio não fornecido'
+                                message: 'Por favor, me informe o código de rastreio que você quer consultar.'
                             });
                             break;
                         }
@@ -430,32 +430,45 @@ class OpenAIService {
                         if (!tracking) {
                             output = JSON.stringify({
                                 error: true,
-                                message: 'Rastreamento não encontrado'
+                                message: `Desculpe, não encontrei informações para o código de rastreio ${parsedArgs.tracking_code}. Poderia verificar se o código está correto?`
                             });
                         } else {
+                            const status = tracking.status.toLowerCase();
+                            let statusEmoji = '📦';
+                            if (status.includes('entregue')) {
+                                statusEmoji = '✅';
+                            } else if (status.includes('transito') || status.includes('trânsito')) {
+                                statusEmoji = '🚚';
+                            } else if (status.includes('postado')) {
+                                statusEmoji = '📮';
+                            }
+
                             output = JSON.stringify({
                                 error: false,
-                                tracking: {
-                                    code: tracking.code,
-                                    status: tracking.status,
-                                    last_update: tracking.last_update,
-                                    location: tracking.location,
-                                    message: tracking.message
-                                },
-                                message: 'Rastreamento encontrado com sucesso'
+                                message: `📬 Informações de Rastreio: ${tracking.code}\n\n` +
+                                        `${statusEmoji} Status: ${tracking.status}\n` +
+                                        `📍 Localização: ${tracking.location}\n` +
+                                        `🕒 Última Atualização: ${tracking.last_update}\n` +
+                                        `${tracking.message ? `\n📝 Observação: ${tracking.message}` : ''}`
                             });
                         }
                         break;
 
                     case 'get_business_hours':
                         const businessHours = this.businessHoursService.getBusinessHours();
+                        const currentStatus = businessHours.isOpen ? '🟢 Estamos Abertos!' : '🔴 Estamos Fechados';
+                        
+                        // Formata o horário de cada dia
+                        const schedule = Object.entries(businessHours.schedule)
+                            .map(([day, hours]) => `${day}: ${hours}`)
+                            .join('\n');
+
                         output = JSON.stringify({
                             error: false,
-                            hours: {
-                                current_status: businessHours.isOpen ? 'Aberto' : 'Fechado',
-                                schedule: businessHours.schedule,
-                                timezone: businessHours.timezone
-                            }
+                            message: `${currentStatus}\n\n` +
+                                    `⏰ Horário de Atendimento:\n` +
+                                    `${schedule}\n\n` +
+                                    `🌎 Fuso Horário: ${businessHours.timezone}`
                         });
                         break;
 
@@ -463,15 +476,73 @@ class OpenAIService {
                         if (!parsedArgs.text) {
                             output = JSON.stringify({
                                 error: true,
-                                message: 'Texto não fornecido'
+                                message: 'Não consegui identificar o texto para buscar o número do pedido.'
                             });
                             break;
                         }
                         const orderNumber = await this.orderValidationService.extractOrderNumber(parsedArgs.text);
+                        
+                        if (!orderNumber) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: '❌ Desculpe, não consegui identificar um número de pedido válido no texto. Poderia me informar o número do pedido diretamente?'
+                            });
+                            break;
+                        }
+
+                        // Busca as informações do pedido
+                        const extractedOrder = await this.nuvemshopService.getOrderByNumber(orderNumber);
+                        if (!extractedOrder) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: `❌ Encontrei o número #${orderNumber}, mas não consegui localizar este pedido em nossa base. Poderia verificar se o número está correto?`
+                            });
+                            break;
+                        }
+
+                        // Processa o pedido como na função check_order
+                        let deliveryStatus = '';
+                        if (extractedOrder.shipping_tracking_number) {
+                            try {
+                                const tracking = await this.trackingService.getTrackingStatus(extractedOrder.shipping_tracking_number);
+                                if (tracking) {
+                                    deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
+                                                   `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}` +
+                                                   `\n📍 Status: ${tracking.status}` +
+                                                   `\n🕒 Última Atualização: ${tracking.last_update}`;
+
+                                    if (tracking.status.toLowerCase().includes('entregue')) {
+                                        deliveryStatus += `\n\n✅ Pedido Entregue` +
+                                                        `\n📅 Data de Entrega: ${tracking.last_update}`;
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
+                            }
+                        }
+
+                        // Lista de produtos
+                        const products = extractedOrder.products.map(product => 
+                            `▫ ${product.quantity}x ${product.name}` + 
+                            `${product.variant_name ? ` (${product.variant_name})` : ''}` +
+                            ` - R$ ${product.price.toFixed(2)}`
+                        ).join('\n');
+
                         output = JSON.stringify({
-                            error: !orderNumber,
-                            order_number: orderNumber || null,
-                            message: orderNumber ? null : 'Número de pedido não encontrado no texto'
+                            error: false,
+                            message: `🛍 Detalhes do Pedido #${extractedOrder.number}\n\n` +
+                                    `👤 Cliente: ${extractedOrder.customer.name}\n` +
+                                    `📅 Data: ${new Date(extractedOrder.created_at).toLocaleString('pt-BR', { 
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}\n` +
+                                    `📦 Status: ${extractedOrder.status}\n` +
+                                    `💰 Valor Total: R$ ${extractedOrder.total.toFixed(2)}\n\n` +
+                                    `Produtos:\n${products}` +
+                                    `${deliveryStatus}`
                         });
                         break;
 
