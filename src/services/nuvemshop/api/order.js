@@ -73,20 +73,41 @@ class OrderApi extends NuvemshopApiBase {
                 timestamp: new Date().toISOString()
             });
 
-            const response = await this.client.get(`/orders/${numericId}`, {
+            // Primeiro tenta buscar usando search
+            const searchResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders/search`, {
                 params: {
-                    fields: this.defaultFields
+                    q: numericId,
+                    fields: this.defaultFields,
+                    per_page: 1
                 }
             });
 
-            // Salva no cache
-            await this.cacheService.set(
-                cacheKey, 
-                JSON.stringify(response.data),
-                NUVEMSHOP_CONFIG.cache.ttl
-            );
+            let order = null;
+            if (searchResponse.data && Array.isArray(searchResponse.data)) {
+                order = searchResponse.data.find(o => String(o.number) === String(numericId));
+            }
 
-            return response.data;
+            // Se não encontrar, tenta buscar diretamente pelo ID
+            if (!order) {
+                const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders/${numericId}`, {
+                    params: {
+                        fields: this.defaultFields
+                    }
+                });
+                order = response.data;
+            }
+
+            if (order) {
+                // Salva no cache
+                await this.cacheService.set(
+                    cacheKey, 
+                    JSON.stringify(order),
+                    NUVEMSHOP_CONFIG.cache.ttl
+                );
+                return order;
+            }
+
+            return null;
         } catch (error) {
             if (error.response?.status === 404) {
                 console.log('❌ Pedido não encontrado:', {
@@ -120,7 +141,7 @@ class OrderApi extends NuvemshopApiBase {
                 status: cachedOrder.status,
                 rastreio: cachedOrder.shipping_tracking_number
             });
-            return cachedOrder;
+            return JSON.parse(cachedOrder);
         }
 
         try {
@@ -130,55 +151,17 @@ class OrderApi extends NuvemshopApiBase {
                 timestamp: new Date().toISOString()
             });
 
-            // Tenta buscar o ID do pedido do cache
-            const orderId = await this.cacheService.get(idMapKey);
-            
-            if (orderId) {
-                console.log('[Nuvemshop] ID do pedido encontrado no cache:', {
-                    numero: orderNumber,
-                    id: orderId
-                });
-
-                try {
-                    // Busca direta pelo ID
-                    const order = await this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`);
-                    
-                    if (order && String(order.number) === String(orderNumber)) {
-                        // Salva no cache por 5 minutos
-                        await this.cacheService.set(cacheKey, order, 300);
-                        
-                        console.log('[Nuvemshop] Pedido encontrado pelo ID:', {
-                            numero: orderNumber,
-                            id: order.id,
-                            status: order.status,
-                            rastreio: order.shipping_tracking_number
-                        });
-                        
-                        return order;
-                    } else {
-                        // Remove o ID inválido do cache
-                        await this.cacheService.delete(idMapKey);
-                    }
-                } catch (error) {
-                    if (error.response?.status === 404) {
-                        // Remove o ID inválido do cache
-                        await this.cacheService.delete(idMapKey);
-                    } else {
-                        throw error;
-                    }
-                }
-            }
-
-            // Se não encontrou pelo ID, busca pelo número
-            const endpoint = `/v1/${NUVEMSHOP_CONFIG.userId}/orders`;
-            const response = await this.handleRequest('get', endpoint, {
+            // Busca usando o endpoint search
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders/search`, {
                 params: {
                     q: orderNumber,
-                    fields: this.defaultFields
+                    fields: this.defaultFields,
+                    per_page: 50,
+                    created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
                 }
             });
 
-            if (!response) {
+            if (!response?.data) {
                 console.log('[Nuvemshop] Pedido não encontrado:', {
                     numero: orderNumber,
                     timestamp: new Date().toISOString()
@@ -187,13 +170,13 @@ class OrderApi extends NuvemshopApiBase {
             }
 
             // Se encontrou pedidos, procura pelo número exato
-            const order = Array.isArray(response) ? 
-                response.find(o => o.number.toString() === orderNumber.toString()) : 
-                (response.number.toString() === orderNumber.toString() ? response : null);
+            const order = Array.isArray(response.data) ? 
+                response.data.find(o => String(o.number) === String(orderNumber)) : 
+                (String(response.data.number) === String(orderNumber) ? response.data : null);
 
             if (order) {
-                // Salva o pedido no cache por 5 minutos
-                await this.cacheService.set(cacheKey, order, 300);
+                // Salva o pedido no cache
+                await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
                 
                 // Salva o mapeamento número -> id por 1 dia
                 await this.cacheService.set(idMapKey, order.id, 86400);
@@ -210,7 +193,7 @@ class OrderApi extends NuvemshopApiBase {
 
             console.log('[Nuvemshop] Pedido não encontrado:', {
                 numero: orderNumber,
-                resultados: Array.isArray(response) ? response.length : 0
+                resultados: Array.isArray(response.data) ? response.data.length : 0
             });
             
             return null;
@@ -227,18 +210,35 @@ class OrderApi extends NuvemshopApiBase {
     }
 
     async searchOrders(params = {}) {
-        const searchParams = {
-            fields: this.defaultFields,
-            ...params
-        };
+        try {
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders/search`, {
+                params: {
+                    ...params,
+                    fields: this.defaultFields
+                }
+            });
 
-        if (params.startDate || params.endDate) {
-            this.validateDateRange(params.startDate, params.endDate);
-            searchParams.created_at_min = params.startDate?.toISOString();
-            searchParams.created_at_max = params.endDate?.toISOString();
+            return response.data || [];
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao buscar pedidos:', {
+                params,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
         }
+    }
 
-        return this.handleRequest('get', `/v1/${NUVEMSHOP_CONFIG.userId}/orders`, { params: searchParams });
+    async getRecentOrders(days = 7) {
+        const minDate = new Date();
+        minDate.setDate(minDate.getDate() - days);
+
+        return this.searchOrders({
+            created_at_min: minDate.toISOString(),
+            per_page: 50,
+            sort_by: 'created_at',
+            sort_direction: 'desc'
+        });
     }
 
     // Métodos de atualização
@@ -253,7 +253,7 @@ class OrderApi extends NuvemshopApiBase {
             ...options
         };
 
-        return this.handleRequest('put', `${NUVEMSHOP_CONFIG.endpoint}/orders/${orderId}`, { data });
+        return this.handleRequest('put', `/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
     }
 
     async updateShippingInfo(orderId, trackingNumber, carrier = null) {
@@ -267,7 +267,7 @@ class OrderApi extends NuvemshopApiBase {
             ...(carrier && { shipping_carrier: carrier })
         };
 
-        return this.handleRequest('put', `${NUVEMSHOP_CONFIG.endpoint}/orders/${orderId}`, { data });
+        return this.handleRequest('put', `/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
     }
 
     async addOrderNote(orderId, note) {
@@ -277,29 +277,10 @@ class OrderApi extends NuvemshopApiBase {
         }
 
         const data = { note };
-        return this.handleRequest('put', `${NUVEMSHOP_CONFIG.endpoint}/orders/${orderId}`, { data });
+        return this.handleRequest('put', `/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
     }
 
     // Métodos de consulta específicos
-    async getRecentOrders(days = 7) {
-        const endDate = new Date();
-        const startDate = new Date();
-        startDate.setDate(startDate.getDate() - days);
-
-        return this.searchOrders({
-            startDate,
-            endDate,
-            sort: '-created_at'
-        });
-    }
-
-    async getPendingOrders() {
-        return this.searchOrders({
-            status: ['pending', 'authorized', 'partially_paid'],
-            sort: 'created_at'
-        });
-    }
-
     async getOrdersByCustomer(customerId) {
         if (!customerId) {
             throw new Error('ID do cliente inválido');
@@ -350,7 +331,7 @@ class OrderApi extends NuvemshopApiBase {
                 return cachedOrder;
             }
 
-            const response = await this.get(`${NUVEMSHOP_CONFIG.endpoint}/${orderNumber}`);
+            const response = await this.get(`/${NUVEMSHOP_CONFIG.userId}/orders/${orderNumber}`);
             if (response && response.data) {
                 await this.cacheService.set(cacheKey, response.data, 3600); // Cache por 1 hora
                 return response.data;
@@ -419,7 +400,7 @@ class OrderApi extends NuvemshopApiBase {
     async handleRequest(method, endpoint, options = {}) {
         const requestConfig = {
             method,
-            url: endpoint,
+            url: `/${NUVEMSHOP_CONFIG.userId}${endpoint}`,
             ...options,
             headers: {
                 'Content-Type': 'application/json',
