@@ -91,25 +91,47 @@ class AIServices {
     }
 
     async handleMessage(messageData) {
-        const from = messageData?.body?.key?.remoteJid?.replace('@s.whatsapp.net', '');
-        const text = messageData?.body?.message?.extendedTextMessage?.text || 
-                    messageData?.body?.message?.conversation ||
-                    messageData?.body?.message?.text;
-
-        if (!from || !text) {
-            console.log('⚠️ Mensagem inválida:', { messageData });
-            return null;
-        }
-
-        const processKey = `processing:${from}:${messageData.body.key.id}`;
-        
         try {
+            // Extrai dados da mensagem
+            let from, text;
+
+            // Se vier no formato antigo
+            if (messageData.from) {
+                from = messageData.from;
+                text = messageData.text;
+            } 
+            // Se vier no formato novo
+            else if (messageData.body?.key?.remoteJid) {
+                from = messageData.body.key.remoteJid.replace('@s.whatsapp.net', '');
+                text = messageData.body.message?.extendedTextMessage?.text || 
+                       messageData.body.message?.conversation ||
+                       messageData.body.message?.text;
+            }
+
+            // Valida dados essenciais
+            if (!from || !text) {
+                console.log('⚠️ Dados inválidos na mensagem:', {
+                    from,
+                    text,
+                    messageData: JSON.stringify(messageData, null, 2)
+                });
+                return null;
+            }
+
+            console.log('📨 Mensagem recebida:', {
+                de: from,
+                texto: text,
+                timestamp: new Date().toISOString()
+            });
+
+            const processKey = `processing:${from}:${messageData.body?.key?.id || messageData.messageId}`;
+            
             // Verifica se já está processando
             const isProcessing = await this.redisStore.get(processKey);
             if (isProcessing) {
                 console.log('⚠️ Mensagem já está sendo processada:', {
                     de: from,
-                    messageId: messageData.body.key.id,
+                    messageId: messageData.body?.key?.id || messageData.messageId,
                     timestamp: new Date().toISOString()
                 });
                 return null;
@@ -118,111 +140,18 @@ class AIServices {
             // Marca como processando
             await this.redisStore.set(processKey, 'true', 300); // 5 minutos
 
-            // Verifica se é um número de pedido ou pedido internacional
-            const orderNumber = await this.orderValidationService.extractOrderNumber(text);
-            const orderKeywords = ['pedido', 'encomenda', 'compra', 'gostaria de saber'];
-            const hasOrderKeywords = orderKeywords.some(keyword => 
-                text?.toLowerCase().includes(keyword)
-            );
-
-            // Se tem palavras relacionadas a pedido
-            if (hasOrderKeywords) {
-                console.log('🔍 Pergunta sobre pedido detectada:', {
-                    texto: text,
-                    temNumero: !!orderNumber,
-                    de: from,
-                    timestamp: new Date().toISOString()
-                });
-
-                // Se não tem número de pedido, pede para informar
-                if (!orderNumber) {
-                    await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar as informações para você.');
-                    
-                    // Marca que estamos esperando o número do pedido
-                    await this.redisStore.set(`waiting_order:${from}`, 'true', 1800); // 30 minutos
-                    await this.redisStore.set(`waiting_since:${from}`, new Date().toISOString());
-                    
-                    await this.redisStore.set(processKey, 'true');
-                    return null;
-                }
-
-                try {
-                    const order = await this.nuvemshopService.getOrder(orderNumber);
-                    
-                    // Se for pedido internacional
-                    if (order?.shipping_address?.country !== 'BR') {
-                        console.log('🌍 Pedido internacional detectado:', {
-                            numero: orderNumber,
-                            pais: order.shipping_address.country,
-                            timestamp: new Date().toISOString()
-                        });
-                        await this.whatsAppService.forwardToFinancial(messageData, orderNumber);
-                        await this.redisStore.set(processKey, 'true');
-                        return null;
-                    }
-
-                    // Processa pedido normal
-                    if (order) {
-                        await this.handleOrderInfo(from, order);
-                    } else {
-                        await this.sendResponse(from, 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.');
-                    }
-                } catch (error) {
-                    console.error('❌ Erro ao processar pedido:', {
-                        erro: error.message,
-                        numero: orderNumber,
+            try {
+                // Recupera histórico do chat
+                const chatHistory = await this.getChatHistory(from);
+                if (!chatHistory) {
+                    console.error('❌ Erro ao recuperar histórico:', {
                         de: from,
                         timestamp: new Date().toISOString()
                     });
-                    await this.sendResponse(from, 'Desculpe, não foi possível verificar o pedido no momento. Por favor, tente novamente mais tarde.');
-                }
-                
-                await this.redisStore.set(processKey, 'true');
-                return null;
-            }
-
-            // Se chegou aqui, é uma mensagem normal para o assistant
-            console.log('💬 Processando mensagem normal com assistant');
-            
-            // Verifica se estamos esperando número do pedido
-            const waitingOrder = await this.redisStore.get(`waiting_order:${from}`);
-            if (waitingOrder) {
-                // Tenta extrair número do pedido novamente
-                const orderNumber = await this.orderValidationService.extractOrderNumber(text);
-                if (orderNumber) {
-                    // Remove o estado de espera
-                    await this.redisStore.del(`waiting_order:${from}`);
-                    await this.redisStore.del(`waiting_since:${from}`);
-                    
-                    // Processa o pedido
-                    try {
-                        const order = await this.nuvemshopService.getOrder(orderNumber);
-                        if (order) {
-                            await this.handleOrderInfo(from, order);
-                        } else {
-                            await this.sendResponse(from, 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.');
-                        }
-                    } catch (error) {
-                        console.error('❌ Erro ao processar pedido:', error);
-                        await this.sendResponse(from, 'Desculpe, não foi possível verificar o pedido no momento. Por favor, tente novamente mais tarde.');
-                    }
-                    await this.redisStore.set(processKey, 'true');
+                    await this.sendResponse(from, 'Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente mais tarde.');
                     return null;
                 }
-            }
 
-            // Recupera histórico do chat
-            const chatHistory = await this.getChatHistory(from);
-            if (!chatHistory) {
-                console.error('❌ Erro ao recuperar histórico:', {
-                    de: from,
-                    timestamp: new Date().toISOString()
-                });
-                await this.sendResponse(from, 'Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente mais tarde.');
-                return null;
-            }
-
-            try {
                 // Verifica se tem um run ativo
                 const activeRun = await this.openAIService.getActiveRun(chatHistory.threadId);
                 if (activeRun) {
@@ -249,11 +178,12 @@ class AIServices {
                     content: text
                 });
 
-                // Processa a mensagem
+                // Processa a mensagem e deixa o Assistant decidir o que fazer
                 const response = await this.openAIService.processMessage(chatHistory.threadId);
                 if (response) {
                     await this.sendResponse(from, response);
                 }
+
             } catch (error) {
                 console.error('❌ Erro ao processar mensagem:', {
                     erro: error.message,
@@ -271,20 +201,14 @@ class AIServices {
 
             await this.redisStore.set(processKey, 'true');
             return null;
-        } catch (error) {
-            console.error('❌ Erro ao processar mensagem:', {
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
 
+        } catch (error) {
+            console.error('[AI] Erro fatal ao processar mensagem:', error);
             try {
                 await this.sendResponse(from, 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente mais tarde.');
             } catch (sendError) {
                 console.error('❌ Erro ao enviar mensagem de fallback:', sendError);
             }
-
-            await this.redisStore.set(processKey, 'true');
             return null;
         }
     }
