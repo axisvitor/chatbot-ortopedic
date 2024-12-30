@@ -225,6 +225,47 @@ class AIServices {
                     }
                 }
 
+                // Verifica se parece uma saudação
+                const saudacoes = ['oi', 'olá', 'ola', 'bom dia', 'boa tarde', 'boa noite'];
+                if (text && saudacoes.some(s => text.toLowerCase().includes(s))) {
+                    console.log('👋 Saudação detectada:', {
+                        texto: text,
+                        de: from,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    // Adiciona a mensagem ao thread
+                    await this.openAIService.addMessage(chatHistory.threadId, {
+                        role: 'user',
+                        content: text
+                    });
+                    
+                    // Executa o assistant e aguarda resposta
+                    const run = await this.openAIService.runAssistant(chatHistory.threadId);
+                    const response = await this.openAIService.waitForResponse(chatHistory.threadId, run.id);
+
+                    // Atualiza o histórico
+                    chatHistory.messages = chatHistory.messages || [];
+                    chatHistory.messages.unshift(
+                        {
+                            role: 'user',
+                            content: text,
+                            timestamp: new Date().toISOString()
+                        },
+                        {
+                            role: 'assistant',
+                            content: response,
+                            timestamp: new Date().toISOString()
+                        }
+                    );
+
+                    chatHistory.lastUpdate = new Date().toISOString();
+                    await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
+                    await this.sendResponse(from, response);
+                    await this.redisStore.set(processKey, 'true');
+                    return null;
+                }
+
                 // Verifica se é uma solicitação de rastreamento
                 const trackingKeywords = ['rastrear', 'status da entrega', 'status do pedido'];
                 if (text && trackingKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
@@ -274,7 +315,7 @@ class AIServices {
                 const orderKeywords = ['pedido', 'encomenda', 'compra'];
                 const isOrderRelated = orderKeywords.some(keyword => 
                     text?.toLowerCase().includes(keyword) && 
-                    /\d{4,}/.test(text)
+                    /\d{4,}/.test(text) // Tem número com 4+ dígitos
                 );
 
                 if (orderNumber || isOrderRelated) {
@@ -286,25 +327,31 @@ class AIServices {
                     });
 
                     try {
-                        const order = await this.nuvemshopService.getOrder(orderNumber);
-                        
-                        // Se for pedido internacional
-                        if (order?.shipping_address?.country !== 'BR') {
-                            console.log('🌍 Pedido internacional detectado:', {
-                                numero: orderNumber,
-                                pais: order.shipping_address.country,
-                                timestamp: new Date().toISOString()
-                            });
-                            await this.whatsAppService.forwardToFinancial(messageData, orderNumber);
-                            await this.redisStore.set(processKey, 'true');
-                            return null;
-                        }
+                        // Só tenta buscar pedido se tiver um número válido
+                        if (orderNumber) {
+                            const order = await this.nuvemshopService.getOrder(orderNumber);
+                            
+                            // Se for pedido internacional
+                            if (order?.shipping_address?.country !== 'BR') {
+                                console.log('🌍 Pedido internacional detectado:', {
+                                    numero: orderNumber,
+                                    pais: order.shipping_address.country,
+                                    timestamp: new Date().toISOString()
+                                });
+                                await this.whatsAppService.forwardToFinancial(messageData, orderNumber);
+                                await this.redisStore.set(processKey, 'true');
+                                return null;
+                            }
 
-                        // Processa pedido normal
-                        if (order) {
-                            await this.handleOrderInfo(from, order);
+                            // Processa pedido normal
+                            if (order) {
+                                await this.handleOrderInfo(from, order);
+                            } else {
+                                await this.sendResponse(from, 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.');
+                            }
                         } else {
-                            await this.sendResponse(from, 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.');
+                            // Se tem palavras de pedido mas não tem número válido
+                            await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa ajudar.');
                         }
                     } catch (error) {
                         console.error('❌ Erro ao processar pedido:', error);
@@ -313,56 +360,6 @@ class AIServices {
                     
                     await this.redisStore.set(processKey, 'true');
                     return null;
-                }
-
-                // Verifica se está esperando número do pedido para comprovante
-                if (waitingFor === 'payment_proof') {
-                    const orderNumber = this.orderValidationService.extractOrderNumber(text);
-                    
-                    if (!orderNumber) {
-                        await this.whatsAppService.sendText(
-                            from,
-                            '❌ Número do pedido inválido. Por favor, envie apenas o número do pedido (exemplo: 2913).'
-                        );
-                        return;
-                    }
-
-                    // Recupera o comprovante salvo
-                    const proofKey = `payment_proof:${from}`;
-                    const savedProof = await this.redisStore.get(proofKey);
-                    
-                    if (!savedProof) {
-                        await this.whatsAppService.sendText(
-                            from,
-                            '❌ Desculpe, não encontrei mais o comprovante. Por favor, envie o comprovante novamente.'
-                        );
-                        return;
-                    }
-
-                    // Encaminha para o financeiro
-                    await this.whatsAppService.forwardToFinancial({
-                        body: `💰 *Novo Comprovante de Pagamento*\n\n` +
-                              `📦 Pedido: #${orderNumber}\n` +
-                              `👤 Cliente: ${messageData.pushName || 'Não identificado'}\n` +
-                              `📱 Telefone: ${from}\n\n` +
-                              `🔍 Por favor, verifique o pagamento na conta.`,
-                        image: savedProof
-                    }, orderNumber);
-
-                    // Limpa o cache
-                    await this.redisStore.del(proofKey);
-                    await this.redisStore.del(`waiting_order:${from}`);
-                    await this.redisStore.del(`waiting_since:${from}`);
-
-                    // Confirma para o cliente
-                    await this.whatsAppService.sendText(
-                        from,
-                        '✅ Comprovante encaminhado com sucesso para análise!\n\n' +
-                        'O departamento financeiro irá verificar o pagamento e atualizar o status do seu pedido.'
-                    );
-
-                    await this.redisStore.set(processKey, 'true');
-                    return;
                 }
 
                 // Se chegou aqui, é uma mensagem normal para o assistant
