@@ -10,17 +10,22 @@ const { GroqServices } = require('./groq-services');
 const { AudioService } = require('./audio-service');
 
 class AIServices {
-    constructor(whatsAppService, whatsAppImageService, redisStore, openAIService, trackingService, orderValidationService, nuvemshopService) {
+    constructor(whatsAppService, whatsAppImageService, redisStore, openAIService, trackingService, orderValidationService, nuvemshopService, businessHoursService) {
         this.whatsAppService = whatsAppService || new WhatsAppService();
         this.whatsAppImageService = whatsAppImageService || new WhatsAppImageService(this.whatsAppService, new GroqServices());
         this.redisStore = redisStore || new RedisStore();
-        this.openAIService = openAIService || new OpenAIService();
         this.trackingService = trackingService || new TrackingService();
+        this.businessHoursService = businessHoursService || new BusinessHoursService();
         this.orderValidationService = orderValidationService || new OrderValidationService();
         this.nuvemshopService = nuvemshopService || new NuvemshopService();
-        this.businessHours = new BusinessHoursService();
+        this.openAIService = openAIService || new OpenAIService(
+            this.nuvemshopService,
+            this.trackingService,
+            this.businessHoursService,
+            this.orderValidationService
+        );
+        this.audioService = new AudioService();
         this.groqServices = new GroqServices();
-        this.audioService = new AudioService(this.groqServices, this.whatsAppService);
     }
 
     /**
@@ -215,10 +220,10 @@ class AIServices {
                     text?.toLowerCase().includes('humano') || 
                     text?.toLowerCase().includes('pessoa')) {
                     
-                    const isBusinessHours = this.businessHours.isWithinBusinessHours();
+                    const isBusinessHours = this.businessHoursService.isWithinBusinessHours();
                     if (!isBusinessHours) {
                         console.log('⏰ Fora do horário comercial para atendimento humano');
-                        const response = this.businessHours.getOutOfHoursMessage();
+                        const response = this.businessHoursService.getOutOfHoursMessage();
                         await this.sendResponse(from, response);
                         await this.redisStore.set(processKey, 'true');
                         return null;
@@ -311,51 +316,57 @@ class AIServices {
                 }
 
                 // Verifica se é um número de pedido ou pedido internacional
-                const orderNumber = this.orderValidationService.extractOrderNumber(text);
-                const orderKeywords = ['pedido', 'encomenda', 'compra'];
-                const isOrderRelated = orderKeywords.some(keyword => 
-                    text?.toLowerCase().includes(keyword) && 
-                    /\d{4,}/.test(text) // Tem número com 4+ dígitos
+                const orderNumber = await this.orderValidationService.extractOrderNumber(text);
+                const orderKeywords = ['pedido', 'encomenda', 'compra', 'gostaria de saber'];
+                const hasOrderKeywords = orderKeywords.some(keyword => 
+                    text?.toLowerCase().includes(keyword)
                 );
 
-                if (orderNumber || isOrderRelated) {
-                    console.log('🔍 Verificando pedido:', {
-                        numero: orderNumber,
-                        textoOriginal: text,
+                // Se tem palavras relacionadas a pedido
+                if (hasOrderKeywords) {
+                    console.log('🔍 Pergunta sobre pedido detectada:', {
+                        texto: text,
+                        temNumero: !!orderNumber,
                         de: from,
                         timestamp: new Date().toISOString()
                     });
 
-                    try {
-                        // Só tenta buscar pedido se tiver um número válido
-                        if (orderNumber) {
-                            const order = await this.nuvemshopService.getOrder(orderNumber);
-                            
-                            // Se for pedido internacional
-                            if (order?.shipping_address?.country !== 'BR') {
-                                console.log('🌍 Pedido internacional detectado:', {
-                                    numero: orderNumber,
-                                    pais: order.shipping_address.country,
-                                    timestamp: new Date().toISOString()
-                                });
-                                await this.whatsAppService.forwardToFinancial(messageData, orderNumber);
-                                await this.redisStore.set(processKey, 'true');
-                                return null;
-                            }
+                    // Se não tem número de pedido, pede para informar
+                    if (!orderNumber) {
+                        await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar as informações para você.');
+                        await this.redisStore.set(processKey, 'true');
+                        return null;
+                    }
 
-                            // Processa pedido normal
-                            if (order) {
-                                await this.handleOrderInfo(from, order);
-                            } else {
-                                await this.sendResponse(from, 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.');
-                            }
+                    try {
+                        const order = await this.nuvemshopService.getOrder(orderNumber);
+                        
+                        // Se for pedido internacional
+                        if (order?.shipping_address?.country !== 'BR') {
+                            console.log('🌍 Pedido internacional detectado:', {
+                                numero: orderNumber,
+                                pais: order.shipping_address.country,
+                                timestamp: new Date().toISOString()
+                            });
+                            await this.whatsAppService.forwardToFinancial(messageData, orderNumber);
+                            await this.redisStore.set(processKey, 'true');
+                            return null;
+                        }
+
+                        // Processa pedido normal
+                        if (order) {
+                            await this.handleOrderInfo(from, order);
                         } else {
-                            // Se tem palavras de pedido mas não tem número válido
-                            await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa ajudar.');
+                            await this.sendResponse(from, 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.');
                         }
                     } catch (error) {
-                        console.error('❌ Erro ao processar pedido:', error);
-                        await this.sendResponse(from, 'Desculpe, não foi possível verificar o pedido no momento. Por favor, tente novamente mais tarde.');
+                        console.error('❌ Erro ao processar pedido:', {
+                            erro: error.message,
+                            numero: orderNumber,
+                            de: from,
+                            timestamp: new Date().toISOString()
+                        });
+                        await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar as informações para você.');
                     }
                     
                     await this.redisStore.set(processKey, 'true');

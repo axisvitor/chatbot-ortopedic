@@ -2,7 +2,7 @@ const OpenAI = require('openai');
 const { OPENAI_CONFIG } = require('../config/settings');
 
 class OpenAIService {
-    constructor() {
+    constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService) {
         this.client = new OpenAI({
             apiKey: OPENAI_CONFIG.apiKey
         });
@@ -11,6 +11,66 @@ class OpenAIService {
         this.messageQueue = new Map(); // Map para fila de mensagens por thread
         this.processingTimers = new Map(); // Map para controlar timers de processamento
         this.MESSAGE_DELAY = 8000; // 8 segundos de delay
+
+        // Serviços injetados
+        this.nuvemshopService = nuvemshopService;
+        this.trackingService = trackingService;
+        this.businessHoursService = businessHoursService;
+        this.orderValidationService = orderValidationService;
+
+        // Define as funções disponíveis para o Assistant
+        this.functions = [
+            {
+                name: "check_order",
+                description: "Busca informações de um pedido pelo número",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        order_number: {
+                            type: "string",
+                            description: "Número do pedido a ser consultado"
+                        }
+                    },
+                    required: ["order_number"]
+                }
+            },
+            {
+                name: "check_tracking",
+                description: "Verifica o status de rastreamento de um pedido",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        tracking_code: {
+                            type: "string",
+                            description: "Código de rastreio para consulta"
+                        }
+                    },
+                    required: ["tracking_code"]
+                }
+            },
+            {
+                name: "get_business_hours",
+                description: "Retorna informações sobre horário de atendimento",
+                parameters: {
+                    type: "object",
+                    properties: {}
+                }
+            },
+            {
+                name: "extract_order_number",
+                description: "Tenta extrair um número de pedido do texto do usuário",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        text: {
+                            type: "string",
+                            description: "Texto do usuário para extrair número do pedido"
+                        }
+                    },
+                    required: ["text"]
+                }
+            }
+        ];
     }
 
     /**
@@ -107,9 +167,14 @@ class OpenAIService {
      */
     async createThread() {
         try {
-            return await this.client.beta.threads.create();
+            const thread = await this.client.beta.threads.create();
+            console.log(' Novo thread criado:', {
+                threadId: thread.id,
+                timestamp: new Date().toISOString()
+            });
+            return thread;
         } catch (error) {
-            console.error('[OpenAI] Erro ao criar thread:', error);
+            console.error(' Erro ao criar thread:', error);
             throw error;
         }
     }
@@ -153,9 +218,12 @@ class OpenAIService {
      */
     async addMessage(threadId, message) {
         try {
-            return await this.client.beta.threads.messages.create(threadId, message);
+            await this.client.beta.threads.messages.create(threadId, {
+                role: message.role,
+                content: message.content
+            });
         } catch (error) {
-            console.error('[OpenAI] Erro ao adicionar mensagem:', error);
+            console.error(' Erro ao adicionar mensagem:', error);
             throw error;
         }
     }
@@ -166,10 +234,17 @@ class OpenAIService {
      * @returns {Promise<Object>} Run criado
      */
     async runAssistant(threadId) {
-        return await this.client.beta.threads.runs.create(
-            threadId,
-            { assistant_id: this.assistantId }
-        );
+        try {
+            const run = await this.client.beta.threads.runs.create(threadId, {
+                assistant_id: this.assistantId,
+                tools: this.functions.map(f => ({ type: "function", function: f }))
+            });
+
+            return run;
+        } catch (error) {
+            console.error(' Erro ao executar assistant:', error);
+            throw error;
+        }
     }
 
     /**
@@ -221,12 +296,104 @@ class OpenAIService {
                 }
             } while (run.status !== 'completed');
 
-            const messages = await this.listMessages(threadId);
-            return messages.data[0]?.content[0]?.text?.value || '';
+            if (run.status === 'requires_action') {
+                const toolOutputs = await this.handleToolCalls(run, threadId);
+                
+                run = await this.client.beta.threads.runs.submitToolOutputs(
+                    threadId,
+                    runId,
+                    { tool_outputs: toolOutputs }
+                );
+
+                return this.waitForResponse(threadId, run.id);
+            }
+
+            if (run.status === 'completed') {
+                const messages = await this.listMessages(threadId);
+                return messages.data[0]?.content[0]?.text?.value || '';
+            }
+
+            throw new Error(`Run failed with status: ${run.status}`);
         } catch (error) {
-            console.error('[OpenAI] Erro ao aguardar resposta:', error);
+            console.error(' Erro ao aguardar resposta:', error);
             throw error;
         }
+    }
+
+    async handleToolCalls(run, threadId) {
+        if (!run?.required_action?.submit_tool_outputs?.tool_calls) {
+            console.warn(' Nenhuma tool call encontrada');
+            return [];
+        }
+
+        const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+        const toolOutputs = [];
+
+        for (const toolCall of toolCalls) {
+            const { name, arguments: args } = toolCall.function;
+            
+            let parsedArgs;
+            try {
+                parsedArgs = JSON.parse(args);
+            } catch (error) {
+                console.error(' Erro ao parsear argumentos:', error);
+                continue;
+            }
+
+            let output;
+            try {
+                switch (name) {
+                    case 'check_order':
+                        if (!parsedArgs.order_number) {
+                            output = 'Número do pedido não fornecido';
+                            break;
+                        }
+                        const order = await this.nuvemshopService.getOrder(parsedArgs.order_number);
+                        output = order ? JSON.stringify(order) : 'Pedido não encontrado';
+                        break;
+
+                    case 'check_tracking':
+                        if (!parsedArgs.tracking_code) {
+                            output = 'Código de rastreio não fornecido';
+                            break;
+                        }
+                        const tracking = await this.trackingService.getTrackingStatus(parsedArgs.tracking_code);
+                        output = tracking ? JSON.stringify(tracking) : 'Rastreamento não encontrado';
+                        break;
+
+                    case 'get_business_hours':
+                        const businessHours = this.businessHoursService.getBusinessHours();
+                        output = JSON.stringify(businessHours);
+                        break;
+
+                    case 'extract_order_number':
+                        if (!parsedArgs.text) {
+                            output = 'Texto não fornecido';
+                            break;
+                        }
+                        const orderNumber = await this.orderValidationService.extractOrderNumber(parsedArgs.text);
+                        output = orderNumber || 'Número de pedido não encontrado';
+                        break;
+
+                    default:
+                        console.warn(' Função desconhecida:', name);
+                        output = 'Função não implementada';
+                }
+
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output
+                });
+            } catch (error) {
+                console.error(` Erro ao executar função ${name}:`, error);
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: `Erro ao executar ${name}: ${error.message}`
+                });
+            }
+        }
+
+        return toolOutputs;
     }
 
     /**
@@ -242,7 +409,7 @@ class OpenAIService {
             await this.client.beta.threads.runs.cancel(threadId, runId);
             this.removeActiveRun(threadId);
         } catch (error) {
-            console.error('[OpenAI] Erro ao cancelar run:', error);
+            console.error(' Erro ao cancelar run:', error);
         }
     }
 
