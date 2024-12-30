@@ -424,8 +424,10 @@ class OpenAIService {
                                     code: tracking.code,
                                     status: tracking.status,
                                     last_update: tracking.last_update,
-                                    location: tracking.location
-                                }
+                                    location: tracking.location,
+                                    message: tracking.message
+                                },
+                                message: 'Rastreamento encontrado com sucesso'
                             });
                         }
                         break;
