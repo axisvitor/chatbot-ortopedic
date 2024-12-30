@@ -76,10 +76,11 @@ class OrderApi extends NuvemshopApiBase {
             });
 
             // Busca pelo endpoint correto de busca
-            const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders/search`, {
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params: {
                     q: orderNumber,
-                    fields: this.defaultFields
+                    fields: this.defaultFields,
+                    per_page: 1 // Limita a 1 resultado já que buscamos por número específico
                 }
             });
 
@@ -138,7 +139,7 @@ class OrderApi extends NuvemshopApiBase {
             });
 
             // Busca direta pelo ID
-            const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders/${numericId}`, {
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders/${numericId}`, {
                 params: {
                     fields: this.defaultFields
                 }
@@ -174,7 +175,7 @@ class OrderApi extends NuvemshopApiBase {
 
     async searchOrders(params = {}) {
         try {
-            const response = await this.client.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders`, {
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params: {
                     fields: this.defaultFields,
                     per_page: params.per_page || 50,
@@ -222,7 +223,7 @@ class OrderApi extends NuvemshopApiBase {
             ...options
         };
 
-        return this.handleRequest('put', `/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
+        return this.handleRequest('put', `/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
     }
 
     async updateShippingInfo(orderId, trackingNumber, carrier = null) {
@@ -236,7 +237,7 @@ class OrderApi extends NuvemshopApiBase {
             ...(carrier && { shipping_carrier: carrier })
         };
 
-        return this.handleRequest('put', `/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
+        return this.handleRequest('put', `/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
     }
 
     async addOrderNote(orderId, note) {
@@ -246,7 +247,7 @@ class OrderApi extends NuvemshopApiBase {
         }
 
         const data = { note };
-        return this.handleRequest('put', `/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
+        return this.handleRequest('put', `/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, { data });
     }
 
     // Métodos de consulta específicos
@@ -300,7 +301,7 @@ class OrderApi extends NuvemshopApiBase {
                 return cachedOrder;
             }
 
-            const response = await this.get(`/v1/${NUVEMSHOP_CONFIG.userId}/orders/${orderNumber}`);
+            const response = await this.get(`/${NUVEMSHOP_CONFIG.userId}/orders/${orderNumber}`);
             if (response && response.data) {
                 await this.cacheService.set(cacheKey, response.data, 3600); // Cache por 1 hora
                 return response.data;
@@ -369,7 +370,7 @@ class OrderApi extends NuvemshopApiBase {
     async handleRequest(method, endpoint, options = {}) {
         const requestConfig = {
             method,
-            url: `/v1/${NUVEMSHOP_CONFIG.userId}${endpoint}`,
+            url: `/${NUVEMSHOP_CONFIG.userId}${endpoint}`,
             ...options,
             headers: {
                 'Content-Type': 'application/json',
