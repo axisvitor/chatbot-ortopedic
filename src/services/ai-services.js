@@ -153,23 +153,15 @@ class AIServices {
                 }
 
                 // Verifica se tem um run ativo
-                const activeRun = await this.openAIService.getActiveRun(chatHistory.threadId);
-                if (activeRun) {
+                const hasActiveRun = await this.openAIService.hasActiveRun(chatHistory.threadId);
+                if (hasActiveRun) {
                     console.log('⚠️ Run ativo detectado:', {
                         threadId: chatHistory.threadId,
-                        runId: activeRun.id,
-                        status: activeRun.status,
                         timestamp: new Date().toISOString()
                     });
                     
-                    // Se o run está rodando há mais de 5 minutos, cancela
-                    const runningTime = Date.now() - new Date(activeRun.created_at).getTime();
-                    if (runningTime > 300000) { // 5 minutos
-                        await this.openAIService.cancelRun(chatHistory.threadId, activeRun.id);
-                    } else {
-                        await this.sendResponse(from, 'Aguarde um momento, ainda estou processando sua última mensagem...');
-                        return null;
-                    }
+                    await this.sendResponse(from, 'Aguarde um momento, ainda estou processando sua última mensagem...');
+                    return null;
                 }
 
                 // Adiciona a mensagem ao thread
