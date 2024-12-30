@@ -23,50 +23,18 @@ class AIServices {
         this.audioService = new AudioService(this.groqServices, this.whatsAppService);
     }
 
-    async handleMessage(message) {
+    /**
+     * Recupera ou cria o histórico de chat para um usuário
+     * @param {string} from Número do usuário
+     * @returns {Promise<Object>} Histórico do chat
+     */
+    async getChatHistory(from) {
+        const threadKey = `chat:${from}`;
         try {
-            if (!message) {
-                throw new Error('Mensagem inválida');
-            }
-
-            const { type, from, text } = message;
-
-            // Log da mensagem recebida
-            console.log('📨 Mensagem recebida:', {
-                tipo: type,
-                de: from,
-                messageId: message.messageId,
-                timestamp: new Date().toISOString()
-            });
-
-            // Verifica se já existe um thread para este usuário
-            const threadKey = `chat:${from}`;
-            let chatHistory;
-            try {
-                const rawHistory = await this.redisStore.get(threadKey);
-                chatHistory = typeof rawHistory === 'string' ? JSON.parse(rawHistory) : rawHistory;
-                
-                console.log('📜 Histórico recuperado:', {
-                    key: threadKey,
-                    threadId: chatHistory?.threadId,
-                    mensagens: chatHistory?.messages?.length || 0,
-                    ultimaMensagem: chatHistory?.messages?.[0]?.content?.substring(0, 100),
-                    ultimaAtualizacao: chatHistory?.lastUpdate,
-                    timestamp: new Date().toISOString()
-                });
-            } catch (error) {
-                console.error('❌ Erro ao buscar histórico:', {
-                    erro: error.message,
-                    key: threadKey,
-                    timestamp: new Date().toISOString()
-                });
-                chatHistory = null;
-            }
-
-            let threadId = chatHistory?.threadId;
+            const rawHistory = await this.redisStore.get(threadKey);
+            let chatHistory = typeof rawHistory === 'string' ? JSON.parse(rawHistory) : rawHistory;
             
-            // Se não existe thread ou dados estão inválidos, cria um novo
-            if (!threadId) {
+            if (!chatHistory?.threadId) {
                 console.log('🔄 Criando novo thread:', {
                     key: threadKey,
                     from,
@@ -74,38 +42,103 @@ class AIServices {
                 });
 
                 const thread = await this.openAIService.createThread();
-                threadId = thread.id;
                 chatHistory = {
-                    threadId,
+                    threadId: thread.id,
                     lastUpdate: new Date().toISOString(),
                     messages: []
                 };
 
-                console.log('💾 Salvando novo histórico:', {
-                    key: threadKey,
-                    threadId,
-                    timestamp: new Date().toISOString()
-                });
-
                 await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
             }
 
-            // Log do histórico
-            console.log('📜 Histórico do chat:', {
-                key: threadKey,
-                threadId,
-                lastUpdate: chatHistory.lastUpdate,
-                numeroMensagens: chatHistory.messages?.length || 0,
+            return chatHistory;
+        } catch (error) {
+            console.error('❌ Erro ao buscar histórico:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Processa informações do pedido e envia resposta ao cliente
+     * @param {string} from Número do cliente
+     * @param {Object} orderInfo Informações do pedido
+     */
+    async handleOrderInfo(from, orderInfo) {
+        try {
+            let response = await this.formatOrderResponse(orderInfo);
+            
+            // Se tiver código de rastreio, adiciona informações de tracking
+            if (orderInfo.shipping_tracking_number) {
+                const tracking = await this.trackingService.getTrackingInfo(orderInfo.shipping_tracking_number);
+                if (tracking) {
+                    response += '\n\n' + await this.formatOrderTrackingResponse(tracking);
+                }
+            }
+
+            await this.whatsAppService.sendText(from, response);
+        } catch (error) {
+            console.error('[AI] Erro ao processar informações do pedido:', error);
+            await this.whatsAppService.sendText(
+                from,
+                'Desculpe, ocorreu um erro ao processar as informações do pedido. Por favor, tente novamente mais tarde.'
+            );
+        }
+    }
+
+    async handleMessage(messageData) {
+        try {
+            const { from, text, type, imageUrl } = messageData;
+
+            // Registra a mensagem recebida
+            console.log('📨 Mensagem recebida:', {
+                tipo: type,
+                de: from,
+                messageId: messageData.messageId,
                 timestamp: new Date().toISOString()
             });
 
+            // Recupera o histórico da conversa
+            const chatHistory = await this.getChatHistory(from);
+            console.log('📜 Histórico recuperado:', {
+                key: `chat:${from}`,
+                threadId: chatHistory.threadId,
+                mensagens: chatHistory.messages?.length,
+                ultimaMensagem: chatHistory.lastMessage,
+                ultimaAtualizacao: chatHistory.lastUpdate,
+                timestamp: new Date().toISOString()
+            });
+
+            // Se for uma imagem, tenta extrair o número do pedido
+            if (type === 'image' && imageUrl) {
+                try {
+                    const orderNumber = await this.orderValidationService.extractOrderNumber(imageUrl);
+                    if (orderNumber) {
+                        console.log(`🔍 Número do pedido encontrado na imagem: ${orderNumber}`);
+                        const orderInfo = await this.orderValidationService.findOrder(orderNumber);
+                        
+                        if (orderInfo) {
+                            await this.handleOrderInfo(from, orderInfo);
+                            return;
+                        } else {
+                            await this.whatsappService.sendText(
+                                from,
+                                'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.'
+                            );
+                            return;
+                        }
+                    }
+                } catch (error) {
+                    console.error('[AI] Erro ao processar imagem:', error);
+                }
+            }
+
             // Verifica se a mensagem já foi processada
-            const processKey = `ai_processed:${message.messageId}`;
+            const processKey = `ai_processed:${messageData.messageId}`;
             const wasProcessed = await this.redisStore.get(processKey);
             
             if (wasProcessed) {
                 console.log('⚠️ Mensagem já processada pelo AI:', {
-                    messageId: message.messageId,
+                    messageId: messageData.messageId,
                     timestamp: new Date().toISOString()
                 });
                 return null;
@@ -115,18 +148,18 @@ class AIServices {
             await this.redisStore.set(processKey, 'true');
 
             // Se for mensagem de áudio, processa com Whisper
-            if (message.audioMessage) {
-                const transcription = await this.handleAudioMessage(message);
+            if (messageData.audioMessage) {
+                const transcription = await this.handleAudioMessage(messageData);
                 if (transcription) {
                     // Adiciona a transcrição ao thread
-                    await this.openAIService.addMessage(threadId, {
+                    await this.openAIService.addMessage(chatHistory.threadId, {
                         role: 'user',
                         content: transcription
                     });
                     
                     // Executa o assistant e aguarda resposta
-                    const run = await this.openAIService.runAssistant(threadId);
-                    const response = await this.openAIService.waitForResponse(threadId, run.id);
+                    const run = await this.openAIService.runAssistant(chatHistory.threadId);
+                    const response = await this.openAIService.waitForResponse(chatHistory.threadId, run.id);
 
                     // Atualiza o histórico com a transcrição e resposta
                     chatHistory.messages = chatHistory.messages || [];
@@ -146,18 +179,18 @@ class AIServices {
                     
                     chatHistory.lastUpdate = new Date().toISOString();
                     console.log('💾 Salvando histórico de áudio:', {
-                        key: threadKey,
-                        threadId,
+                        key: `chat:${from}`,
+                        threadId: chatHistory.threadId,
                         mensagens: chatHistory.messages.length,
                         timestamp: new Date().toISOString()
                     });
-                    await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
+                    await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
 
                     // Log da resposta
                     console.log('📤 Enviando resposta para áudio:', {
-                        messageId: message.messageId,
-                        from: message.from,
-                        threadId,
+                        messageId: messageData.messageId,
+                        from: messageData.from,
+                        threadId: chatHistory.threadId,
                         transcriptionLength: transcription.length,
                         responseLength: response.length,
                         preview: response.substring(0, 100),
@@ -172,13 +205,13 @@ class AIServices {
             // Se for imagem, processa primeiro
             if (type === 'image') {
                 console.log('🖼️ Processando imagem...');
-                await this.handleImageMessage(message);
+                await this.handleImageMessage(messageData);
                 return null;
             }
 
             // Verifica se é um comando especial
             if (text?.toLowerCase() === '#resetid') {
-                const response = await this.handleResetCommand(message);
+                const response = await this.handleResetCommand(messageData);
                 await this.sendResponse(from, response);
                 return null;
             }
@@ -304,7 +337,7 @@ class AIServices {
                             pais: order.shipping_address.country,
                             timestamp: new Date().toISOString()
                         });
-                        await this.whatsAppService.forwardToFinancial(message, orderId);
+                        await this.whatsAppService.forwardToFinancial(messageData, orderId);
                         return null;
                     }
                 }
@@ -393,32 +426,32 @@ class AIServices {
                     // Se for pedido internacional, encaminha internamente para o financeiro
                     if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
                         console.log('🌍 Pedido internacional detectado:', orderId);
-                        await this.whatsAppService.forwardToFinancial(message, orderId);
+                        await this.whatsAppService.forwardToFinancial(messageData, orderId);
                         return null;
                     }
                 }
             }
 
             // Verifica se está esperando número do pedido
-            const waitingFor = await this.redisStore.get(`waiting_order:${message.from}`);
+            const waitingFor = await this.redisStore.get(`waiting_order:${messageData.from}`);
             if (waitingFor === 'payment_proof') {
-                const orderNumber = this.extractOrderNumber(message.text);
+                const orderNumber = this.extractOrderNumber(messageData.text);
                 
                 if (!orderNumber) {
                     await this.whatsAppService.sendMessage({
-                        to: message.from,
+                        to: messageData.from,
                         body: `❌ Número do pedido inválido. Por favor, envie apenas o número do pedido (exemplo: 2913).`
                     });
                     return;
                 }
 
                 // Recupera o comprovante salvo
-                const proofKey = `payment_proof:${message.from}`;
+                const proofKey = `payment_proof:${messageData.from}`;
                 const savedProof = await this.redisStore.get(proofKey);
                 
                 if (!savedProof) {
                     await this.whatsAppService.sendMessage({
-                        to: message.from,
+                        to: messageData.from,
                         body: `❌ Desculpe, não encontrei mais o comprovante. Por favor, envie o comprovante novamente.`
                     });
                     return;
@@ -428,19 +461,19 @@ class AIServices {
                 await this.whatsAppService.forwardToFinancial({
                     body: `💰 *Novo Comprovante de Pagamento*\n\n` +
                           `📦 Pedido: #${orderNumber}\n` +
-                          `👤 Cliente: ${message.pushName || 'Não identificado'}\n` +
-                          `📱 Telefone: ${message.from}\n\n` +
+                          `👤 Cliente: ${messageData.pushName || 'Não identificado'}\n` +
+                          `📱 Telefone: ${messageData.from}\n\n` +
                           `🔍 Por favor, verifique o pagamento na conta.`,
                     image: savedProof
                 }, orderNumber);
 
                 // Limpa o cache
                 await this.redisStore.del(proofKey);
-                await this.redisStore.del(`waiting_order:${message.from}`);
+                await this.redisStore.del(`waiting_order:${messageData.from}`);
 
                 // Confirma para o cliente
                 await this.whatsAppService.sendMessage({
-                    to: message.from,
+                    to: messageData.from,
                     body: `✅ Comprovante encaminhado com sucesso para análise!\n\n` +
                           `O departamento financeiro irá verificar o pagamento e atualizar o status do seu pedido.`
                 });
@@ -450,24 +483,24 @@ class AIServices {
 
             // Adiciona a mensagem ao thread
             console.log('💬 Adicionando mensagem:', {
-                threadId,
+                threadId: chatHistory.threadId,
                 from,
-                messageId: message.messageId,
-                tipo: text ? 'texto' : message.audioMessage ? 'audio' : message.imageMessage ? 'imagem' : 'desconhecido',
+                messageId: messageData.messageId,
+                tipo: text ? 'texto' : messageData.audioMessage ? 'audio' : messageData.imageMessage ? 'imagem' : 'desconhecido',
                 preview: text?.substring(0, 100),
                 timestamp: new Date().toISOString()
             });
 
-            await this.openAIService.addMessage(threadId, {
+            await this.openAIService.addMessage(chatHistory.threadId, {
                 role: 'user',
                 content: text || 'Mensagem sem texto'
             });
 
             // Executa o assistant
-            const run = await this.openAIService.runAssistant(threadId);
+            const run = await this.openAIService.runAssistant(chatHistory.threadId);
             
             // Aguarda e obtém a resposta
-            const response = await this.openAIService.waitForResponse(threadId, run.id);
+            const response = await this.openAIService.waitForResponse(chatHistory.threadId, run.id);
 
             // Atualiza o histórico com a mensagem e resposta
             chatHistory.messages = chatHistory.messages || [];
@@ -487,16 +520,16 @@ class AIServices {
             
             chatHistory.lastUpdate = new Date().toISOString();
             console.log('💾 Salvando histórico:', {
-                key: threadKey,
-                threadId,
+                key: `chat:${from}`,
+                threadId: chatHistory.threadId,
                 mensagens: chatHistory.messages.length,
                 ultimaMensagem: chatHistory.messages[0].content.substring(0, 100),
                 timestamp: new Date().toISOString()
             });
-            await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
+            await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
 
             console.log('🤖 Resposta do Assistant:', {
-                threadId,
+                threadId: chatHistory.threadId,
                 runId: run.id,
                 preview: response?.substring(0, 100),
                 timestamp: new Date().toISOString()
@@ -664,6 +697,10 @@ class AIServices {
         }
     }
 
+    /**
+     * Processa uma mensagem de imagem
+     * @param {Object} message Mensagem recebida
+     */
     async handleImageMessage(message) {
         try {
             if (!message) {
@@ -693,95 +730,78 @@ class AIServices {
                 throw new Error('Objeto de imagem não encontrado na mensagem');
             }
 
-            // Verifica se parece ser um comprovante
-            const imageService = new WhatsAppImageService(this.whatsAppService, this.groqServices);
-            const isPaymentProof = await imageService.isLikelyPaymentProof(message.message);
-
-            if (isPaymentProof) {
-                // Salva a imagem temporariamente
-                const cacheKey = `payment_proof:${message.from}`;
-                await this.redisStore.set(cacheKey, message.message, 30 * 60); // 30 minutos
-
-                // Pede o número do pedido
-                const response = `Recebi seu comprovante! 🧾\n\n` +
-                               `Para que eu possa encaminhar ao financeiro, por favor me informe o *número do pedido* que este comprovante pertence.`;
-
-                await this.sendResponse(message.from, response);
-
-                // Marca o usuário como esperando número do pedido
-                await this.redisStore.set(`waiting_order:${message.from}`, 'payment_proof', 30 * 60);
+            // Verifica se está esperando comprovante
+            const waitingFor = await this.redisStore.get(`waiting_order:${from}`);
+            if (waitingFor === 'payment_proof') {
+                console.log('💰 Recebido possível comprovante de pagamento');
                 
-                return;
-            }
-
-            console.log('🎯 Baixando imagem:', {
-                messageId,
-                mimetype: message.message.imageMessage.mimetype,
-                timestamp: new Date().toISOString()
-            });
-
-            // Baixa a imagem usando o Baileys
-            const buffer = await this.whatsAppService.downloadMediaMessage(message);
-
-            // Valida o buffer da imagem
-            if (!buffer || buffer.length < 100) {
-                throw new Error('Buffer da imagem inválido ou muito pequeno');
-            }
-
-            console.log('✅ Imagem baixada:', {
-                messageId,
-                tamanho: buffer.length,
-                tipo: message.message.imageMessage.mimetype,
-                timestamp: new Date().toISOString()
-            });
-
-            // Se não for comprovante, analisa com Groq
-            const base64Image = buffer.toString('base64');
-            const messages = [
-                {
-                    role: "user", 
-                    content: [
-                        {
-                            type: "text",
-                            text: "Analise esta imagem e me diga se é um comprovante de pagamento válido. Forneça detalhes como valor, data e outros dados relevantes se houver."
-                        },
-                        {
-                            type: "image_url",
-                            image_url: {
-                                "url": `data:image/jpeg;base64,${base64Image}`,
-                                "detail": "high"
-                            }
-                        }
-                    ]
+                // Baixa a imagem usando o Baileys
+                const buffer = await this.whatsAppService.downloadMediaMessage(message);
+                if (!buffer || buffer.length < 100) {
+                    throw new Error('Buffer da imagem inválido ou muito pequeno');
                 }
-            ];
 
-            const response = await this.groqServices.chat.completions.create({
-                model: "llama-3.2-11b-vision-preview",
-                messages: messages,
-                temperature: 0.7,
-                max_tokens: 1024,
-                stream: false
-            });
-
-            if (!response?.choices?.[0]?.message?.content) {
-                throw new Error('Resposta inválida da Groq');
+                // Analisa com Groq para verificar se é realmente um comprovante
+                const base64Image = buffer.toString('base64');
+                const isPaymentProof = await this.analyzeImageWithGroq(base64Image);
+                
+                if (isPaymentProof) {
+                    // Salva o comprovante temporariamente
+                    const proofKey = `payment_proof:${from}`;
+                    await this.redisStore.set(proofKey, message.message, 'EX', 300); // Expira em 5 minutos
+                    
+                    await this.whatsAppService.sendText(
+                        from,
+                        'Ótimo! Agora me confirme o número do pedido para que eu possa vincular o comprovante.'
+                    );
+                    return;
+                } else {
+                    await this.whatsAppService.sendText(
+                        from,
+                        'Esta imagem não parece ser um comprovante de pagamento válido. Por favor, envie uma foto clara do comprovante.'
+                    );
+                    return;
+                }
             }
 
-            const analysis = response.choices[0].message.content;
-            const formattedResponse = `🖼️ *Análise da imagem:*\n\n${analysis}`;
-            
-            // Atualiza o histórico com a mensagem e resposta
-            const threadKey = `chat:${from}`;
-            let chatHistory = await this.redisStore.get(threadKey);
-            chatHistory = typeof chatHistory === 'string' ? JSON.parse(chatHistory) : chatHistory;
-            
-            if (chatHistory) {
+            // Se não estiver esperando comprovante, tenta extrair número do pedido
+            try {
+                // Primeiro tenta baixar e processar a imagem
+                const buffer = await this.whatsAppService.downloadMediaMessage(message);
+                if (!buffer || buffer.length < 100) {
+                    throw new Error('Buffer da imagem inválido ou muito pequeno');
+                }
+
+                const orderNumber = await this.orderValidationService.extractOrderNumber(buffer);
+                if (orderNumber) {
+                    console.log(`🔍 Número do pedido encontrado na imagem: ${orderNumber}`);
+                    const orderInfo = await this.orderValidationService.findOrder(orderNumber);
+                    
+                    if (orderInfo) {
+                        await this.handleOrderInfo(from, orderInfo);
+                        return;
+                    } else {
+                        await this.whatsAppService.sendText(
+                            from,
+                            'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.'
+                        );
+                        return;
+                    }
+                }
+
+                // Se não encontrou número do pedido, analisa com Groq
+                const base64Image = buffer.toString('base64');
+                const analysis = await this.analyzeImageWithGroq(base64Image);
+                
+                // Atualiza o histórico com a análise
+                const threadKey = `chat:${from}`;
+                let chatHistory = await this.getChatHistory(from);
+                
                 chatHistory.messages = chatHistory.messages || [];
                 chatHistory.messages.unshift(
                     {
                         role: 'user',
-                        content: messages[0].content[0].text,
+                        content: 'Analisar imagem',
                         type: 'image',
                         timestamp: new Date().toISOString()
                     },
@@ -793,37 +813,65 @@ class AIServices {
                 );
 
                 chatHistory.lastUpdate = new Date().toISOString();
-                console.log('💾 Salvando histórico de imagem:', {
-                    key: threadKey,
-                    threadId: chatHistory.threadId,
-                    mensagens: chatHistory.messages.length,
-                    timestamp: new Date().toISOString()
-                });
                 await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
-            }
 
-            await this.sendResponse(from, formattedResponse);
-            return null;
+                // Envia a análise para o usuário
+                await this.whatsAppService.sendText(
+                    from,
+                    `🖼️ *Análise da imagem:*\n\n${analysis}`
+                );
 
-        } catch (error) {
-            console.error('❌ Erro ao processar imagem:', {
-                erro: error.message,
-                stack: error.stack,
-                messageId: message?.messageId,
-                from: message?.from,
-                timestamp: new Date().toISOString()
-            });
-            
-            // Envia mensagem de erro amigável
-            if (message && message.from) {
-                await this.sendResponse(
-                    message.from,
+            } catch (error) {
+                console.error('[AI] Erro ao processar imagem:', error);
+                await this.whatsAppService.sendText(
+                    from,
                     'Desculpe, não consegui processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.'
                 );
             }
-            
-            return null;
+        } catch (error) {
+            console.error('[AI] Erro ao processar imagem:', error);
+            throw error;
         }
+    }
+
+    /**
+     * Analisa uma imagem usando o Groq Vision
+     * @param {string} base64Image Imagem em base64
+     * @returns {Promise<string>} Análise da imagem
+     */
+    async analyzeImageWithGroq(base64Image) {
+        const messages = [
+            {
+                role: "user", 
+                content: [
+                    {
+                        type: "text",
+                        text: "Analise esta imagem e me diga se é um comprovante de pagamento válido. Forneça detalhes como valor, data e outros dados relevantes se houver."
+                    },
+                    {
+                        type: "image_url",
+                        image_url: {
+                            "url": `data:image/jpeg;base64,${base64Image}`,
+                            "detail": "high"
+                        }
+                    }
+                ]
+            }
+        ];
+
+        const response = await this.groqServices.chat.completions.create({
+            model: "llama-3.2-11b-vision-preview",
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 1024,
+            stream: false
+        });
+
+        if (!response?.choices?.[0]?.message?.content) {
+            throw new Error('Resposta inválida da Groq');
+        }
+
+        return response.choices[0].message.content;
     }
 
     async handleAudioMessage(message) {

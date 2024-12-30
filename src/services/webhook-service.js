@@ -2,10 +2,11 @@ const crypto = require('crypto');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
 
 class WebhookService {
-    constructor(whatsappService, aiServices, audioService) {
+    constructor(whatsappService, aiServices, audioService, mediaManagerService) {
         this.whatsappService = whatsappService;
         this.aiServices = aiServices;
         this.audioService = audioService;
+        this.mediaManagerService = mediaManagerService;
         this.userAgent = 'API Loja Ortopedic (suporte@lojaortopedic.com.br)';
     }
 
@@ -68,6 +69,21 @@ class WebhookService {
                 temDocumento: messageData.type === 'document'
             });
 
+            // Se for imagem, processa primeiro
+            if (messageData.type === 'image' && this.mediaManagerService) {
+                try {
+                    console.log('🖼️ Processando imagem...');
+                    const imageUrl = await this.mediaManagerService.downloadAndUploadMedia(
+                        messageData.message?.imageMessage,
+                        messageData.key,
+                        'image'
+                    );
+                    messageData.imageUrl = imageUrl;
+                } catch (error) {
+                    console.error('[WhatsApp] Erro ao processar imagem:', error);
+                }
+            }
+
             // Se for áudio, processa primeiro
             if (messageData.type === 'audio' && this.audioService) {
                 console.log('🎤 Processando áudio...');
@@ -81,8 +97,9 @@ class WebhookService {
                 text: messageData.text,
                 messageId: messageData.messageId,
                 pushName: messageData.pushName,
-                message: messageData.message, // Inclui a mensagem original do WhatsApp
-                key: messageData.key // Inclui a chave original
+                message: messageData.message,
+                key: messageData.key,
+                imageUrl: messageData.imageUrl // Adiciona URL da imagem se existir
             });
 
             return true;

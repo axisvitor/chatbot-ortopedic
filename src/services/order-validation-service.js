@@ -4,6 +4,7 @@ const { TrackingService } = require('./tracking-service');
 const { formatTimeAgo } = require('../utils/date-utils');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
 const { NuvemshopService } = require('./nuvemshop-service');
+const { ImageProcessingService } = require('./image-processing-service');
 const { container } = require('./service-container');
 
 class OrderValidationService {
@@ -11,6 +12,7 @@ class OrderValidationService {
         this.nuvemshopService = new NuvemshopService();
         this.orderApi = new OrderApi(nuvemshopClient || this.nuvemshopService.client);
         this.redisStore = new RedisStore();
+        this.imageProcessor = new ImageProcessingService();
         this.MAX_ATTEMPTS = 5; // Limite de tentativas por usuário
         this.BLOCK_TIME = 1800; // 30 minutos em segundos
         this.CACHE_TTL = NUVEMSHOP_CONFIG.cache.ttl.orders.recent; // 5 minutos para pedidos recentes
@@ -89,22 +91,53 @@ class OrderValidationService {
     }
 
     /**
-     * Extrai número do pedido do texto
-     * @param {string} text - Texto com número do pedido
-     * @returns {string|null} Número do pedido ou null
+     * Extrai e valida número do pedido
+     * @param {string} input Texto ou URL da imagem
+     * @returns {Promise<string|null>} Número do pedido validado ou null
      */
-    extractOrderNumber(text) {
-        if (!text) return null;
-        
-        // Remove caracteres especiais e espaços
-        const cleanText = text.replace(/[^0-9]/g, '');
-        
-        // Retorna se for um número válido
-        if (this.isValidOrderNumber(cleanText)) {
-            return cleanText;
+    async extractOrderNumber(input) {
+        try {
+            let orderNumber = null;
+
+            // Verifica se é uma URL de imagem
+            if (input.startsWith('http') && (input.includes('.jpg') || input.includes('.png') || input.includes('.jpeg'))) {
+                console.log('[OrderValidation] Processando imagem para extrair número do pedido');
+                orderNumber = await this.imageProcessor.extractOrderNumber(input);
+            } else {
+                // Tenta extrair número do texto
+                const match = input.match(/\d{8}/);
+                orderNumber = match ? match[0] : null;
+            }
+
+            if (!orderNumber) {
+                console.log('[OrderValidation] Número do pedido não encontrado no input');
+                return null;
+            }
+
+            return orderNumber;
+        } catch (error) {
+            console.error('[OrderValidation] Erro ao extrair número do pedido:', error);
+            return null;
         }
-        
-        return null;
+    }
+
+    /**
+     * Busca informações do pedido
+     * @param {string} input Texto ou URL da imagem contendo número do pedido
+     * @returns {Promise<Object|null>} Informações do pedido ou null se não encontrado
+     */
+    async findOrder(input) {
+        try {
+            const orderNumber = await this.extractOrderNumber(input);
+            if (!orderNumber) {
+                return null;
+            }
+
+            return await this.nuvemshopService.findOrder(orderNumber);
+        } catch (error) {
+            console.error('[OrderValidation] Erro ao buscar pedido:', error);
+            return null;
+        }
     }
 
     /**
