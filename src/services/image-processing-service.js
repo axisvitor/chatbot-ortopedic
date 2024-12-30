@@ -48,11 +48,11 @@ class ImageProcessingService {
             
             // Procura por padrões comuns de número de pedido
             const patterns = [
-                /pedido\s+(\d{8})/i,           // "pedido 12345678"
-                /pedido\s+número\s+(\d{8})/i,  // "pedido número 12345678"
-                /pedido\s+#?(\d{8})/i,         // "pedido #12345678"
-                /número\s+(\d{8})/i,           // "número 12345678"
-                /[#]?(\d{8})/                  // apenas 8 dígitos ou #12345678
+                /pedido\s+(\d{4,})/i,           // "pedido 1234"
+                /pedido\s+número\s+(\d{4,})/i,  // "pedido número 1234"
+                /pedido\s+#?(\d{4,})/i,         // "pedido #1234"
+                /número\s+(\d{4,})/i,           // "número 1234"
+                /[#]?(\d{4,})/                  // apenas dígitos ou #1234
             ];
 
             for (const pattern of patterns) {

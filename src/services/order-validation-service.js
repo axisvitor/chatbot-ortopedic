@@ -86,27 +86,37 @@ class OrderValidationService {
         // Remove caracteres especiais e espaços
         const cleanText = text.replace(/[^0-9]/g, '');
         
-        // Verifica se é um número com pelo menos 4 dígitos
+        // Verifica se é um número com 4 ou mais dígitos
         return /^\d{4,}$/.test(cleanText);
     }
 
     /**
      * Extrai e valida número do pedido
-     * @param {string} input Texto ou URL da imagem
+     * @param {string|Buffer} input Texto ou buffer de imagem
      * @returns {Promise<string|null>} Número do pedido validado ou null
      */
     async extractOrderNumber(input) {
         try {
             let orderNumber = null;
 
-            // Verifica se é uma URL de imagem
-            if (input.startsWith('http') && (input.includes('.jpg') || input.includes('.png') || input.includes('.jpeg'))) {
-                console.log('[OrderValidation] Processando imagem para extrair número do pedido');
+            // Se for um buffer de imagem
+            if (Buffer.isBuffer(input)) {
+                console.log('[OrderValidation] Processando buffer de imagem para extrair número do pedido');
                 orderNumber = await this.imageProcessor.extractOrderNumber(input);
-            } else {
+            }
+            // Se for uma URL de imagem
+            else if (typeof input === 'string' && input.startsWith('http') && (input.includes('.jpg') || input.includes('.png') || input.includes('.jpeg'))) {
+                console.log('[OrderValidation] Processando URL de imagem para extrair número do pedido');
+                orderNumber = await this.imageProcessor.extractOrderNumber(input);
+            }
+            // Se for texto
+            else if (typeof input === 'string') {
                 // Tenta extrair número do texto
                 const match = input.match(/\d{8}/);
                 orderNumber = match ? match[0] : null;
+            } else {
+                console.log('[OrderValidation] Input inválido:', typeof input);
+                return null;
             }
 
             if (!orderNumber) {
