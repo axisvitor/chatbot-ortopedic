@@ -364,13 +364,23 @@ class OpenAIService {
                             });
                             break;
                         }
-                        const order = await this.nuvemshopService.getOrder(parsedArgs.order_number);
+                        const order = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
                         if (!order) {
                             output = JSON.stringify({
                                 error: true,
                                 message: 'Pedido não encontrado'
                             });
                         } else {
+                            // Se tiver código de rastreio, busca o status
+                            let trackingStatus = null;
+                            if (order.shipping_tracking_number) {
+                                try {
+                                    trackingStatus = await this.trackingService.getTrackingStatus(order.shipping_tracking_number);
+                                } catch (error) {
+                                    console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
+                                }
+                            }
+
                             output = JSON.stringify({
                                 error: false,
                                 order: {
@@ -379,7 +389,15 @@ class OpenAIService {
                                     created_at: order.created_at,
                                     total: order.total,
                                     shipping_status: order.shipping_status,
-                                    tracking_number: order.shipping?.tracking_number
+                                    tracking_number: order.shipping_tracking_number,
+                                    tracking_url: order.shipping_tracking_url,
+                                    tracking_status: trackingStatus ? {
+                                        code: trackingStatus.code,
+                                        status: trackingStatus.status,
+                                        last_update: trackingStatus.last_update,
+                                        location: trackingStatus.location,
+                                        message: trackingStatus.message
+                                    } : null
                                 }
                             });
                         }
