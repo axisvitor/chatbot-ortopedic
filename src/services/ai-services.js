@@ -108,30 +108,6 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            // Se for uma imagem, tenta extrair o número do pedido
-            if (type === 'image' && imageUrl) {
-                try {
-                    const orderNumber = await this.orderValidationService.extractOrderNumber(imageUrl);
-                    if (orderNumber) {
-                        console.log(`🔍 Número do pedido encontrado na imagem: ${orderNumber}`);
-                        const orderInfo = await this.orderValidationService.findOrder(orderNumber);
-                        
-                        if (orderInfo) {
-                            await this.handleOrderInfo(from, orderInfo);
-                            return;
-                        } else {
-                            await this.whatsappService.sendText(
-                                from,
-                                'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.'
-                            );
-                            return;
-                        }
-                    }
-                } catch (error) {
-                    console.error('[AI] Erro ao processar imagem:', error);
-                }
-            }
-
             // Verifica se a mensagem já foi processada
             const processKey = `ai_processed:${messageData.messageId}`;
             const wasProcessed = await this.redisStore.get(processKey);
@@ -144,408 +120,312 @@ class AIServices {
                 return null;
             }
 
-            // Marca a mensagem como processada antes de continuar
-            await this.redisStore.set(processKey, 'true');
-
-            // Se for mensagem de áudio, processa com Whisper
-            if (messageData.audioMessage) {
-                const transcription = await this.handleAudioMessage(messageData);
-                if (transcription) {
-                    // Adiciona a transcrição ao thread
-                    await this.openAIService.addMessage(chatHistory.threadId, {
-                        role: 'user',
-                        content: transcription
-                    });
+            try {
+                // Se for uma imagem, processa primeiro
+                if (type === 'image') {
+                    console.log('🖼️ Processando imagem...');
                     
-                    // Executa o assistant e aguarda resposta
-                    const run = await this.openAIService.runAssistant(chatHistory.threadId);
-                    const response = await this.openAIService.waitForResponse(chatHistory.threadId, run.id);
-
-                    // Atualiza o histórico com a transcrição e resposta
-                    chatHistory.messages = chatHistory.messages || [];
-                    chatHistory.messages.unshift(
-                        {
-                            role: 'user',
-                            content: transcription,
-                            type: 'audio',
-                            timestamp: new Date().toISOString()
-                        },
-                        {
-                            role: 'assistant',
-                            content: response,
-                            timestamp: new Date().toISOString()
-                        }
-                    );
-                    
-                    chatHistory.lastUpdate = new Date().toISOString();
-                    console.log('💾 Salvando histórico de áudio:', {
-                        key: `chat:${from}`,
-                        threadId: chatHistory.threadId,
-                        mensagens: chatHistory.messages.length,
-                        timestamp: new Date().toISOString()
-                    });
-                    await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
-
-                    // Log da resposta
-                    console.log('📤 Enviando resposta para áudio:', {
-                        messageId: messageData.messageId,
-                        from: messageData.from,
-                        threadId: chatHistory.threadId,
-                        transcriptionLength: transcription.length,
-                        responseLength: response.length,
-                        preview: response.substring(0, 100),
-                        timestamp: new Date().toISOString()
-                    });
-
-                    await this.sendResponse(from, response);
-                }
-                return null;
-            }
-
-            // Se for imagem, processa primeiro
-            if (type === 'image') {
-                console.log('🖼️ Processando imagem...');
-                await this.handleImageMessage(messageData);
-                return null;
-            }
-
-            // Verifica se é um comando especial
-            if (text?.toLowerCase() === '#resetid') {
-                const response = await this.handleResetCommand(messageData);
-                await this.sendResponse(from, response);
-                return null;
-            }
-
-            // Verifica se é uma solicitação de atendimento humano
-            if (text?.toLowerCase().includes('atendente') || 
-                text?.toLowerCase().includes('humano') || 
-                text?.toLowerCase().includes('pessoa')) {
-                
-                const isBusinessHours = this.businessHours.isWithinBusinessHours();
-                if (!isBusinessHours) {
-                    console.log('⏰ Fora do horário comercial para atendimento humano');
-                    const response = this.businessHours.getOutOfHoursMessage();
-                    await this.sendResponse(from, response);
-                    return null;
-                }
-            }
-
-            // Verifica se é uma solicitação de rastreamento
-            if (text?.toLowerCase().includes('rastrear') || 
-                text?.toLowerCase().includes('status da entrega') ||
-                text?.toLowerCase().includes('status do pedido')) {
-                
-                console.log('🔍 Solicitação de rastreamento detectada');
-
-                // Primeiro tenta recuperar código de rastreio do cache
-                const trackingKey = `tracking:${from}`;
-                const trackingNumber = await this.redisStore.get(trackingKey);
-
-                if (trackingNumber) {
-                    console.log('📦 Código de rastreio encontrado:', {
-                        codigo: trackingNumber,
-                        de: from,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    // Busca status atual no 17track
-                    const trackingStatus = await this.orderValidationService.getTrackingStatus(trackingNumber);
-                    if (trackingStatus) {
-                        await this.sendResponse(from, trackingStatus);
-                        return null;
-                    }
-                }
-
-                // Se não encontrou código de rastreio, verifica pedido em cache
-                const orderKey = `order:${from}`;
-                const orderNumber = await this.redisStore.get(orderKey);
-
-                if (orderNumber) {
-                    console.log('🔍 Pedido encontrado em cache:', {
-                        numero: orderNumber,
-                        de: from,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    const order = await this.orderValidationService.validateOrderNumber(orderNumber);
-                    if (order) {
-                        const orderResponse = await this.orderValidationService.formatOrderMessage(order, from);
-                        if (orderResponse) {
-                            await this.sendResponse(from, orderResponse);
-                            return null;
-                        }
-                    }
-                }
-
-                await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar o status de entrega.');
-                return null;
-            }
-
-            // Verifica se é um número de pedido
-            const orderNumber = this.orderValidationService.extractOrderNumber(text);
-            if (orderNumber) {
-                console.log('🔍 Buscando pedido:', {
-                    numero: orderNumber,
-                    textoOriginal: text,
-                    de: from,
-                    timestamp: new Date().toISOString()
-                });
-
-                // Verifica tentativas de validação
-                const isBlocked = await this.orderValidationService.checkAttempts(from);
-                if (isBlocked) {
-                    console.log('🚫 Usuário bloqueado por muitas tentativas:', {
-                        numero: from,
-                        timestamp: new Date().toISOString()
-                    });
-                    await this.sendResponse(from, 'Você excedeu o número máximo de tentativas. Por favor, aguarde alguns minutos antes de tentar novamente.');
-                    return null;
-                }
-
-                const order = await this.orderValidationService.validateOrderNumber(orderNumber);
-                if (order) {
-                    // Reseta tentativas em caso de sucesso
-                    await this.orderValidationService.resetAttempts(from);
-
-                    const response = await this.orderValidationService.formatOrderMessage(order, from);
-                    await this.sendResponse(from, response);
-                    return null;
-                }
-
-                // Incrementa tentativas em caso de falha
-                await this.orderValidationService.incrementAttempts(from);
-                await this.sendResponse(from, "Desculpe, não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.");
-                return null;
-            }
-
-            // Verifica se é uma pergunta sobre pedido ou se é pedido internacional
-            if (text?.toLowerCase().includes('pedido') || 
-                text?.toLowerCase().includes('encomenda') ||
-                text?.toLowerCase().includes('compra')) {
-                
-                // Primeiro verifica se tem número de pedido na mensagem
-                const orderIdMatch = text.match(/\d+/);
-                if (orderIdMatch) {
-                    const orderId = orderIdMatch[0];
-                    console.log('📦 Buscando informações do pedido:', orderId);
-                    const order = await this.nuvemshopService.getOrder(orderId);
-                    
-                    // Se for pedido internacional, encaminha para o financeiro
-                    if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
-                        console.log('🌍 Pedido internacional detectado:', {
-                            numero: orderId,
-                            pais: order.shipping_address.country,
-                            timestamp: new Date().toISOString()
-                        });
-                        await this.whatsAppService.forwardToFinancial(messageData, orderId);
-                        return null;
-                    }
-                }
-
-                // Se não for internacional, pede o número do pedido
-                console.log('❓ Pergunta sobre pedido detectada:', {
-                    texto: text,
-                    de: from,
-                    timestamp: new Date().toISOString()
-                });
-
-                await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar o status.');
-                return null;
-            }
-
-            // Verifica se é um possível código de rastreio
-            const hasTrackingKeywords = this.trackingService.hasTrackingKeywords(text);
-            const trackingNumber = this.trackingService.validateTrackingNumber(text);
-            
-            if (trackingNumber || (hasTrackingKeywords && text.length > 8)) {
-                console.log('📦 Possível código de rastreio detectado:', {
-                    texto: text,
-                    codigo: trackingNumber,
-                    temPalavrasChave: hasTrackingKeywords,
-                    timestamp: new Date().toISOString()
-                });
-
-                // Verifica se tem pedido pendente
-                const orderKey = `pending_order:${from}`;
-                const pendingOrder = await this.redisStore.get(orderKey);
-
-                if (pendingOrder) {
-                    console.log('📦 Pedido pendente encontrado:', {
-                        numero: pendingOrder,
-                        de: from,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    const order = await this.orderValidationService.validateOrderNumber(pendingOrder);
-                    if (order) {
-                        const orderResponse = await this.orderValidationService.formatOrderMessage(order);
-                        await this.sendResponse(from, orderResponse);
-                        return null;
-                    }
-                }
-
-                // Se for um código válido, busca direto
-                if (trackingNumber) {
-                    const trackingInfo = await this.trackingService.getTrackingStatus(trackingNumber);
-                    if (trackingInfo) {
-                        // Armazena para consultas futuras
-                        const trackingKey = `tracking:${from}`;
-                        await this.redisStore.set(trackingKey, trackingNumber);
+                    // Tenta extrair número do pedido primeiro
+                    const orderNumber = await this.orderValidationService.extractOrderNumber(imageUrl);
+                    if (orderNumber) {
+                        console.log(`🔍 Número do pedido encontrado na imagem: ${orderNumber}`);
+                        const orderInfo = await this.orderValidationService.findOrder(orderNumber);
                         
-                        const response = this.formatOrderTrackingResponse(trackingInfo);
+                        if (orderInfo) {
+                            await this.handleOrderInfo(from, orderInfo);
+                        } else {
+                            await this.whatsAppService.sendText(
+                                from,
+                                'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.'
+                            );
+                        }
+                    } else {
+                        // Se não for pedido, processa como imagem normal
+                        await this.handleImageMessage(messageData);
+                    }
+                    
+                    // Marca como processado após sucesso
+                    await this.redisStore.set(processKey, 'true');
+                    return null;
+                }
+
+                // Se for áudio, processa com transcrição
+                if (messageData.audioMessage) {
+                    const transcription = await this.handleAudioMessage(messageData);
+                    if (transcription) {
+                        // Adiciona a transcrição ao thread
+                        await this.openAIService.addMessage(chatHistory.threadId, {
+                            role: 'user',
+                            content: transcription
+                        });
+                        
+                        // Executa o assistant e aguarda resposta
+                        const run = await this.openAIService.runAssistant(chatHistory.threadId);
+                        const response = await this.openAIService.waitForResponse(chatHistory.threadId, run.id);
+
+                        // Atualiza o histórico
+                        chatHistory.messages = chatHistory.messages || [];
+                        chatHistory.messages.unshift(
+                            {
+                                role: 'user',
+                                content: transcription,
+                                type: 'audio',
+                                timestamp: new Date().toISOString()
+                            },
+                            {
+                                role: 'assistant',
+                                content: response,
+                                timestamp: new Date().toISOString()
+                            }
+                        );
+                        
+                        chatHistory.lastUpdate = new Date().toISOString();
+                        await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
                         await this.sendResponse(from, response);
+                        
+                        // Marca como processado após sucesso
+                        await this.redisStore.set(processKey, 'true');
                         return null;
                     }
                 }
+
+                // Verifica se é um comando especial
+                if (text?.toLowerCase() === '#resetid') {
+                    const response = await this.handleResetCommand(messageData);
+                    await this.sendResponse(from, response);
+                    await this.redisStore.set(processKey, 'true');
+                    return null;
+                }
+
+                // Verifica timeout de estados
+                const waitingFor = await this.redisStore.get(`waiting_order:${messageData.from}`);
+                const waitingSince = await this.redisStore.get(`waiting_since:${messageData.from}`);
                 
-                // Se tiver palavras-chave mas não for código válido
-                if (hasTrackingKeywords) {
-                    const trackingKey = `tracking:${from}`;
-                    const savedTracking = await this.redisStore.get(trackingKey);
+                if (waitingFor && waitingSince) {
+                    const waitingTime = Date.now() - new Date(waitingSince).getTime();
+                    if (waitingTime > 30 * 60 * 1000) { // 30 minutos
+                        await this.redisStore.del(`waiting_order:${messageData.from}`);
+                        await this.redisStore.del(`waiting_since:${messageData.from}`);
+                        waitingFor = null;
+                    }
+                }
+
+                // Verifica se é uma solicitação de atendimento humano
+                if (text?.toLowerCase().includes('atendente') || 
+                    text?.toLowerCase().includes('humano') || 
+                    text?.toLowerCase().includes('pessoa')) {
                     
-                    if (savedTracking) {
-                        const trackingInfo = await this.trackingService.getTrackingStatus(savedTracking);
-                        if (trackingInfo) {
-                            const response = this.formatOrderTrackingResponse(trackingInfo);
-                            await this.sendResponse(from, response);
+                    const isBusinessHours = this.businessHours.isWithinBusinessHours();
+                    if (!isBusinessHours) {
+                        console.log('⏰ Fora do horário comercial para atendimento humano');
+                        const response = this.businessHours.getOutOfHoursMessage();
+                        await this.sendResponse(from, response);
+                        await this.redisStore.set(processKey, 'true');
+                        return null;
+                    }
+                }
+
+                // Verifica se é uma solicitação de rastreamento
+                const trackingKeywords = ['rastrear', 'status da entrega', 'status do pedido'];
+                if (text && trackingKeywords.some(keyword => text.toLowerCase().includes(keyword))) {
+                    try {
+                        // Primeiro tenta recuperar código de rastreio do cache
+                        const trackingKey = `tracking:${from}`;
+                        const trackingNumber = await this.redisStore.get(trackingKey);
+
+                        if (trackingNumber) {
+                            const trackingStatus = await this.orderValidationService.getTrackingStatus(trackingNumber);
+                            if (trackingStatus) {
+                                await this.sendResponse(from, trackingStatus);
+                                await this.redisStore.set(processKey, 'true');
+                                return null;
+                            }
+                        }
+
+                        // Se não encontrou código de rastreio, verifica pedido em cache
+                        const orderKey = `order:${from}`;
+                        const orderNumber = await this.redisStore.get(orderKey);
+
+                        if (orderNumber) {
+                            const order = await this.orderValidationService.validateOrderNumber(orderNumber);
+                            if (order) {
+                                const orderResponse = await this.orderValidationService.formatOrderMessage(order, from);
+                                if (orderResponse) {
+                                    await this.sendResponse(from, orderResponse);
+                                    await this.redisStore.set(processKey, 'true');
+                                    return null;
+                                }
+                            }
+                        }
+
+                        await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar o status de entrega.');
+                        await this.redisStore.set(processKey, 'true');
+                        return null;
+                    } catch (error) {
+                        console.error('❌ Erro ao processar rastreamento:', error);
+                        await this.sendResponse(from, 'Desculpe, não foi possível verificar o status do rastreamento no momento. Por favor, tente novamente mais tarde.');
+                        await this.redisStore.set(processKey, 'true');
+                        return null;
+                    }
+                }
+
+                // Verifica se é um número de pedido ou pedido internacional
+                const orderNumber = this.orderValidationService.extractOrderNumber(text);
+                const orderKeywords = ['pedido', 'encomenda', 'compra'];
+                const isOrderRelated = orderKeywords.some(keyword => 
+                    text?.toLowerCase().includes(keyword) && 
+                    /\d{4,}/.test(text)
+                );
+
+                if (orderNumber || isOrderRelated) {
+                    console.log('🔍 Verificando pedido:', {
+                        numero: orderNumber,
+                        textoOriginal: text,
+                        de: from,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    try {
+                        const order = await this.nuvemshopService.getOrder(orderNumber);
+                        
+                        // Se for pedido internacional
+                        if (order?.shipping_address?.country !== 'BR') {
+                            console.log('🌍 Pedido internacional detectado:', {
+                                numero: orderNumber,
+                                pais: order.shipping_address.country,
+                                timestamp: new Date().toISOString()
+                            });
+                            await this.whatsAppService.forwardToFinancial(messageData, orderNumber);
+                            await this.redisStore.set(processKey, 'true');
                             return null;
                         }
-                    }
-                }
-            }
 
-            // Verifica internamente se o pedido é internacional
-            if (text?.toLowerCase().includes('pedido') || text?.toLowerCase().includes('encomenda')) {
-                console.log('🔍 Verificando se é pedido internacional...');
-                const orderIdMatch = text.match(/\d+/);
-                if (orderIdMatch) {
-                    const orderId = orderIdMatch[0];
-                    console.log('📦 Buscando informações do pedido:', orderId);
-                    const order = await this.nuvemshopService.getOrder(orderId);
+                        // Processa pedido normal
+                        if (order) {
+                            await this.handleOrderInfo(from, order);
+                        } else {
+                            await this.sendResponse(from, 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.');
+                        }
+                    } catch (error) {
+                        console.error('❌ Erro ao processar pedido:', error);
+                        await this.sendResponse(from, 'Desculpe, não foi possível verificar o pedido no momento. Por favor, tente novamente mais tarde.');
+                    }
                     
-                    // Se for pedido internacional, encaminha internamente para o financeiro
-                    if (order && order.shipping_address && order.shipping_address.country !== 'BR') {
-                        console.log('🌍 Pedido internacional detectado:', orderId);
-                        await this.whatsAppService.forwardToFinancial(messageData, orderId);
-                        return null;
+                    await this.redisStore.set(processKey, 'true');
+                    return null;
+                }
+
+                // Verifica se está esperando número do pedido para comprovante
+                if (waitingFor === 'payment_proof') {
+                    const orderNumber = this.orderValidationService.extractOrderNumber(text);
+                    
+                    if (!orderNumber) {
+                        await this.whatsAppService.sendText(
+                            from,
+                            '❌ Número do pedido inválido. Por favor, envie apenas o número do pedido (exemplo: 2913).'
+                        );
+                        return;
                     }
-                }
-            }
 
-            // Verifica se está esperando número do pedido
-            const waitingFor = await this.redisStore.get(`waiting_order:${messageData.from}`);
-            if (waitingFor === 'payment_proof') {
-                const orderNumber = this.extractOrderNumber(messageData.text);
-                
-                if (!orderNumber) {
-                    await this.whatsAppService.sendMessage({
-                        to: messageData.from,
-                        body: `❌ Número do pedido inválido. Por favor, envie apenas o número do pedido (exemplo: 2913).`
-                    });
+                    // Recupera o comprovante salvo
+                    const proofKey = `payment_proof:${from}`;
+                    const savedProof = await this.redisStore.get(proofKey);
+                    
+                    if (!savedProof) {
+                        await this.whatsAppService.sendText(
+                            from,
+                            '❌ Desculpe, não encontrei mais o comprovante. Por favor, envie o comprovante novamente.'
+                        );
+                        return;
+                    }
+
+                    // Encaminha para o financeiro
+                    await this.whatsAppService.forwardToFinancial({
+                        body: `💰 *Novo Comprovante de Pagamento*\n\n` +
+                              `📦 Pedido: #${orderNumber}\n` +
+                              `👤 Cliente: ${messageData.pushName || 'Não identificado'}\n` +
+                              `📱 Telefone: ${from}\n\n` +
+                              `🔍 Por favor, verifique o pagamento na conta.`,
+                        image: savedProof
+                    }, orderNumber);
+
+                    // Limpa o cache
+                    await this.redisStore.del(proofKey);
+                    await this.redisStore.del(`waiting_order:${from}`);
+                    await this.redisStore.del(`waiting_since:${from}`);
+
+                    // Confirma para o cliente
+                    await this.whatsAppService.sendText(
+                        from,
+                        '✅ Comprovante encaminhado com sucesso para análise!\n\n' +
+                        'O departamento financeiro irá verificar o pagamento e atualizar o status do seu pedido.'
+                    );
+
+                    await this.redisStore.set(processKey, 'true');
                     return;
                 }
 
-                // Recupera o comprovante salvo
-                const proofKey = `payment_proof:${messageData.from}`;
-                const savedProof = await this.redisStore.get(proofKey);
+                // Se chegou aqui, é uma mensagem normal para o assistant
+                console.log('💬 Processando mensagem normal com assistant');
                 
-                if (!savedProof) {
-                    await this.whatsAppService.sendMessage({
-                        to: messageData.from,
-                        body: `❌ Desculpe, não encontrei mais o comprovante. Por favor, envie o comprovante novamente.`
-                    });
-                    return;
-                }
-
-                // Encaminha para o financeiro
-                await this.whatsAppService.forwardToFinancial({
-                    body: `💰 *Novo Comprovante de Pagamento*\n\n` +
-                          `📦 Pedido: #${orderNumber}\n` +
-                          `👤 Cliente: ${messageData.pushName || 'Não identificado'}\n` +
-                          `📱 Telefone: ${messageData.from}\n\n` +
-                          `🔍 Por favor, verifique o pagamento na conta.`,
-                    image: savedProof
-                }, orderNumber);
-
-                // Limpa o cache
-                await this.redisStore.del(proofKey);
-                await this.redisStore.del(`waiting_order:${messageData.from}`);
-
-                // Confirma para o cliente
-                await this.whatsAppService.sendMessage({
-                    to: messageData.from,
-                    body: `✅ Comprovante encaminhado com sucesso para análise!\n\n` +
-                          `O departamento financeiro irá verificar o pagamento e atualizar o status do seu pedido.`
-                });
-
-                return;
-            }
-
-            // Adiciona a mensagem ao thread
-            console.log('💬 Adicionando mensagem:', {
-                threadId: chatHistory.threadId,
-                from,
-                messageId: messageData.messageId,
-                tipo: text ? 'texto' : messageData.audioMessage ? 'audio' : messageData.imageMessage ? 'imagem' : 'desconhecido',
-                preview: text?.substring(0, 100),
-                timestamp: new Date().toISOString()
-            });
-
-            await this.openAIService.addMessage(chatHistory.threadId, {
-                role: 'user',
-                content: text || 'Mensagem sem texto'
-            });
-
-            // Executa o assistant
-            const run = await this.openAIService.runAssistant(chatHistory.threadId);
-            
-            // Aguarda e obtém a resposta
-            const response = await this.openAIService.waitForResponse(chatHistory.threadId, run.id);
-
-            // Atualiza o histórico com a mensagem e resposta
-            chatHistory.messages = chatHistory.messages || [];
-            chatHistory.messages.unshift(
-                {
+                // Adiciona a mensagem ao thread
+                await this.openAIService.addMessage(chatHistory.threadId, {
                     role: 'user',
-                    content: text || 'Mensagem sem texto',
-                    type: 'text',
+                    content: text
+                });
+                
+                // Executa o assistant e aguarda resposta
+                const run = await this.openAIService.runAssistant(chatHistory.threadId);
+                const response = await this.openAIService.waitForResponse(chatHistory.threadId, run.id);
+
+                // Atualiza o histórico
+                chatHistory.messages = chatHistory.messages || [];
+                chatHistory.messages.unshift(
+                    {
+                        role: 'user',
+                        content: text,
+                        timestamp: new Date().toISOString()
+                    },
+                    {
+                        role: 'assistant',
+                        content: response,
+                        timestamp: new Date().toISOString()
+                    }
+                );
+
+                chatHistory.lastUpdate = new Date().toISOString();
+                await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
+                await this.sendResponse(from, response);
+                
+                // Marca como processado após sucesso
+                await this.redisStore.set(processKey, 'true');
+
+            } catch (error) {
+                console.error('❌ Erro ao processar mensagem:', {
+                    erro: error.message,
+                    stack: error.stack,
                     timestamp: new Date().toISOString()
-                },
-                {
-                    role: 'assistant',
-                    content: response,
-                    timestamp: new Date().toISOString()
-                }
-            );
-            
-            chatHistory.lastUpdate = new Date().toISOString();
-            console.log('💾 Salvando histórico:', {
-                key: `chat:${from}`,
-                threadId: chatHistory.threadId,
-                mensagens: chatHistory.messages.length,
-                ultimaMensagem: chatHistory.messages[0].content.substring(0, 100),
-                timestamp: new Date().toISOString()
-            });
-            await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
-
-            console.log('🤖 Resposta do Assistant:', {
-                threadId: chatHistory.threadId,
-                runId: run.id,
-                preview: response?.substring(0, 100),
-                timestamp: new Date().toISOString()
-            });
-
-            // Envia a resposta
-            await this.sendResponse(from, response);
-            return null;
-
+                });
+                throw error;
+            }
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', {
                 erro: error.message,
                 stack: error.stack,
                 timestamp: new Date().toISOString()
             });
-            throw error;
+
+            // Tenta enviar mensagem de erro genérica
+            try {
+                await this.whatsAppService.sendText(
+                    from,
+                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+                );
+            } catch (fallbackError) {
+                console.error('❌ Erro ao enviar mensagem de fallback:', fallbackError);
+            }
+
+            return null;
         }
     }
 
