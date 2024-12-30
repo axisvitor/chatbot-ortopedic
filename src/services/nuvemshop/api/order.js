@@ -23,15 +23,21 @@ class OrderApi extends NuvemshopApiBase {
 
     // Validações
     validateOrderId(orderId) {
-        if (!orderId || typeof orderId !== 'number') {
+        // Converte para número se for string
+        const numericId = typeof orderId === 'string' ? parseInt(orderId, 10) : orderId;
+        
+        if (!numericId || isNaN(numericId)) {
             throw new Error('ID do pedido inválido');
         }
+        
+        return numericId; // Retorna o ID convertido
     }
 
     validateOrderNumber(orderNumber) {
-        if (!orderNumber || typeof orderNumber !== 'string') {
+        if (!orderNumber || (typeof orderNumber !== 'string' && typeof orderNumber !== 'number')) {
             throw new Error('Número do pedido inválido');
         }
+        return orderNumber.toString(); // Garante que é string
     }
 
     validateDateRange(startDate, endDate) {
@@ -48,10 +54,54 @@ class OrderApi extends NuvemshopApiBase {
 
     // Métodos principais
     async getOrder(orderId) {
-        this.validateOrderId(orderId);
-        return this.handleRequest('get', `/orders/${orderId}`, {
-            params: { fields: this.defaultFields }
-        });
+        const numericId = this.validateOrderId(orderId);
+        
+        // Tenta buscar do cache primeiro
+        const cacheKey = `${this.cachePrefix}${numericId}`;
+        const cachedOrder = await this.cacheService.get(cacheKey);
+        if (cachedOrder) {
+            console.log('🎯 Pedido encontrado no cache:', {
+                id: numericId,
+                timestamp: new Date().toISOString()
+            });
+            return JSON.parse(cachedOrder);
+        }
+
+        try {
+            console.log('🔍 Buscando pedido na Nuvemshop:', {
+                id: numericId,
+                timestamp: new Date().toISOString()
+            });
+
+            const response = await this.client.get(`/orders/${numericId}`, {
+                params: {
+                    fields: this.defaultFields
+                }
+            });
+
+            // Salva no cache
+            await this.cacheService.set(
+                cacheKey, 
+                JSON.stringify(response.data),
+                NUVEMSHOP_CONFIG.cache.ttl
+            );
+
+            return response.data;
+        } catch (error) {
+            if (error.response?.status === 404) {
+                console.log('❌ Pedido não encontrado:', {
+                    id: numericId,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+            console.error('❌ Erro ao buscar pedido:', {
+                id: numericId,
+                erro: error.message,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
     }
 
     async getOrderByNumber(orderNumber) {

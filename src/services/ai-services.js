@@ -334,6 +334,11 @@ class AIServices {
                     // Se não tem número de pedido, pede para informar
                     if (!orderNumber) {
                         await this.sendResponse(from, 'Por favor, me informe o número do seu pedido para que eu possa verificar as informações para você.');
+                        
+                        // Marca que estamos esperando o número do pedido
+                        await this.redisStore.set(`waiting_order:${from}`, 'true', 1800); // 30 minutos
+                        await this.redisStore.set(`waiting_since:${from}`, new Date().toISOString());
+                        
                         await this.redisStore.set(processKey, 'true');
                         return null;
                     }
@@ -376,6 +381,34 @@ class AIServices {
                 // Se chegou aqui, é uma mensagem normal para o assistant
                 console.log('💬 Processando mensagem normal com assistant');
                 
+                // Verifica se estamos esperando número do pedido
+                const waitingOrder = await this.redisStore.get(`waiting_order:${from}`);
+                if (waitingOrder) {
+                    // Tenta extrair número do pedido novamente
+                    const orderNumber = await this.orderValidationService.extractOrderNumber(text);
+                    if (orderNumber) {
+                        // Remove o estado de espera
+                        await this.redisStore.del(`waiting_order:${from}`);
+                        await this.redisStore.del(`waiting_since:${from}`);
+                        
+                        // Processa o pedido
+                        try {
+                            const order = await this.nuvemshopService.getOrder(orderNumber);
+                            if (order) {
+                                await this.handleOrderInfo(from, order);
+                            } else {
+                                await this.sendResponse(from, 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.');
+                            }
+                        } catch (error) {
+                            console.error('❌ Erro ao processar pedido:', error);
+                            await this.sendResponse(from, 'Desculpe, não foi possível verificar o pedido no momento. Por favor, tente novamente mais tarde.');
+                        }
+                        await this.redisStore.set(processKey, 'true');
+                        return null;
+                    }
+                }
+
+                // Se não é nada específico, processa com o assistant
                 // Adiciona a mensagem ao thread
                 await this.openAIService.addMessage(chatHistory.threadId, {
                     role: 'user',
