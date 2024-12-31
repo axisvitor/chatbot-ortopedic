@@ -1,13 +1,14 @@
 const { createWorker } = require('tesseract.js');
 const axios = require('axios');
 const OpenAI = require('openai');
-const { OPENAI_CONFIG } = require('../config/settings');
+const { OPENAI_CONFIG, GROQ_CONFIG } = require('../config/settings');
 
 class ImageProcessingService {
     constructor() {
         this.worker = null;
         this.openai = new OpenAI({
-            apiKey: OPENAI_CONFIG.apiKey
+            apiKey: GROQ_CONFIG.apiKey,
+            baseURL: GROQ_CONFIG.baseUrl
         });
     }
 
@@ -122,9 +123,9 @@ class ImageProcessingService {
             // Primeiro, vamos usar o OCR para extrair texto
             const extractedText = await this.extractTextFromImage(imageUrl);
 
-            // Em seguida, vamos usar o GPT-4 Vision para análise visual
+            // Em seguida, vamos usar o Groq Vision para análise visual
             const response = await this.openai.chat.completions.create({
-                model: "gpt-4-vision-preview",
+                model: GROQ_CONFIG.models.vision,
                 messages: [
                     {
                         role: "user",
