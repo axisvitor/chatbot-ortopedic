@@ -84,12 +84,15 @@ class OrderApi extends NuvemshopApiBase {
             const searchResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params: {
                     q: cleanNumber,
-                    fields: this.defaultFields
+                    fields: this.defaultFields,
+                    per_page: 50
                 }
             });
 
             // Se não encontrar nada, tenta buscar diretamente pelo número
             if (!searchResponse?.data || !Array.isArray(searchResponse.data) || searchResponse.data.length === 0) {
+                console.log('[Nuvemshop] Nada encontrado na busca geral, tentando busca direta');
+                
                 const directResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                     params: {
                         number: cleanNumber,
@@ -127,6 +130,16 @@ class OrderApi extends NuvemshopApiBase {
 
             // Salva no cache
             await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
+            
+            console.log('[Nuvemshop] Pedido encontrado:', {
+                numeroOriginal: orderNumber,
+                numeroLimpo: cleanNumber,
+                id: order.id,
+                status: order.status,
+                rastreio: order.shipping_tracking_number,
+                timestamp: new Date().toISOString()
+            });
+            
             return order;
 
         } catch (error) {
