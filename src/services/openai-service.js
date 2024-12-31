@@ -375,7 +375,7 @@ class OpenAIService {
                             if (order.shipping_tracking_number) {
                                 try {
                                     const tracking = await this.trackingService.getTrackingStatus(order.shipping_tracking_number);
-                                    if (tracking) {
+                                    if (tracking && tracking.status) {
                                         deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
                                                        `\n📬 Rastreamento: ${order.shipping_tracking_number}` +
                                                        `\n📍 Status: ${tracking.status}` +
@@ -386,18 +386,27 @@ class OpenAIService {
                                             deliveryStatus += `\n\n✅ Pedido Entregue` +
                                                             `\n📅 Data de Entrega: ${tracking.last_update}`;
                                         }
+                                    } else {
+                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
                                     }
                                 } catch (error) {
                                     console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
+                                    deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                   `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
                                 }
                             }
 
-                            // Lista de produtos
-                            const products = order.products.map(product => 
-                                `▫ ${product.quantity}x ${product.name}` + 
-                                `${product.variant_name ? ` (${product.variant_name})` : ''}` +
-                                ` - R$ ${product.price.toFixed(2)}`
-                            ).join('\n');
+                            // Lista de produtos com tratamento seguro de preço
+                            const products = order.products.map(product => {
+                                const price = typeof product.price === 'number' ? 
+                                    product.price.toFixed(2) : 
+                                    String(product.price).replace(/[^\d.,]/g, '');
+                                
+                                return `▫ ${product.quantity}x ${product.name}` + 
+                                       `${product.variant_name ? ` (${product.variant_name})` : ''}` +
+                                       ` - R$ ${price}`;
+                            }).join('\n');
 
                             output = JSON.stringify({
                                 error: false,
@@ -505,7 +514,7 @@ class OpenAIService {
                         if (extractedOrder.shipping_tracking_number) {
                             try {
                                 const tracking = await this.trackingService.getTrackingStatus(extractedOrder.shipping_tracking_number);
-                                if (tracking) {
+                                if (tracking && tracking.status) {
                                     deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
                                                    `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}` +
                                                    `\n📍 Status: ${tracking.status}` +
@@ -515,18 +524,27 @@ class OpenAIService {
                                         deliveryStatus += `\n\n✅ Pedido Entregue` +
                                                         `\n📅 Data de Entrega: ${tracking.last_update}`;
                                     }
+                                } else {
+                                    deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
+                                                   `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}`;
                                 }
                             } catch (error) {
                                 console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
+                                deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
+                                               `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}`;
                             }
                         }
 
-                        // Lista de produtos
-                        const products = extractedOrder.products.map(product => 
-                            `▫ ${product.quantity}x ${product.name}` + 
-                            `${product.variant_name ? ` (${product.variant_name})` : ''}` +
-                            ` - R$ ${product.price.toFixed(2)}`
-                        ).join('\n');
+                        // Lista de produtos com tratamento seguro de preço
+                        const products = extractedOrder.products.map(product => {
+                            const price = typeof product.price === 'number' ? 
+                                product.price.toFixed(2) : 
+                                String(product.price).replace(/[^\d.,]/g, '');
+                            
+                            return `▫ ${product.quantity}x ${product.name}` + 
+                                   `${product.variant_name ? ` (${product.variant_name})` : ''}` +
+                                   ` - R$ ${price}`;
+                        }).join('\n');
 
                         output = JSON.stringify({
                             error: false,
