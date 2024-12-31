@@ -201,6 +201,11 @@ class ImageService {
                 fileLength: imageMessage.fileLength
             });
 
+            // Limpa a URL da imagem
+            if (imageMessage.url) {
+                imageMessage.url = imageMessage.url.replace(/";,$/g, '');
+            }
+
             // Baixa e descriptografa a imagem
             console.log('📥 Baixando e descriptografando imagem...');
             
@@ -211,12 +216,15 @@ class ImageService {
                 {
                     logger: console,
                     reuploadRequest: async (media) => {
+                        // Limpa a URL se necessário
+                        const cleanUrl = media.url?.replace(/";,$/g, '') || '';
+                        
                         console.log('[ImageService] Tentando baixar mídia:', {
-                            url: media.url?.substring(0, 50) + '...',
+                            url: cleanUrl.substring(0, 50) + '...',
                             headers: media.headers
                         });
                         
-                        const response = await axios.get(media.url, {
+                        const response = await axios.get(cleanUrl, {
                             responseType: 'arraybuffer',
                             headers: { Origin: 'https://web.whatsapp.com' }
                         });
