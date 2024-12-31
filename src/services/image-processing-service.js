@@ -6,6 +6,9 @@ const { OPENAI_CONFIG } = require('../config/settings');
 class ImageProcessingService {
     constructor() {
         this.worker = null;
+        this.openai = new OpenAI({
+            apiKey: OPENAI_CONFIG.apiKey
+        });
     }
 
     async initialize() {
@@ -116,11 +119,7 @@ class ImageProcessingService {
      */
     async analyzeImage(imageUrl) {
         try {
-            const openai = new OpenAI({
-                apiKey: OPENAI_CONFIG.apiKey
-            });
-
-            const response = await openai.chat.completions.create({
+            const response = await this.openai.chat.completions.create({
                 model: "ft:gpt-4o-2024-08-06:gest-o-jd::AgY9wrxj",
                 messages: [
                     {
