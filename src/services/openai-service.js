@@ -1,6 +1,11 @@
 const OpenAI = require('openai');
 const { RedisStore } = require('../store/redis-store');
 const { OPENAI_CONFIG } = require('../config/settings');
+const { TrackingService } = require('./tracking-service');
+const { BusinessHoursService } = require('./business-hours');
+const { OrderValidationService } = require('./order-validation-service');
+const { NuvemshopService } = require('./nuvemshop-service');
+const { FinancialService } = require('./financial-service');
 
 class OpenAIService {
     constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService) {
@@ -14,10 +19,11 @@ class OpenAIService {
         this.MESSAGE_DELAY = 8000; // 8 segundos de delay
 
         // Serviços injetados
-        this.nuvemshopService = nuvemshopService;
-        this.trackingService = trackingService;
-        this.businessHoursService = businessHoursService;
-        this.orderValidationService = orderValidationService;
+        this.nuvemshopService = nuvemshopService || new NuvemshopService();
+        this.trackingService = trackingService || new TrackingService();
+        this.businessHoursService = businessHoursService || new BusinessHoursService();
+        this.orderValidationService = orderValidationService || new OrderValidationService();
+        this.financialService = new FinancialService();
 
         // Define as funções disponíveis para o Assistant
         this.functions = [
@@ -69,6 +75,67 @@ class OpenAIService {
                         }
                     },
                     required: ["text"]
+                }
+            },
+            {
+                name: "request_payment_proof",
+                description: "Gerencia solicitações de comprovante de pagamento",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        action: {
+                            type: "string",
+                            description: "Ação a ser executada",
+                            enum: ["request", "validate", "cancel"]
+                        },
+                        order_number: {
+                            type: "string",
+                            description: "Número do pedido relacionado (opcional)"
+                        },
+                        reason: {
+                            type: "string",
+                            description: "Motivo da solicitação",
+                            enum: ["payment_pending", "payment_not_found", "payment_rejected", "payment_analysis"]
+                        }
+                    },
+                    required: ["action"]
+                }
+            },
+            {
+                name: "forward_to_financial",
+                description: "Encaminha um caso para análise do setor financeiro",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        order_number: {
+                            type: "string",
+                            description: "Número do pedido relacionado (opcional)"
+                        },
+                        tracking_code: {
+                            type: "string",
+                            description: "Código de rastreio relacionado (opcional)"
+                        },
+                        reason: {
+                            type: "string",
+                            description: "Motivo do encaminhamento",
+                            enum: ["payment_issue", "refund_request", "taxation", "customs", "payment_proof", "other"]
+                        },
+                        customer_message: {
+                            type: "string",
+                            description: "Mensagem original do cliente que gerou o encaminhamento"
+                        },
+                        priority: {
+                            type: "string",
+                            description: "Prioridade do caso",
+                            enum: ["low", "medium", "high", "urgent"],
+                            default: "medium"
+                        },
+                        additional_info: {
+                            type: "string",
+                            description: "Informações adicionais relevantes para o financeiro"
+                        }
+                    },
+                    required: ["reason", "customer_message"]
                 }
             }
         ];
@@ -604,6 +671,87 @@ class OpenAIService {
                                     `💰 Valor Total: R$ ${total}\n\n` +
                                     `Produtos:\n${products}` +
                                     `${deliveryStatus}`
+                        });
+                        break;
+
+                    case 'request_payment_proof':
+                        if (!parsedArgs.action) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'A ação é obrigatória para gerenciar comprovantes.'
+                            });
+                            break;
+                        }
+
+                        switch (parsedArgs.action) {
+                            case 'request':
+                                // Registra a solicitação no Redis
+                                await this.redisStore.set(`waiting_order:${threadId}`, 'payment_proof', 1800);
+                                if (parsedArgs.order_number) {
+                                    await this.redisStore.set(`pending_order:${threadId}`, parsedArgs.order_number, 1800);
+                                }
+
+                                output = JSON.stringify({
+                                    error: false,
+                                    message: 'Por favor, me envie:\n1. Uma foto clara do comprovante de pagamento\n2. O número do seu pedido\n\nAssim que receber, irei encaminhar para nossa equipe financeira. 📎'
+                                });
+                                break;
+
+                            case 'validate':
+                                // Verifica se há uma solicitação pendente
+                                const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
+                                const pendingOrder = await this.redisStore.get(`pending_order:${threadId}`);
+
+                                output = JSON.stringify({
+                                    error: !waiting,
+                                    message: waiting ? 
+                                        `Aguardando comprovante${pendingOrder ? ` para o pedido #${pendingOrder}` : ''}. Por favor, envie uma foto clara do comprovante.` :
+                                        'Não há solicitação de comprovante pendente.'
+                                });
+                                break;
+
+                            case 'cancel':
+                                // Remove a solicitação do Redis
+                                await this.redisStore.del(`waiting_order:${threadId}`);
+                                await this.redisStore.del(`pending_order:${threadId}`);
+
+                                output = JSON.stringify({
+                                    error: false,
+                                    message: 'Solicitação de comprovante cancelada.'
+                                });
+                                break;
+
+                            default:
+                                output = JSON.stringify({
+                                    error: true,
+                                    message: 'Ação inválida para gerenciamento de comprovantes.'
+                                });
+                        }
+                        break;
+
+                    case 'forward_to_financial':
+                        if (!parsedArgs.reason || !parsedArgs.customer_message) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'Por favor, forneça o motivo do encaminhamento e a mensagem do cliente.'
+                            });
+                            break;
+                        }
+
+                        const success = await this.financialService.forwardCase({
+                            order_number: parsedArgs.order_number,
+                            tracking_code: parsedArgs.tracking_code,
+                            reason: parsedArgs.reason,
+                            customer_message: parsedArgs.customer_message,
+                            priority: parsedArgs.priority || 'medium',
+                            additional_info: parsedArgs.additional_info
+                        });
+
+                        output = JSON.stringify({
+                            error: !success,
+                            message: success 
+                                ? 'Caso encaminhado com sucesso para o setor financeiro. Em breve entrarão em contato.'
+                                : 'Não foi possível encaminhar o caso no momento. Por favor, tente novamente mais tarde.'
                         });
                         break;
 

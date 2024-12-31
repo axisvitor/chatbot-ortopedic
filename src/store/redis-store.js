@@ -379,6 +379,118 @@ class RedisStore {
             return [];
         }
     }
+
+    /**
+     * Adiciona um ou mais membros a um Set
+     * @param {string} key Chave do Set
+     * @param {...string} members Membros a serem adicionados
+     * @returns {Promise<number>} Número de membros adicionados
+     */
+    async sadd(key, ...members) {
+        try {
+            return await this.client.sAdd(key, members);
+        } catch (error) {
+            console.error('[Redis] Erro ao adicionar ao set:', {
+                key,
+                members,
+                error: error.message
+            });
+            return 0;
+        }
+    }
+
+    /**
+     * Remove um ou mais membros de um Set
+     * @param {string} key Chave do Set
+     * @param {...string} members Membros a serem removidos
+     * @returns {Promise<number>} Número de membros removidos
+     */
+    async srem(key, ...members) {
+        try {
+            return await this.client.sRem(key, members);
+        } catch (error) {
+            console.error('[Redis] Erro ao remover do set:', {
+                key,
+                members,
+                error: error.message
+            });
+            return 0;
+        }
+    }
+
+    /**
+     * Lista todos os membros de um Set
+     * @param {string} key Chave do Set
+     * @returns {Promise<string[]>} Array com os membros do Set
+     */
+    async smembers(key) {
+        try {
+            return await this.client.sMembers(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao listar membros do set:', {
+                key,
+                error: error.message
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Verifica se um membro existe em um Set
+     * @param {string} key Chave do Set
+     * @param {string} member Membro a ser verificado
+     * @returns {Promise<boolean>} True se o membro existe
+     */
+    async sismember(key, member) {
+        try {
+            return await this.client.sIsMember(key, member);
+        } catch (error) {
+            console.error('[Redis] Erro ao verificar membro do set:', {
+                key,
+                member,
+                error: error.message
+            });
+            return false;
+        }
+    }
+
+    /**
+     * Retorna o número de membros em um Set
+     * @param {string} key Chave do Set
+     * @returns {Promise<number>} Número de membros
+     */
+    async scard(key) {
+        try {
+            return await this.client.sCard(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao contar membros do set:', {
+                key,
+                error: error.message
+            });
+            return 0;
+        }
+    }
+
+    /**
+     * Move um membro de um Set para outro
+     * @param {string} source Set de origem
+     * @param {string} destination Set de destino
+     * @param {string} member Membro a ser movido
+     * @returns {Promise<boolean>} True se o membro foi movido
+     */
+    async smove(source, destination, member) {
+        try {
+            return await this.client.sMove(source, destination, member);
+        } catch (error) {
+            console.error('[Redis] Erro ao mover membro entre sets:', {
+                source,
+                destination,
+                member,
+                error: error.message
+            });
+            return false;
+        }
+    }
 }
 
 module.exports = { RedisStore };

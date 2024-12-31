@@ -398,107 +398,136 @@ class AIServices {
                 throw new Error('Objeto de imagem não encontrado na mensagem');
             }
 
-            // Verifica se está esperando comprovante
-            const waitingFor = await this.redisStore.get(`waiting_order:${from}`);
-            if (waitingFor === 'payment_proof') {
-                console.log('💰 Recebido possível comprovante de pagamento');
-                
-                // Baixa a imagem usando o Baileys
-                const buffer = await this.whatsAppService.downloadMediaMessage(message);
-                if (!buffer || buffer.length < 100) {
-                    throw new Error('Buffer da imagem inválido ou muito pequeno');
-                }
-
-                // Analisa com Groq para verificar se é realmente um comprovante
-                const base64Image = buffer.toString('base64');
-                const isPaymentProof = await this.analyzeImageWithGroq(base64Image);
-                
-                if (isPaymentProof) {
-                    // Salva o comprovante temporariamente
-                    const proofKey = `payment_proof:${from}`;
-                    await this.redisStore.set(proofKey, message.message, 'EX', 300); // Expira em 5 minutos
-                    
-                    await this.whatsAppService.sendText(
-                        from,
-                        'Ótimo! Agora me confirme o número do pedido para que eu possa vincular o comprovante.'
-                    );
-                    return;
-                } else {
-                    await this.whatsAppService.sendText(
-                        from,
-                        'Esta imagem não parece ser um comprovante de pagamento válido. Por favor, envie uma foto clara do comprovante.'
-                    );
-                    return;
-                }
+            // Baixa a imagem primeiro para evitar repetição de código
+            const buffer = await this.whatsAppService.downloadMediaMessage(message);
+            if (!buffer || buffer.length < 100) {
+                throw new Error('Buffer da imagem inválido ou muito pequeno');
             }
 
-            // Se não estiver esperando comprovante, tenta extrair número do pedido
-            try {
-                // Primeiro tenta baixar e processar a imagem
-                const buffer = await this.whatsAppService.downloadMediaMessage(message);
-                if (!buffer || buffer.length < 100) {
-                    throw new Error('Buffer da imagem inválido ou muito pequeno');
-                }
+            // Converte para base64 uma única vez
+            const base64Image = buffer.toString('base64');
 
-                const orderNumber = await this.orderValidationService.extractOrderNumber(buffer);
-                if (orderNumber) {
-                    console.log(`🔍 Número do pedido encontrado na imagem: ${orderNumber}`);
-                    const orderInfo = await this.orderValidationService.findOrder(orderNumber);
-                    
-                    if (orderInfo) {
-                        await this.handleOrderInfo(from, orderInfo);
+            // Verifica se está esperando comprovante
+            const waitingFor = await this.redisStore.get(`waiting_order:${from}`);
+            const pendingOrder = await this.redisStore.get(`pending_order:${from}`);
+
+            // Analisa com Groq para verificar se é um comprovante
+            const analysis = await this.analyzeImageWithGroq(base64Image);
+            const isPaymentProof = analysis.toLowerCase().includes('comprovante') || 
+                                 analysis.toLowerCase().includes('pagamento') ||
+                                 analysis.toLowerCase().includes('transferência') ||
+                                 analysis.toLowerCase().includes('pix');
+
+            if (isPaymentProof) {
+                console.log('💰 Comprovante de pagamento detectado');
+
+                // Se já está esperando comprovante e tem número do pedido
+                if (waitingFor === 'payment_proof' && pendingOrder) {
+                    // Valida o pedido
+                    const order = await this.validateOrderForReceipt(from, pendingOrder);
+                    if (order) {
+                        // Encaminha para o financeiro
+                        await this.openAIService.handleToolCalls({
+                            function_call: {
+                                name: 'forward_to_financial',
+                                arguments: JSON.stringify({
+                                    order_number: pendingOrder,
+                                    reason: 'payment_proof',
+                                    customer_message: `Cliente enviou comprovante de pagamento.\n\nAnálise da imagem:\n${analysis}`,
+                                    priority: 'high',
+                                    additional_info: analysis
+                                })
+                            }
+                        }, from);
+
+                        // Limpa o estado
+                        await this.redisStore.del(`waiting_order:${from}`);
+                        await this.redisStore.del(`pending_order:${from}`);
+
+                        await this.whatsAppService.sendText(
+                            from,
+                            '✅ Comprovante recebido e encaminhado para análise! Em breve nossa equipe financeira irá verificar.'
+                        );
                         return;
                     } else {
                         await this.whatsAppService.sendText(
                             from,
-                            'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto e tente novamente.'
+                            '❌ Não encontrei o pedido informado ou ele não pertence a você. Por favor, verifique o número e tente novamente.'
                         );
                         return;
                     }
                 }
-
-                // Se não encontrou número do pedido, analisa com Groq
-                const base64Image = buffer.toString('base64');
-                const analysis = await this.analyzeImageWithGroq(base64Image);
                 
-                // Atualiza o histórico com a análise
-                const threadKey = `chat:${from}`;
-                let chatHistory = await this.getChatHistory(from);
-                
-                chatHistory.messages = chatHistory.messages || [];
-                chatHistory.messages.unshift(
-                    {
-                        role: 'user',
-                        content: 'Analisar imagem',
-                        type: 'image',
-                        timestamp: new Date().toISOString()
-                    },
-                    {
-                        role: 'assistant',
-                        content: analysis,
-                        timestamp: new Date().toISOString()
+                // Se não estava esperando ou não tem número do pedido
+                await this.openAIService.handleToolCalls({
+                    function_call: {
+                        name: 'request_payment_proof',
+                        arguments: JSON.stringify({
+                            action: 'request',
+                            reason: 'payment_analysis'
+                        })
                     }
-                );
+                }, from);
 
-                chatHistory.lastUpdate = new Date().toISOString();
-                await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
+                // Salva o comprovante temporariamente
+                const proofKey = `payment_proof:${from}`;
+                await this.redisStore.set(proofKey, base64Image, 'EX', 300); // Expira em 5 minutos
 
-                // Envia a análise para o usuário
-                await this.whatsAppService.sendText(
-                    from,
-                    `🖼️ *Análise da imagem:*\n\n${analysis}`
-                );
-
-            } catch (error) {
-                console.error('[AI] Erro ao processar imagem:', error);
-                await this.whatsAppService.sendText(
-                    from,
-                    'Desculpe, não consegui processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.'
-                );
+                return;
             }
+
+            // Se não é comprovante ou não estava esperando um
+            // Tenta extrair número do pedido
+            const orderNumber = await this.orderValidationService.extractOrderNumber(buffer);
+            if (orderNumber) {
+                console.log(`🔍 Número do pedido encontrado na imagem: ${orderNumber}`);
+                const orderInfo = await this.orderValidationService.findOrder(orderNumber);
+                
+                if (orderInfo) {
+                    await this.handleOrderInfo(from, orderInfo);
+                    return;
+                }
+            }
+
+            // Se chegou aqui, é uma imagem comum
+            // Atualiza o histórico com a análise
+            const threadKey = `chat:${from}`;
+            let chatHistory = await this.getChatHistory(from);
+            
+            chatHistory.messages = chatHistory.messages || [];
+            chatHistory.messages.unshift(
+                {
+                    role: 'user',
+                    content: 'Analisar imagem',
+                    type: 'image',
+                    timestamp: new Date().toISOString()
+                },
+                {
+                    role: 'assistant',
+                    content: analysis,
+                    timestamp: new Date().toISOString()
+                }
+            );
+
+            chatHistory.lastUpdate = new Date().toISOString();
+            await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
+
+            // Envia a análise para o usuário
+            await this.whatsAppService.sendText(
+                from,
+                `🖼️ *Análise da imagem:*\n\n${analysis}`
+            );
+
         } catch (error) {
             console.error('[AI] Erro ao processar imagem:', error);
-            throw error;
+            try {
+                await this.whatsAppService.sendText(
+                    message.from,
+                    'Desculpe, não consegui processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.'
+                );
+            } catch (sendError) {
+                console.error('❌ Erro ao enviar mensagem de erro:', sendError);
+            }
         }
     }
 
