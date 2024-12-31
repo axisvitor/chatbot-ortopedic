@@ -72,7 +72,9 @@ class OrderApi extends NuvemshopApiBase {
         try {
             console.log('[Nuvemshop] Buscando pedido:', {
                 numero: orderNumber,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                url: `${NUVEMSHOP_CONFIG.apiUrl}/orders`,
+                token: NUVEMSHOP_CONFIG.accessToken.substring(0, 10) + '...'
             });
 
             // Busca pelo endpoint correto de busca
@@ -86,7 +88,8 @@ class OrderApi extends NuvemshopApiBase {
             if (!response?.data || !Array.isArray(response.data) || response.data.length === 0) {
                 console.log('[Nuvemshop] Pedido não encontrado:', {
                     numero: orderNumber,
-                    timestamp: new Date().toISOString()
+                    timestamp: new Date().toISOString(),
+                    resposta: response.data
                 });
                 return null;
             }

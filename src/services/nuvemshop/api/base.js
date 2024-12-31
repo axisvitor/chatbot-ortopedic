@@ -56,24 +56,26 @@ class NuvemshopApiBase {
             }
         });
 
-        // Configuração de rate limit
-        const rateLimitedClient = rateLimit(this.client, NUVEMSHOP_CONFIG.api.rateLimit);
-
         // Adiciona interceptors para logs
-        rateLimitedClient.interceptors.request.use(request => {
+        this.client.interceptors.request.use(request => {
             console.log('[Nuvemshop] Request:', {
                 url: request.url,
                 method: request.method,
-                params: request.params
+                params: request.params,
+                headers: {
+                    ...request.headers,
+                    'Authentication': 'bearer [REDACTED]'
+                }
             });
             return request;
         });
 
-        rateLimitedClient.interceptors.response.use(
+        this.client.interceptors.response.use(
             response => {
                 console.log('[Nuvemshop] Response Success:', {
                     status: response.status,
-                    url: response.config.url
+                    url: response.config.url,
+                    data: response.data
                 });
                 return response;
             },
@@ -81,11 +83,16 @@ class NuvemshopApiBase {
                 console.error('[Nuvemshop] Response Error:', {
                     status: error.response?.status,
                     url: error.config?.url,
-                    message: error.message
+                    message: error.message,
+                    data: error.response?.data,
+                    headers: error.response?.headers
                 });
                 throw error;
             }
         );
+
+        // Configuração de rate limit
+        const rateLimitedClient = rateLimit(this.client, NUVEMSHOP_CONFIG.api.rateLimit);
 
         this.client = rateLimitedClient;
     }

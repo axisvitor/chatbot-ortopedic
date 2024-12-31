@@ -87,13 +87,42 @@ class NuvemshopService {
                 timestamp: new Date().toISOString()
             });
 
-            // Usar a API do OrderApi que já tem toda a lógica implementada
-            return await this.orderApi.getOrderByNumber(cleanOrderNumber);
+            // Primeiro tenta buscar usando o número
+            const response = await this.client.get('/orders', {
+                params: {
+                    number: cleanOrderNumber,
+                    fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number,shipping_tracking_url'
+                }
+            });
+
+            if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+                const order = response.data[0];
+                
+                // Se encontrou o pedido, busca os detalhes completos usando o ID
+                if (order) {
+                    console.log('[Nuvemshop] Pedido encontrado, buscando detalhes:', {
+                        numero: cleanOrderNumber,
+                        id: order.id,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    const detailedOrder = await this.getOrder(order.id);
+                    return detailedOrder;
+                }
+            }
+
+            console.log('[Nuvemshop] Pedido não encontrado:', {
+                numero: cleanOrderNumber,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
-                numero: cleanOrderNumber,
+                numero: orderNumber,
                 erro: error.message,
-                status: error.response?.status,
+                stack: error.stack,
+                resposta: error.response?.data,
                 timestamp: new Date().toISOString()
             });
             throw error;
