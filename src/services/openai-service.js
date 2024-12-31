@@ -195,6 +195,14 @@ class OpenAIService {
                 return null;
             }
 
+            // Verifica se é um comando especial
+            if (typeof message.content === 'string' && message.content.startsWith('#')) {
+                const result = await this.handleCommand(threadId, message.content);
+                if (result) {
+                    return result;
+                }
+            }
+
             console.log(`[OpenAI] Processando mensagem para thread ${threadId}:`, 
                 message.content.length > 100 ? message.content.substring(0, 100) + '...' : message.content);
 
@@ -743,6 +751,31 @@ class OpenAIService {
                 stack: error.stack
             });
             return [];
+        }
+    }
+
+    async handleCommand(threadId, command) {
+        try {
+            if (command === '#resetid') {
+                // Remove o run ativo se houver
+                await this.removeActiveRun(threadId);
+                
+                // Deleta a thread antiga
+                await this.client.beta.threads.del(threadId);
+                
+                // Cria uma nova thread
+                const newThread = await this.client.beta.threads.create();
+                
+                return {
+                    threadId: newThread.id,
+                    message: 'Conversa reiniciada com sucesso! Como posso ajudar?'
+                };
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao processar comando:', error);
+            throw error;
         }
     }
 }

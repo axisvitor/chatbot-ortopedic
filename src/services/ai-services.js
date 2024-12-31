@@ -177,7 +177,15 @@ class AIServices {
                 });
                 
                 if (response) {
-                    await this.sendResponse(from, response);
+                    // Se for resposta de comando com novo threadId
+                    if (typeof response === 'object' && response.threadId) {
+                        // Atualiza o histórico com o novo threadId
+                        chatHistory.threadId = response.threadId;
+                        await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
+                        await this.sendResponse(from, response.message);
+                    } else {
+                        await this.sendResponse(from, response);
+                    }
                 }
 
             } catch (error) {
