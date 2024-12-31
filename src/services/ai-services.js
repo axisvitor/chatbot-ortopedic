@@ -418,6 +418,19 @@ class AIServices {
 
             // Analisa com Groq para verificar se é um comprovante
             const analysis = await this.analyzeImageWithGroq(base64Image);
+            
+            // Formata a mensagem para o OpenAI
+            const messageContent = `[Análise de Imagem]\n${analysis}`;
+            
+            // Envia a análise para o OpenAI Assistant
+            await this.openAIService.addMessageAndRun(
+                await this.openAIService.getOrCreateThreadForCustomer(from), 
+                {
+                    role: 'user',
+                    content: messageContent
+                }
+            );
+
             const isPaymentProof = analysis.toLowerCase().includes('comprovante') || 
                                  analysis.toLowerCase().includes('pagamento') ||
                                  analysis.toLowerCase().includes('transferência') ||
