@@ -84,11 +84,12 @@ class NuvemshopService {
             
             console.log('[Nuvemshop] Buscando pedido:', {
                 numero: cleanOrderNumber,
+                storeId: NUVEMSHOP_CONFIG.userId,
                 timestamp: new Date().toISOString()
             });
 
-            // Primeiro tenta buscar usando o número
-            const response = await this.client.get('/orders', {
+            // Busca direta pelo número do pedido
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params: {
                     number: cleanOrderNumber
                 }
@@ -97,17 +98,15 @@ class NuvemshopService {
             if (response.data && Array.isArray(response.data) && response.data.length > 0) {
                 const order = response.data[0];
                 
-                // Se encontrou o pedido, busca os detalhes completos usando o ID
-                if (order) {
-                    console.log('[Nuvemshop] Pedido encontrado, buscando detalhes:', {
-                        numero: cleanOrderNumber,
-                        id: order.id,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    const detailedOrder = await this.getOrder(order.id);
-                    return detailedOrder;
-                }
+                console.log('[Nuvemshop] Pedido encontrado:', {
+                    numero: cleanOrderNumber,
+                    id: order.id,
+                    status: order.status,
+                    cliente: order.customer?.name || 'Não informado',
+                    timestamp: new Date().toISOString()
+                });
+                
+                return order;
             }
 
             console.log('[Nuvemshop] Pedido não encontrado:', {
@@ -124,6 +123,11 @@ class NuvemshopService {
                 resposta: error.response?.data,
                 timestamp: new Date().toISOString()
             });
+            
+            // Se for erro 404, retorna null em vez de lançar erro
+            if (error.response?.status === 404) {
+                return null;
+            }
             throw error;
         }
     }
