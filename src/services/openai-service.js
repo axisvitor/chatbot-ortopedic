@@ -473,13 +473,13 @@ class OpenAIService {
                             break;
                         }
                         const tracking = await this.trackingService.getTrackingStatus(parsedArgs.tracking_code);
-                        if (!tracking) {
+                        if (!tracking || !tracking.status) {
                             output = JSON.stringify({
                                 error: true,
                                 message: `Desculpe, não encontrei informações para o código de rastreio ${parsedArgs.tracking_code}. Poderia verificar se o código está correto?`
                             });
                         } else {
-                            const status = tracking.status.toLowerCase();
+                            const status = (tracking.status || '').toLowerCase();
                             let statusEmoji = '📦';
                             if (status.includes('entregue')) {
                                 statusEmoji = '✅';
@@ -491,10 +491,10 @@ class OpenAIService {
 
                             output = JSON.stringify({
                                 error: false,
-                                message: `📬 Informações de Rastreio: ${tracking.code}\n\n` +
-                                        `${statusEmoji} Status: ${tracking.status}\n` +
-                                        `📍 Localização: ${tracking.location}\n` +
-                                        `🕒 Última Atualização: ${tracking.last_update}\n` +
+                                message: `📬 Informações de Rastreio: ${tracking.code || parsedArgs.tracking_code}\n\n` +
+                                        `${statusEmoji} Status: ${tracking.status || 'Status não disponível'}\n` +
+                                        `${tracking.location ? `📍 Localização: ${tracking.location}\n` : ''}` +
+                                        `${tracking.last_update ? `🕒 Última Atualização: ${tracking.last_update}\n` : ''}` +
                                         `${tracking.message ? `\n📝 Observação: ${tracking.message}` : ''}`
                             });
                         }

@@ -57,26 +57,6 @@ class TrackingService {
         return await this._makeRequest(options, data);
     }
 
-    async getTrackingStatus(trackingNumber, carrier) {
-        const data = JSON.stringify({
-            "tracking_number": trackingNumber,
-            "carrier_code": carrier || undefined
-        });
-
-        const options = {
-            hostname: this.config.endpoint,
-            path: this.config.paths.status,
-            method: 'POST',
-            headers: {
-                '17token': this.config.apiKey,
-                'Content-Type': 'application/json',
-                'Content-Length': data.length
-            }
-        };
-
-        return await this._makeRequest(options, data);
-    }
-
     async getTrackingStatus(trackingNumber) {
         const data = JSON.stringify({
             "tracking_number": trackingNumber
@@ -93,7 +73,29 @@ class TrackingService {
             }
         };
 
-        return await this._makeRequest(options, data);
+        const result = await this._makeRequest(options, data);
+        
+        // Se não tem dados ou tem erro
+        if (!result || result.code !== 0 || !result.data?.accepted?.length) {
+            return null;
+        }
+
+        const trackInfo = result.data.accepted[0];
+        
+        // Formata a resposta no padrão esperado
+        return {
+            code: trackingNumber,
+            status: trackInfo.latest_event_info || 'Status não disponível',
+            location: trackInfo.latest_event_location || 'Localização não disponível',
+            last_update: trackInfo.latest_event_time ? new Date(trackInfo.latest_event_time).toLocaleString('pt-BR', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            }) : 'Data não disponível',
+            message: trackInfo.latest_event_message
+        };
     }
 
     async _makeRequest(options, data) {
