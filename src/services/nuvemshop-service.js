@@ -105,10 +105,10 @@ class NuvemshopService {
             console.log('[Nuvemshop] Pedido encontrado:', {
                 numeroOriginal: orderNumber,
                 numeroLimpo: cleanOrderNumber,
-                numeroPedido: order.number,
                 id: order.id,
                 status: order.status,
-                cliente: order.customer?.name || 'Não informado',
+                cliente: order.customer?.name || order.client_details?.name || 'Não informado',
+                produtos: order.products?.length || 0,
                 timestamp: new Date().toISOString()
             });
 
@@ -124,7 +124,6 @@ class NuvemshopService {
                 timestamp: new Date().toISOString()
             });
             
-            // Se for erro 404, retorna null em vez de lançar erro
             if (error.response?.status === 404) {
                 return null;
             }
@@ -710,55 +709,7 @@ class NuvemshopService {
     }
 
     async getOrderByNumber(orderNumber) {
-        try {
-            const cleanOrderNumber = String(orderNumber).replace(/[#\\s]/g, '');
-            
-            console.log('[Nuvemshop] Buscando pedido:', {
-                numero: cleanOrderNumber,
-                storeId: NUVEMSHOP_CONFIG.userId,
-                timestamp: new Date().toISOString()
-            });
-
-            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders/search`, {
-                params: {
-                    q: cleanOrderNumber,
-                    per_page: 50,
-                    created_at_min: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-                }
-            });
-
-            if (response.data && Array.isArray(response.data)) {
-                const order = response.data.find(o => String(o.number) === cleanOrderNumber);
-                
-                if (order) {
-                    console.log('[Nuvemshop] Pedido encontrado:', {
-                        numero: cleanOrderNumber,
-                        id: order.id,
-                        status: order.status,
-                        cliente: order.customer?.name || order.client_details?.name || 'Não informado',
-                        produtos: order.products?.length || 0,
-                        timestamp: new Date().toISOString()
-                    });
-                    return order;
-                }
-            }
-
-            console.log('[Nuvemshop] Pedido não encontrado:', {
-                numero: cleanOrderNumber,
-                timestamp: new Date().toISOString()
-            });
-            return null;
-
-        } catch (error) {
-            console.error('[Nuvemshop] Erro ao buscar pedido:', {
-                numero: orderNumber,
-                erro: error.message,
-                stack: error.stack,
-                resposta: error.response?.data,
-                timestamp: new Date().toISOString()
-            });
-            throw error;
-        }
+        return this.orderApi.getOrderByNumber(orderNumber);
     }
 
     async getOrder(orderId) {
