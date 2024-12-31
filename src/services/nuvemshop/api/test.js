@@ -1,5 +1,6 @@
 const { OrderApi } = require('./order');
 const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
+const { NuvemshopService } = require('../../nuvemshop-service');
 
 async function testOrderSearch() {
     try {
@@ -9,9 +10,9 @@ async function testOrderSearch() {
             tokenLength: NUVEMSHOP_CONFIG.accessToken.length
         });
 
-        const orderApi = new OrderApi();
+        const nuvemshop = new NuvemshopService();
         console.log('Buscando pedido...');
-        const order = await orderApi.getOrder('1623071044'); // ID do pedido
+        const order = await nuvemshop.getOrderByNumber('2913');
         console.log('Resultado:', JSON.stringify(order, null, 2));
     } catch (error) {
         console.error('Erro:', error.message);

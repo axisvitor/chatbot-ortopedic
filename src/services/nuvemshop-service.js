@@ -90,8 +90,7 @@ class NuvemshopService {
             // Primeiro tenta buscar usando o número
             const response = await this.client.get('/orders', {
                 params: {
-                    number: cleanOrderNumber,
-                    fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number,shipping_tracking_url'
+                    number: cleanOrderNumber
                 }
             });
 
@@ -640,18 +639,39 @@ class NuvemshopService {
     }
 
     async getOrder(orderId) {
-        const cacheKey = `nuvemshop:order:${orderId}`;
-        const cached = await this.cacheService.get(cacheKey);
-        
-        if (cached) {
-            return JSON.parse(cached);
-        }
+        try {
+            console.log('[Nuvemshop] Buscando pedido por ID:', {
+                id: orderId,
+                timestamp: new Date().toISOString()
+            });
 
-        const order = await this.orderApi.getOrder(orderId);
-        if (order) {
-            await this.cacheService.set(cacheKey, JSON.stringify(order), 3600); // 1 hora
+            const response = await this.client.get(`/orders/${orderId}`);
+            
+            if (response?.data) {
+                console.log('[Nuvemshop] Pedido encontrado por ID:', {
+                    id: orderId,
+                    status: response.data.status,
+                    timestamp: new Date().toISOString()
+                });
+                return response.data;
+            }
+
+            console.log('[Nuvemshop] Pedido não encontrado por ID:', {
+                id: orderId,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao buscar pedido por ID:', {
+                id: orderId,
+                erro: error.message,
+                stack: error.stack,
+                resposta: error.response?.data,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
         }
-        return order;
     }
 
     async getOrderByNumber(orderNumber) {
