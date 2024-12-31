@@ -146,6 +146,39 @@ class BusinessHoursService {
 
         return `🕒 Horário de Atendimento:\n${days}`;
     }
+
+    getBusinessHours() {
+        const isOpen = this.isWithinBusinessHours();
+        const schedule = {};
+        
+        // Formata o horário de cada dia
+        for (const [day, hours] of Object.entries(this.config.schedule)) {
+            if (hours.start && hours.end) {
+                schedule[this.formatDayName(day)] = `${hours.start} às ${hours.end}`;
+            } else {
+                schedule[this.formatDayName(day)] = 'Fechado';
+            }
+        }
+
+        return {
+            isOpen,
+            schedule,
+            timezone: this.config.timezone
+        };
+    }
+
+    formatDayName(day) {
+        const dayNames = {
+            'domingo': 'Domingo',
+            'segunda': 'Segunda-feira',
+            'terca': 'Terça-feira',
+            'quarta': 'Quarta-feira',
+            'quinta': 'Quinta-feira',
+            'sexta': 'Sexta-feira',
+            'sabado': 'Sábado'
+        };
+        return dayNames[day] || day;
+    }
 }
 
 module.exports = { BusinessHoursService };
