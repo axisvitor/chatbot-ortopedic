@@ -116,7 +116,8 @@ class GroqServices {
                                     '1. O tipo da imagem (comprovante de pagamento, foto de calçado, foto de pés para medidas, tabela de medidas/numeração, documento)\n' +
                                     '2. Uma descrição detalhada do que você vê\n' +
                                     '3. Se for um comprovante de pagamento, extraia: valor, data e ID da transação\n' +
-                                    'Responda em formato JSON com os campos: type, description, isPaymentProof, paymentInfo (se aplicável)'
+                                    (message?.extractedText ? `\nTexto extraído via OCR: ${message.extractedText}` : '') +
+                                    '\nResponda em formato JSON com os campos: type, description, isPaymentProof, paymentInfo (se aplicável)'
                             },
                             {
                                 type: 'image_url',
