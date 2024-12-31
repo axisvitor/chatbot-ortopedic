@@ -566,38 +566,97 @@ class AIServices {
      * @returns {Promise<string>} Análise da imagem
      */
     async analyzeImageWithGroq(base64Image) {
-        const messages = [
-            {
-                role: "user", 
-                content: [
-                    {
-                        type: "text",
-                        text: "Analise esta imagem e me diga se é um comprovante de pagamento válido. Forneça detalhes como valor, data e outros dados relevantes se houver."
-                    },
-                    {
-                        type: "image_url",
-                        image_url: {
-                            "url": `data:image/jpeg;base64,${base64Image}`,
-                            "detail": "high"
+        try {
+            console.log('🔄 Iniciando análise de imagem com Groq Vision...', {
+                timestamp: new Date().toISOString(),
+                imageSize: base64Image.length
+            });
+
+            const messages = [
+                {
+                    role: "user", 
+                    content: [
+                        {
+                            type: "text",
+                            text: `Analise esta imagem detalhadamente e me forneça as seguintes informações:
+
+1. Tipo de Imagem/Documento:
+   - Identifique se é um comprovante de pagamento
+   - Foto de calçado
+   - Foto dos pés para medidas
+   - Tabela de medidas/numeração
+   - Outro tipo de documento
+
+2. Se for um comprovante de pagamento:
+   - Valor da transação
+   - Data e hora
+   - Tipo de transação (PIX, TED, etc)
+   - Banco ou instituição
+   - Nome do beneficiário (se visível)
+   - Status da transação
+
+3. Se for uma foto de calçado ou pés:
+   - Descrição do calçado ou características dos pés
+   - Detalhes visíveis importantes
+   - Qualidade e clareza da imagem
+   - Ângulo da foto
+   - Se há régua ou referência de medida
+
+4. Se for uma tabela de medidas:
+   - Tipo de medida (comprimento, largura)
+   - Numerações visíveis
+   - Clareza das informações
+
+Por favor, forneça uma análise estruturada e detalhada focando no contexto de uma loja de calçados.`
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                "url": `data:image/jpeg;base64,${base64Image}`,
+                                "detail": "high"
+                            }
                         }
-                    }
-                ]
+                    ]
+                }
+            ];
+
+            console.log('📤 Enviando requisição para Groq Vision...', {
+                timestamp: new Date().toISOString(),
+                modelVersion: "llama-3.2-11b-vision-preview"
+            });
+
+            const response = await this.groqServices.chat.completions.create({
+                model: "llama-3.2-11b-vision-preview",
+                messages: messages,
+                temperature: 0.7,
+                max_tokens: 1024,
+                stream: false
+            });
+
+            if (!response?.choices?.[0]?.message?.content) {
+                console.error('❌ Resposta inválida da Groq:', {
+                    response,
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error('Resposta inválida da Groq');
             }
-        ];
 
-        const response = await this.groqServices.chat.completions.create({
-            model: "llama-3.2-11b-vision-preview",
-            messages: messages,
-            temperature: 0.7,
-            max_tokens: 1024,
-            stream: false
-        });
+            const analysis = response.choices[0].message.content;
+            
+            console.log('✅ Análise concluída com sucesso:', {
+                analysisLength: analysis.length,
+                timestamp: new Date().toISOString()
+            });
 
-        if (!response?.choices?.[0]?.message?.content) {
-            throw new Error('Resposta inválida da Groq');
+            return analysis;
+        } catch (error) {
+            console.error('❌ Erro ao analisar imagem com Groq:', {
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
         }
-
-        return response.choices[0].message.content;
     }
 
     async handleAudioMessage(message) {
