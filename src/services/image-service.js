@@ -192,10 +192,10 @@ class ImageService {
 
     async processWhatsAppImage({ imageMessage, caption = '', from, messageId, businessHours }) {
         try {
-            console.log('[ImageService] Processando imagem:', {
+            console.log('[ImageService] Iniciando processamento de imagem:', {
                 from,
                 messageId,
-                hasCaption: !!caption,
+                caption: caption || '(sem legenda)',
                 mediaId: imageMessage.id,
                 mimetype: imageMessage.mimetype,
                 fileLength: imageMessage.fileLength
@@ -255,6 +255,12 @@ class ImageService {
 
             // Analisa a imagem com Groq Vision
             const analysis = await this.groqServices.analyzeImage(base64Image);
+            
+            console.log('[ImageService] Análise da imagem concluída:', {
+                imageType: analysis.type,
+                hasText: !!analysis.extractedText,
+                description: analysis.description?.substring(0, 100) + '...'
+            });
 
             // Verifica se é um comprovante
             const isReceipt = this.isPaymentReceipt(analysis);

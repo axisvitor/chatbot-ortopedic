@@ -112,7 +112,11 @@ class GroqServices {
                         content: [
                             {
                                 type: 'text',
-                                text: 'Determine se esta imagem é um comprovante de pagamento. Responda apenas "sim" ou "não".'
+                                text: 'Analise esta imagem em detalhes. Determine:\n' +
+                                    '1. O tipo da imagem (comprovante de pagamento, foto de calçado, foto de pés para medidas, tabela de medidas/numeração, documento)\n' +
+                                    '2. Uma descrição detalhada do que você vê\n' +
+                                    '3. Se for um comprovante de pagamento, extraia: valor, data e ID da transação\n' +
+                                    'Responda em formato JSON com os campos: type, description, isPaymentProof, paymentInfo (se aplicável)'
                             },
                             {
                                 type: 'image_url',
@@ -142,12 +146,24 @@ class GroqServices {
                 throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
             }
 
-            const answer = response.data.choices[0].message.content.toLowerCase().trim();
-            const isPaymentProof = answer.includes('sim');
+            // Processa a resposta
+            const content = response.data.choices[0].message.content;
+            let analysis;
+            try {
+                analysis = JSON.parse(content);
+            } catch (e) {
+                console.warn('⚠️ Erro ao parsear JSON da resposta:', e);
+                // Tenta extrair informações básicas mesmo se o JSON for inválido
+                analysis = {
+                    type: content.toLowerCase().includes('comprovante') ? 'payment_proof' : 'unknown',
+                    description: content,
+                    isPaymentProof: content.toLowerCase().includes('comprovante'),
+                    paymentInfo: null
+                };
+            }
 
             return {
-                type: 'image',
-                isPaymentProof,
+                ...analysis,
                 originalMessage: message
             };
 
