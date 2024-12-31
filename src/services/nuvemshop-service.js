@@ -678,21 +678,6 @@ class NuvemshopService {
         }
     }
 
-    async getOrderByNumber(orderNumber) {
-        const cacheKey = `nuvemshop:order:number:${orderNumber}`;
-        const cached = await this.cacheService.get(cacheKey);
-        
-        if (cached) {
-            return JSON.parse(cached);
-        }
-
-        const order = await this.orderApi.getOrderByNumber(orderNumber);
-        if (order) {
-            await this.cacheService.set(cacheKey, JSON.stringify(order), 3600);
-        }
-        return order;
-    }
-
     async searchOrders(params) {
         return this.orderApi.searchOrders(params);
     }
