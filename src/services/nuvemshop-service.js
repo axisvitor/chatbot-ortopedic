@@ -80,44 +80,66 @@ class NuvemshopService {
 
     async getOrderByNumber(orderNumber) {
         try {
-            const cleanOrderNumber = String(orderNumber).replace(/[#\\s]/g, '');
+            // Remove espaços e caracteres especiais, mas mantém apenas os números
+            const cleanOrderNumber = String(orderNumber).replace(/[^\d]/g, '');
             
             console.log('[Nuvemshop] Buscando pedido:', {
-                numero: cleanOrderNumber,
+                numeroOriginal: orderNumber,
+                numeroLimpo: cleanOrderNumber,
                 storeId: NUVEMSHOP_CONFIG.userId,
                 timestamp: new Date().toISOString()
             });
 
-            // Busca direta pelo número do pedido
-            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
-                params: {
-                    number: cleanOrderNumber
-                }
+            // Primeiro busca o ID do pedido usando o endpoint de busca
+            const searchResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: { q: cleanOrderNumber }
             });
 
-            if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-                const order = response.data[0];
-                
-                console.log('[Nuvemshop] Pedido encontrado:', {
-                    numero: cleanOrderNumber,
-                    id: order.id,
-                    status: order.status,
-                    cliente: order.customer?.name || 'Não informado',
-                    timestamp: new Date().toISOString()
-                });
-                
-                return order;
+            if (!searchResponse?.data || !Array.isArray(searchResponse.data)) {
+                console.log('[Nuvemshop] Nenhum resultado encontrado na busca');
+                return null;
             }
 
-            console.log('[Nuvemshop] Pedido não encontrado:', {
-                numero: cleanOrderNumber,
+            // Encontra o pedido com o número exato (comparando apenas números)
+            const matchingOrder = searchResponse.data.find(order => 
+                String(order.number).replace(/[^\d]/g, '') === cleanOrderNumber
+            );
+
+            if (!matchingOrder) {
+                console.log('[Nuvemshop] Pedido não encontrado:', {
+                    numeroOriginal: orderNumber,
+                    numeroLimpo: cleanOrderNumber,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+
+            // Busca os detalhes completos usando o ID do pedido
+            const detailResponse = await this.client.get(
+                `/${NUVEMSHOP_CONFIG.userId}/orders/${matchingOrder.id}`
+            );
+
+            if (!detailResponse?.data) {
+                console.log('[Nuvemshop] Detalhes do pedido não encontrados');
+                return matchingOrder; // Retorna os dados básicos se não conseguir os detalhes
+            }
+
+            console.log('[Nuvemshop] Pedido encontrado:', {
+                numeroOriginal: orderNumber,
+                numeroLimpo: cleanOrderNumber,
+                numeroPedido: detailResponse.data.number,
+                id: detailResponse.data.id,
+                status: detailResponse.data.status,
+                cliente: detailResponse.data.customer?.name || 'Não informado',
                 timestamp: new Date().toISOString()
             });
-            return null;
+
+            return detailResponse.data;
 
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
-                numero: orderNumber,
+                numeroOriginal: orderNumber,
+                numeroLimpo: cleanOrderNumber,
                 erro: error.message,
                 stack: error.stack,
                 resposta: error.response?.data,
