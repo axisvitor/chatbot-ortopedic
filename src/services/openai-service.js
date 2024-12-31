@@ -195,12 +195,6 @@ class OpenAIService {
                 return null;
             }
 
-            // Adiciona uma mensagem do sistema para instruir sobre formatação
-            await this.addMessage(threadId, {
-                role: 'system',
-                content: 'Se a resposta contiver o prefixo [NO_FORMAT], você deve retornar exatamente o conteúdo após o prefixo, sem adicionar nenhum texto antes ou depois e sem alterar a formatação.'
-            });
-
             console.log(`[OpenAI] Processando mensagem para thread ${threadId}:`, 
                 message.content.length > 100 ? message.content.substring(0, 100) + '...' : message.content);
 
@@ -330,14 +324,7 @@ class OpenAIService {
             if (run.status === 'completed') {
                 const messages = await this.listMessages(threadId);
                 if (messages.data && messages.data.length > 0) {
-                    const messageContent = messages.data[0].content[0].text.value;
-                    
-                    // Se a mensagem tem o prefixo [NO_FORMAT], remove o prefixo e retorna exatamente como está
-                    if (messageContent.includes('[NO_FORMAT]')) {
-                        return messageContent.replace('[NO_FORMAT]', '');
-                    }
-                    
-                    return messageContent;
+                    return messages.data[0].content[0].text.value;
                 }
             }
 
@@ -457,18 +444,14 @@ class OpenAIService {
                                 }
                             }
 
-                            // Força a formatação exata que queremos
-                            const formattedMessage = `🛍 Detalhes do Pedido #${order.number}\n\n` +
-                                                   `👤 Cliente: ${order.customer.name}\n` +
-                                                   `📅 Data: ${orderDate}\n` +
-                                                   `📦 Status: ${order.status}\n` +
-                                                   `💰 Valor Total: R$ ${total}\n\n` +
-                                                   `Produtos:\n${products}${deliveryStatus}`;
-
-                            // Adiciona um prefixo especial para indicar que não deve ser reformatado
                             output = JSON.stringify({
                                 error: false,
-                                message: `[NO_FORMAT]${formattedMessage}`
+                                message: `🛍 Detalhes do Pedido #${order.number}\n\n` +
+                                        `👤 Cliente: ${order.customer.name}\n` +
+                                        `📅 Data: ${orderDate}\n` +
+                                        `📦 Status: ${order.status}\n` +
+                                        `💰 Valor Total: R$ ${total}\n\n` +
+                                        `Produtos:\n${products}${deliveryStatus}`
                             });
                         }
                         break;
@@ -598,25 +581,21 @@ class OpenAIService {
                             extractedOrder.total.toFixed(2) : 
                             String(extractedOrder.total).replace(/[^\d.,]/g, '');
 
-                        // Força a formatação exata que queremos
-                        const formattedMessage = `🛍 Detalhes do Pedido #${extractedOrder.number}\n\n` +
-                                               `👤 Cliente: ${extractedOrder.customer.name}\n` +
-                                               `📅 Data: ${new Date(extractedOrder.created_at).toLocaleString('pt-BR', { 
-                                                   day: '2-digit',
-                                                   month: '2-digit',
-                                                   year: 'numeric',
-                                                   hour: '2-digit',
-                                                   minute: '2-digit'
-                                               })}\n` +
-                                               `📦 Status: ${extractedOrder.status}\n` +
-                                               `💰 Valor Total: R$ ${total}\n\n` +
-                                               `Produtos:\n${products}` +
-                                               `${deliveryStatus}`;
-
-                        // Adiciona um prefixo especial para indicar que não deve ser reformatado
                         output = JSON.stringify({
                             error: false,
-                            message: `[NO_FORMAT]${formattedMessage}`
+                            message: `🛍 Detalhes do Pedido #${extractedOrder.number}\n\n` +
+                                    `👤 Cliente: ${extractedOrder.customer.name}\n` +
+                                    `📅 Data: ${new Date(extractedOrder.created_at).toLocaleString('pt-BR', { 
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}\n` +
+                                    `📦 Status: ${extractedOrder.status}\n` +
+                                    `💰 Valor Total: R$ ${total}\n\n` +
+                                    `Produtos:\n${products}` +
+                                    `${deliveryStatus}`
                         });
                         break;
 
