@@ -296,6 +296,25 @@ app.post('/message/send-text', async (req, res) => {
     }
 });
 
+const { OrderStatusSyncJob } = require('./jobs/sync-order-status');
+
+// Configuração do job de sincronização
+const orderSyncJob = new OrderStatusSyncJob();
+const SYNC_INTERVAL = 30 * 60 * 1000; // 30 minutos
+
+// Executa job de sincronização periodicamente
+setInterval(() => {
+    orderSyncJob.run().catch(error => {
+        console.error('[Server] Erro ao executar job de sincronização', {
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    });
+}, SYNC_INTERVAL);
+
+// Executa primeira vez ao iniciar
+orderSyncJob.run().catch(console.error);
+
 // Função para iniciar o servidor
 async function startServer(maxRetries = 3) {
     let retries = 0;

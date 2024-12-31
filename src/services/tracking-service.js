@@ -13,6 +13,19 @@ class TrackingService {
         this.nuvemshopService = new NuvemshopService();
         this.whatsAppService = whatsAppService;
         
+        // Configurações de retry
+        this.retryConfig = {
+            maxAttempts: 3,
+            initialDelay: 1000,
+            maxDelay: 5000
+        };
+
+        // Configurações de cache
+        this.cacheConfig = {
+            ttl: 30 * 60, // 30 minutos
+            prefix: 'tracking:'
+        };
+        
         // Registra este serviço no container
         container.register('tracking', this);
     }
@@ -23,6 +36,42 @@ class TrackingService {
      */
     get _whatsAppService() {
         return this.whatsAppService || container.get('whatsapp');
+    }
+
+    /**
+     * Gera uma chave única para o cache do rastreamento
+     * @private
+     */
+    _getCacheKey(trackingNumber) {
+        return `${this.cacheConfig.prefix}${trackingNumber}`;
+    }
+
+    /**
+     * Implementa exponential backoff para retry
+     * @private
+     */
+    async _retryWithBackoff(operation, attempt = 1) {
+        try {
+            return await operation();
+        } catch (error) {
+            if (attempt >= this.retryConfig.maxAttempts) {
+                throw error;
+            }
+
+            const delay = Math.min(
+                this.retryConfig.initialDelay * Math.pow(2, attempt - 1),
+                this.retryConfig.maxDelay
+            );
+
+            console.log(`[Tracking] Tentativa ${attempt} falhou, aguardando ${delay}ms para retry`, {
+                error: error.message,
+                attempt,
+                delay
+            });
+
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return this._retryWithBackoff(operation, attempt + 1);
+        }
     }
 
     async registerTracking(trackingNumber) {
@@ -141,147 +190,101 @@ class TrackingService {
         });
     }
 
-    /**
-     * Processa uma requisição de rastreamento
-     * @param {string} trackingNumber - Número de rastreamento
-     * @param {string} from - ID do remetente (WhatsApp)
-     * @returns {Promise<string>} Mensagem formatada com status do rastreamento
-     */
-    async processTrackingRequest(trackingNumber, from) {
+    async getTrackingInfo(trackingNumber, forceRefresh = false) {
+        const transactionId = `trk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        console.log(`[Tracking][${transactionId}] Iniciando consulta de rastreamento`, {
+            trackingNumber,
+            forceRefresh
+        });
+
         try {
-            if (!trackingNumber) {
-                throw new Error('Número de rastreamento é obrigatório');
+            // Verifica cache primeiro
+            if (!forceRefresh) {
+                const cachedData = await this.redisStore.get(this._getCacheKey(trackingNumber));
+                if (cachedData) {
+                    console.log(`[Tracking][${transactionId}] Dados encontrados em cache`, {
+                        trackingNumber
+                    });
+                    return JSON.parse(cachedData);
+                }
             }
 
-            // Remove espaços e caracteres especiais do número de rastreamento
-            trackingNumber = trackingNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-
-            console.log('[Tracking] Iniciando consulta:', {
-                trackingNumber
+            // Consulta API de rastreamento com retry
+            const trackingData = await this._retryWithBackoff(async () => {
+                const status = await this.getTrackingStatus(trackingNumber);
+                if (!status) {
+                    throw new Error('Dados de rastreamento não disponíveis');
+                }
+                return status;
             });
 
-            // Verifica cache primeiro
-            const cacheKey = `tracking:${trackingNumber}`;
-            const cachedStatus = await this.redisStore.get(cacheKey);
-            
-            if (cachedStatus) {
-                console.log('[Tracking] Usando cache para:', trackingNumber);
-                return cachedStatus;
+            // Verifica eventos de taxação
+            const hasTaxation = this._checkForTaxation(trackingData);
+            if (hasTaxation) {
+                await this._handleTaxationEvent(trackingNumber, trackingData);
             }
 
-            // Consultar o status diretamente
-            const statusResult = await this.getTrackingStatus(trackingNumber);
-            
-            console.log('[Tracking] Resultado da consulta:', JSON.stringify(statusResult, null, 2));
+            // Remove informações sensíveis de taxação antes de cachear
+            const safeTrackingData = this._removeTaxationInfo(trackingData);
 
-            if (statusResult.code !== 0) {
-                throw new Error(`Erro ao consultar status: ${statusResult.message || 'Erro desconhecido'}`);
-            }
-
-            // Se tem erros na resposta
-            if (statusResult.data?.errors?.length > 0) {
-                const error = statusResult.data.errors[0];
-                console.log('[Tracking] Erro na consulta:', JSON.stringify(error, null, 2));
-                throw new Error(`Erro na consulta: ${error.message || 'Erro desconhecido'}`);
-            }
-
-            // Verifica se tem dados aceitos
-            if (!statusResult.data?.accepted?.length) {
-                const message = 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
-                await this.redisStore.set(cacheKey, message, 300); // Cache por 5 minutos para evitar consultas repetidas
-                return message;
-            }
-
-            const trackInfo = statusResult.data.accepted[0];
-
-            // Se não tem eventos
-            if (!trackInfo.latest_event_info) {
-                const message = `📦 *Status do Rastreamento*\n\n*Código:* ${trackingNumber}\n\n_Ainda não há eventos de movimentação registrados._`;
-                await this.redisStore.set(cacheKey, message, 300); // Cache por 5 minutos
-                return message;
-            }
-
-            // Formata a resposta com os eventos
-            const formattedResponse = await this._formatTrackingResponse(trackInfo, from);
-            
-            // Cache por tempo maior se já tem eventos
-            await this.redisStore.set(cacheKey, formattedResponse, 1800); // Cache por 30 minutos
-            
-            return formattedResponse;
-            
-        } catch (error) {
-            console.error('[Tracking] Erro ao processar rastreamento:', error);
-            throw error;
-        }
-    }
-
-    async getTrackingInfo(trackingNumber) {
-        try {
-            // Consultar o status diretamente
-            const statusResult = await this.getTrackingStatus(trackingNumber);
-            
-            console.log('[Tracking] Resultado da consulta:', JSON.stringify(statusResult, null, 2));
-
-            if (statusResult.code !== 0) {
-                throw new Error(`Erro ao consultar status: ${statusResult.message || 'Erro desconhecido'}`);
-            }
-
-            // Se tem erros na resposta
-            if (statusResult.data?.errors?.length > 0) {
-                const error = statusResult.data.errors[0];
-                console.log('[Tracking] Erro na consulta:', JSON.stringify(error, null, 2));
-                throw new Error(`Erro na consulta: ${error.message || 'Erro desconhecido'}`);
-            }
-
-            // Verifica se tem dados aceitos
-            if (!statusResult.data?.accepted?.length) {
-                const message = 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
-                return message;
-            }
-
-            const trackInfo = statusResult.data.accepted[0];
-
-            // Verifica se há eventos de taxação (apenas para uso interno)
-            const taxationEvents = [
-                'taxa a pagar',
-                'aguardando pagamento',
-                'pagamento de taxas',
-                'tributos',
-                'imposto',
-                'darf'
-            ];
-
-            // Verifica eventos apenas internamente, não expõe ao cliente
-            const hasTaxation = trackInfo.events?.some(event => 
-                taxationEvents.some(term => 
-                    event.description?.toLowerCase().includes(term)
-                )
+            // Atualiza cache
+            await this.redisStore.set(
+                this._getCacheKey(trackingNumber),
+                JSON.stringify(safeTrackingData),
+                this.cacheConfig.ttl
             );
 
-            // Se detectar taxação, notifica o financeiro
-            if (hasTaxation) {
-                await this.notifyFinancialDepartment(trackingNumber, trackInfo);
+            // Se o status indica entrega, atualiza Nuvemshop
+            if (safeTrackingData.status.toLowerCase().includes('entregue')) {
+                await this._updateNuvemshopOrderStatus(trackingNumber);
             }
 
-            // Remove informações de taxação antes de retornar ao cliente
-            const safeTrackInfo = this.removeTaxationInfo(trackInfo);
-
-            return safeTrackInfo;
-        } catch (error) {
-            console.error('❌ Erro ao buscar rastreamento:', {
-                codigo: trackingNumber,
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
+            console.log(`[Tracking][${transactionId}] Consulta finalizada com sucesso`, {
+                trackingNumber,
+                status: safeTrackingData.status,
+                hasTaxation
             });
-            return null;
+
+            return safeTrackingData;
+
+        } catch (error) {
+            console.error(`[Tracking][${transactionId}] Erro ao consultar rastreamento`, {
+                trackingNumber,
+                error: error.message,
+                stack: error.stack
+            });
+            throw new Error(`Erro ao consultar status: ${error.message}`);
         }
     }
 
-    removeTaxationInfo(trackInfo) {
-        if (!trackInfo || !trackInfo.events) return trackInfo;
+    /**
+     * Verifica se há eventos de taxação nos dados de rastreamento
+     * @private
+     */
+    _checkForTaxation(trackingData) {
+        const taxationTerms = [
+            'taxa a pagar',
+            'aguardando pagamento',
+            'pagamento de taxas',
+            'tributos',
+            'imposto',
+            'darf'
+        ];
 
-        // Palavras que indicam taxação para filtrar
+        return trackingData.events?.some(event => 
+            taxationTerms.some(term => 
+                event.description?.toLowerCase().includes(term)
+            )
+        );
+    }
+
+    /**
+     * Remove informações sensíveis de taxação dos dados de rastreamento
+     * @private
+     */
+    _removeTaxationInfo(trackingData) {
+        if (!trackingData || !trackingData.events) return trackingData;
+
         const taxationTerms = [
             'taxa',
             'imposto',
@@ -291,8 +294,7 @@ class TrackingService {
             'recolhimento'
         ];
 
-        // Filtra eventos removendo menções a taxação
-        const safeEvents = trackInfo.events.map(event => {
+        const safeEvents = trackingData.events.map(event => {
             if (!event.description) return event;
 
             const hasTaxationTerm = taxationTerms.some(term => 
@@ -300,7 +302,6 @@ class TrackingService {
             );
 
             if (hasTaxationTerm) {
-                // Substitui por mensagem genérica
                 return {
                     ...event,
                     description: 'Em processamento na unidade'
@@ -311,32 +312,34 @@ class TrackingService {
         });
 
         return {
-            ...trackInfo,
+            ...trackingData,
             events: safeEvents
         };
     }
 
-    async notifyFinancialDepartment(trackingNumber, trackInfo) {
+    /**
+     * Processa e notifica eventos de taxação
+     * @private
+     */
+    async _handleTaxationEvent(trackingNumber, trackingData) {
         try {
-            // Checa se já notificou recentemente
+            // Verifica se já notificou recentemente
             const cacheKey = `tax_notification:${trackingNumber}`;
             const lastNotification = await this.redisStore.get(cacheKey);
             
             if (lastNotification) {
-                console.log('ℹ️ Notificação já enviada recentemente:', {
-                    rastreio: trackingNumber,
-                    ultima: new Date(lastNotification).toISOString(),
-                    timestamp: new Date().toISOString()
+                console.log('[Tracking] Notificação de taxação já enviada recentemente', {
+                    trackingNumber,
+                    lastNotification: new Date(lastNotification).toISOString()
                 });
                 return;
             }
 
-            // Busca informações do pedido relacionado
-            const orderInfo = await this.nuvemshopService.getOrderByTrackingNumber(trackingNumber);
+            // Busca informações do pedido
+            const orderInfo = await this.nuvemshopService.findOrderByTracking(trackingNumber);
 
-            const taxationEvent = trackInfo.events.find(event => 
-                event.description?.toLowerCase().includes('taxa') ||
-                event.description?.toLowerCase().includes('tributo')
+            const taxationEvent = trackingData.events.find(event => 
+                this._checkForTaxation({ events: [event] })
             );
 
             // Monta mensagem para o financeiro
@@ -358,29 +361,88 @@ class TrackingService {
             // Guarda no cache que já notificou (24 horas)
             await this.redisStore.set(cacheKey, new Date().toISOString(), 24 * 60 * 60);
 
-            console.log('✅ Notificação de taxação enviada:', {
-                pedido: orderInfo?.number,
-                rastreio: trackingNumber,
-                timestamp: new Date().toISOString()
+            console.log('[Tracking] Notificação de taxação enviada com sucesso', {
+                trackingNumber,
+                orderNumber: orderInfo?.number
             });
         } catch (error) {
-            console.error('❌ Erro ao notificar taxação:', {
-                rastreio: trackingNumber,
-                erro: error.message,
-                timestamp: new Date().toISOString()
+            console.error('[Tracking] Erro ao processar evento de taxação', {
+                trackingNumber,
+                error: error.message
             });
+            // Não propaga o erro para não interromper o fluxo principal
         }
     }
 
+    async processTrackingRequest(trackingNumber, from) {
+        const transactionId = `trk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        console.log(`[Tracking][${transactionId}] Processando requisição de rastreamento`, {
+            trackingNumber,
+            from
+        });
+
+        try {
+            if (!trackingNumber) {
+                throw new Error('Número de rastreamento é obrigatório');
+            }
+
+            // Remove espaços e caracteres especiais do número de rastreamento
+            trackingNumber = trackingNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
+            // Usa o novo método getTrackingInfo que já implementa cache e retry
+            const trackingData = await this.getTrackingInfo(trackingNumber);
+
+            // Se não tem dados de rastreamento
+            if (!trackingData) {
+                const message = 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
+                console.log(`[Tracking][${transactionId}] Rastreamento não encontrado`, {
+                    trackingNumber
+                });
+                return message;
+            }
+
+            // Se não tem eventos
+            if (!trackingData.status) {
+                const message = `📦 *Status do Rastreamento*\n\n*Código:* ${trackingNumber}\n\n_Ainda não há eventos de movimentação registrados._`;
+                console.log(`[Tracking][${transactionId}] Sem eventos de movimentação`, {
+                    trackingNumber
+                });
+                return message;
+            }
+
+            // Formata a resposta com os eventos
+            const formattedResponse = await this._formatTrackingResponse(trackingData, from);
+            
+            console.log(`[Tracking][${transactionId}] Resposta formatada com sucesso`, {
+                trackingNumber,
+                responseLength: formattedResponse.length
+            });
+            
+            return formattedResponse;
+            
+        } catch (error) {
+            console.error(`[Tracking][${transactionId}] Erro ao processar rastreamento`, {
+                trackingNumber,
+                error: error.message,
+                stack: error.stack
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Formata a resposta com os eventos de rastreamento
+     * @private
+     */
     async _formatTrackingResponse(trackInfo, from) {
         try {
             // Formata a resposta com os eventos disponíveis
             let response = `📦 *Status do Rastreamento*\n\n`;
-            response += `*Código:* ${trackInfo.number}\n`;
+            response += `*Código:* ${trackInfo.code}\n`;
             
             // Verifica se está em tributação para encaminhar ao financeiro
             const isCustomsHold = trackInfo.package_status === 'CustomsHold' || 
-                                /tribut|taxa|imposto|aduaneir/i.test(trackInfo.latest_event_info);
+                                /tribut|taxa|imposto|aduaneir/i.test(trackInfo.status);
             
             if (isCustomsHold) {
                 try {
@@ -396,10 +458,10 @@ class TrackingService {
                     // Encaminha para o financeiro
                     const financialMessage = {
                         type: 'tracking_customs',
-                        trackingNumber: trackInfo.number,
+                        trackingNumber: trackInfo.code,
                         status: trackInfo.package_status,
-                        lastUpdate: trackInfo.latest_event_time,
-                        originalMessage: trackInfo.latest_event_info,
+                        lastUpdate: trackInfo.last_update,
+                        originalMessage: trackInfo.status,
                         from: from,
                         orderDetails: orderInfo ? {
                             number: orderInfo.number,
@@ -414,17 +476,20 @@ class TrackingService {
                     
                     // Formata mensagem para o financeiro
                     const financialNotification = `🚨 *Pedido em Tributação*\n\n` +
-                        `📦 Rastreio: ${trackInfo.number}\n` +
+                        `📦 Rastreio: ${trackInfo.code}\n` +
                         `🛍️ Pedido: #${financialMessage.orderDetails.number}\n` +
                         `👤 Cliente: ${financialMessage.orderDetails.customerName}\n` +
                         `📱 Telefone: ${financialMessage.orderDetails.customerPhone}\n` +
-                        `📅 Atualização: ${new Date(trackInfo.latest_event_time).toLocaleString('pt-BR')}\n` +
-                        `📝 Status Original: ${trackInfo.latest_event_info}`;
+                        `📅 Atualização: ${new Date(trackInfo.last_update).toLocaleString('pt-BR')}\n` +
+                        `📝 Status Original: ${trackInfo.status}`;
                     
-                    await this._whatsAppService.forwardToFinancial(financialMessage, financialNotification);
-                    
+                    await this._whatsAppService.forwardToFinancial({ 
+                        body: financialNotification,
+                        from: 'SISTEMA'
+                    }, financialMessage.orderDetails.number);
+
                     console.log('💰 Notificação enviada ao financeiro:', {
-                        rastreio: trackInfo.number,
+                        rastreio: trackInfo.code,
                         pedido: financialMessage.orderDetails.number,
                         cliente: financialMessage.orderDetails.customerName,
                         telefone: financialMessage.orderDetails.customerPhone,
@@ -458,14 +523,14 @@ class TrackingService {
             }
 
             // Adiciona última atualização
-            if (trackInfo.latest_event_time) {
-                const date = new Date(trackInfo.latest_event_time);
+            if (trackInfo.last_update) {
+                const date = new Date(trackInfo.last_update);
                 response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
             }
 
             // Filtra mensagens de tributação/taxação
-            if (trackInfo.latest_event_info) {
-                let situacao = trackInfo.latest_event_info;
+            if (trackInfo.status) {
+                let situacao = trackInfo.status;
                 
                 // Lista de termos para filtrar
                 const termsToReplace = [

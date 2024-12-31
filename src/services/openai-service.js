@@ -539,15 +539,22 @@ class OpenAIService {
                             });
                             break;
                         }
-                        const tracking = await this.trackingService.getTrackingStatus(parsedArgs.tracking_code);
-                        if (!tracking || !tracking.status) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: `Desculpe, não encontrei informações para o código de rastreio ${parsedArgs.tracking_code}. Poderia verificar se o código está correto?`
-                            });
-                        } else {
-                            const status = (tracking.status || '').toLowerCase();
+
+                        try {
+                            // Usa o novo método getTrackingInfo que já implementa cache e retry
+                            const tracking = await this.trackingService.getTrackingInfo(parsedArgs.tracking_code);
+                            
+                            if (!tracking || !tracking.status) {
+                                output = JSON.stringify({
+                                    error: true,
+                                    message: `Desculpe, não encontrei informações para o código de rastreio ${parsedArgs.tracking_code}. Poderia verificar se o código está correto?`
+                                });
+                                break;
+                            }
+
+                            const status = tracking.status.toLowerCase();
                             let statusEmoji = '📦';
+                            
                             if (status.includes('entregue')) {
                                 statusEmoji = '✅';
                             } else if (status.includes('transito') || status.includes('trânsito')) {
@@ -556,13 +563,26 @@ class OpenAIService {
                                 statusEmoji = '📮';
                             }
 
+                            // Formata a mensagem com as informações disponíveis
+                            const message = [
+                                `📬 Informações de Rastreio: ${tracking.code}`,
+                                '',
+                                `${statusEmoji} Status: ${tracking.status}`,
+                                tracking.location ? `📍 Localização: ${tracking.location}` : null,
+                                tracking.last_update ? `🕒 Última Atualização: ${tracking.last_update}` : null,
+                                tracking.message ? `\n📝 Observação: ${tracking.message}` : null
+                            ].filter(Boolean).join('\n');
+
                             output = JSON.stringify({
                                 error: false,
-                                message: `📬 Informações de Rastreio: ${tracking.code || parsedArgs.tracking_code}\n\n` +
-                                        `${statusEmoji} Status: ${tracking.status || 'Status não disponível'}\n` +
-                                        `${tracking.location ? `📍 Localização: ${tracking.location}\n` : ''}` +
-                                        `${tracking.last_update ? `🕒 Última Atualização: ${tracking.last_update}\n` : ''}` +
-                                        `${tracking.message ? `\n📝 Observação: ${tracking.message}` : ''}`
+                                message
+                            });
+
+                        } catch (error) {
+                            console.error('[OpenAI] Erro ao consultar rastreamento:', error);
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'Desculpe, ocorreu um erro ao consultar o rastreamento. Por favor, tente novamente mais tarde.'
                             });
                         }
                         break;
