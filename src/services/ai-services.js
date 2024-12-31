@@ -108,11 +108,15 @@ class AIServices {
                        messageData.body.message?.text;
             }
 
+            // Verifica se é uma mensagem de imagem
+            const isImage = messageData.body?.message?.imageMessage || messageData.type === 'image';
+
             // Valida dados essenciais
-            if (!from || !text) {
+            if (!from || (!text && !isImage)) {
                 console.log('⚠️ Dados inválidos na mensagem:', {
                     from,
                     text,
+                    isImage,
                     messageData: JSON.stringify(messageData, null, 2)
                 });
                 return null;
@@ -120,7 +124,8 @@ class AIServices {
 
             console.log('📨 Mensagem recebida:', {
                 de: from,
-                texto: text,
+                tipo: isImage ? 'imagem' : 'texto',
+                texto: text || '(sem texto)',
                 timestamp: new Date().toISOString()
             });
 

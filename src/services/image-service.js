@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const groqServices = require('./groq-services');
 const settings = require('../config/settings');
+const ImageProcessingService = require('./image-processing-service');
 
 class ImageService {
     constructor(groqServices, whatsappClient) {
@@ -253,12 +254,24 @@ class ImageService {
                 preview: base64Image?.substring(0, 50) + '...'
             });
 
-            // Analisa a imagem com Groq Vision
-            const analysis = await this.groqServices.analyzeImage(base64Image);
+            // Primeiro usa OCR para extrair texto
+            const imageProcessingService = new ImageProcessingService();
+            const extractedText = await imageProcessingService.extractTextFromImage(base64Image);
+            
+            console.log('[ImageService] Texto extraído via OCR:', {
+                hasText: !!extractedText,
+                preview: extractedText?.substring(0, 100) + '...'
+            });
+
+            // Depois analisa com Groq Vision, passando o texto extraído
+            const analysis = await this.groqServices.processImage(base64Image, {
+                extractedText,
+                originalMessage: imageMessage
+            });
             
             console.log('[ImageService] Análise da imagem concluída:', {
                 imageType: analysis.type,
-                hasText: !!analysis.extractedText,
+                hasText: !!extractedText,
                 description: analysis.description?.substring(0, 100) + '...'
             });
 
