@@ -93,55 +93,217 @@ class OrderValidationService {
     /**
      * Extrai e valida número do pedido
      * @param {string|Buffer} input Texto ou buffer de imagem
-     * @returns {Promise<string|null>} Número do pedido validado ou null
+     * @returns {Promise<{orderNumber: string|null, isImage: boolean}>} Número do pedido validado e se veio de imagem
      */
     async extractOrderNumber(input) {
         try {
             let orderNumber = null;
+            let isImage = false;
 
-            // Se for um buffer de imagem
-            if (Buffer.isBuffer(input)) {
-                console.log('[OrderValidation] Processando buffer de imagem para extrair número do pedido');
+            // Se for URL ou buffer de imagem
+            if (typeof input === 'string' && (input.startsWith('http') || input.startsWith('data:'))) {
+                isImage = true;
                 orderNumber = await this.imageProcessor.extractOrderNumber(input);
-            }
-            // Se for uma URL de imagem
-            else if (typeof input === 'string' && input.startsWith('http') && (input.includes('.jpg') || input.includes('.png') || input.includes('.jpeg'))) {
-                console.log('[OrderValidation] Processando URL de imagem para extrair número do pedido');
-                orderNumber = await this.imageProcessor.extractOrderNumber(input);
-            }
+            } 
             // Se for texto
             else if (typeof input === 'string') {
-                // Tenta extrair número do texto - aceita números de 1-8 dígitos
-                const match = input.match(/\b\d{1,8}\b/);
-                orderNumber = match ? match[0] : null;
+                // Remove caracteres especiais e espaços
+                orderNumber = input.replace(/[^0-9]/g, '');
                 
-                if (orderNumber) {
-                    console.log('[OrderValidation] Número do pedido extraído:', {
-                        input,
-                        numero: orderNumber,
-                        timestamp: new Date().toISOString()
-                    });
+                // Verifica se é um número com 4 ou mais dígitos
+                if (!this.isValidOrderNumber(orderNumber)) {
+                    orderNumber = null;
                 }
-            } else {
-                console.log('[OrderValidation] Input inválido:', typeof input);
-                return null;
             }
 
             if (!orderNumber) {
-                console.log('[OrderValidation] Número do pedido não encontrado no input');
-                return null;
+                console.log('[OrderValidation] Número do pedido não encontrado no input:', {
+                    input: typeof input === 'string' ? input.substring(0, 100) : 'Buffer',
+                    isImage
+                });
+                return { orderNumber: null, isImage };
             }
 
-            // Valida o número
-            if (!/^\d+$/.test(orderNumber)) {
-                console.log('[OrderValidation] Número do pedido inválido:', orderNumber);
-                return null;
+            // Verifica se o pedido existe
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            if (!order) {
+                console.log('[OrderValidation] Pedido não encontrado:', orderNumber);
+                return { orderNumber: null, isImage };
             }
 
-            return orderNumber;
+            return { orderNumber, isImage };
+
         } catch (error) {
             console.error('[OrderValidation] Erro ao extrair número do pedido:', error);
-            return null;
+            return { orderNumber: null, isImage: false };
+        }
+    }
+
+    /**
+     * Processa comprovante de pagamento
+     * @param {string} imageUrl URL da imagem do comprovante
+     * @param {string} phoneNumber Número do WhatsApp do cliente
+     * @returns {Promise<{success: boolean, message: string, askForOrder: boolean}>} Resultado do processamento
+     */
+    async processPaymentProof(imageUrl, phoneNumber) {
+        try {
+            // Verifica tentativas
+            if (await this.checkAttempts(phoneNumber)) {
+                return {
+                    success: false,
+                    askForOrder: false,
+                    message: 'Você excedeu o limite de tentativas. Por favor, aguarde alguns minutos.'
+                };
+            }
+
+            // Extrai número do pedido
+            const { orderNumber, isImage } = await this.extractOrderNumber(imageUrl);
+            
+            // Se não encontrou o número do pedido, mas é uma imagem que parece ser um comprovante
+            const isPaymentProof = await this.imageProcessor.isPaymentProof(imageUrl);
+            if (!orderNumber && isPaymentProof) {
+                // Salva a imagem temporariamente
+                const key = `pending_proof:${phoneNumber}`;
+                await this.redisStore.set(key, imageUrl, 3600); // expira em 1 hora
+                
+                return {
+                    success: true,
+                    askForOrder: true,
+                    message: 'Recebi seu comprovante! Por favor, me informe o número do pedido para que eu possa encaminhar ao setor financeiro.'
+                };
+            }
+
+            // Se não é um comprovante
+            if (!orderNumber && !isPaymentProof) {
+                await this.incrementAttempts(phoneNumber);
+                return {
+                    success: false,
+                    askForOrder: false,
+                    message: 'Não foi possível identificar um comprovante de pagamento válido na imagem.'
+                };
+            }
+
+            // Se tem número do pedido, processa normalmente
+            if (orderNumber) {
+                // Busca pedido
+                const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+                
+                // Valida status do pedido
+                if (order.payment_status === 'paid') {
+                    return {
+                        success: false,
+                        askForOrder: false,
+                        message: `O pedido #${orderNumber} já está marcado como pago.`
+                    };
+                }
+
+                if (order.status === 'closed' || order.status === 'cancelled') {
+                    return {
+                        success: false,
+                        askForOrder: false,
+                        message: `O pedido #${orderNumber} já está ${order.status === 'closed' ? 'fechado' : 'cancelado'}.`
+                    };
+                }
+
+                // Encaminha para o financeiro
+                const financial = container.get('financial');
+                await financial.forwardCase({
+                    order_number: orderNumber,
+                    reason: 'payment_proof',
+                    customer_message: 'Cliente enviou comprovante de pagamento',
+                    priority: 'medium',
+                    additional_info: `Comprovante enviado via WhatsApp\nURL: ${imageUrl}`
+                });
+
+                // Reseta tentativas se chegou até aqui
+                await this.resetAttempts(phoneNumber);
+
+                return {
+                    success: true,
+                    askForOrder: false,
+                    message: `Comprovante recebido para o pedido #${orderNumber}. ` +
+                            'Nossa equipe irá analisar e confirmar o pagamento em breve.'
+                };
+            }
+
+        } catch (error) {
+            console.error('[OrderValidation] Erro ao processar comprovante:', error);
+            return {
+                success: false,
+                askForOrder: false,
+                message: 'Ocorreu um erro ao processar o comprovante. Por favor, tente novamente.'
+            };
+        }
+    }
+
+    /**
+     * Processa número do pedido para comprovante pendente
+     * @param {string} orderNumber Número do pedido
+     * @param {string} phoneNumber Número do WhatsApp do cliente
+     * @returns {Promise<{success: boolean, message: string}>} Resultado do processamento
+     */
+    async processPendingProof(orderNumber, phoneNumber) {
+        try {
+            // Busca comprovante pendente
+            const key = `pending_proof:${phoneNumber}`;
+            const imageUrl = await this.redisStore.get(key);
+            
+            if (!imageUrl) {
+                return {
+                    success: false,
+                    message: 'Não encontrei nenhum comprovante pendente. Por favor, envie o comprovante novamente.'
+                };
+            }
+
+            // Remove o comprovante pendente
+            await this.redisStore.del(key);
+
+            // Busca pedido
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            if (!order) {
+                return {
+                    success: false,
+                    message: 'Pedido não encontrado. Por favor, verifique o número e tente novamente.'
+                };
+            }
+
+            // Valida status do pedido
+            if (order.payment_status === 'paid') {
+                return {
+                    success: false,
+                    message: `O pedido #${orderNumber} já está marcado como pago.`
+                };
+            }
+
+            if (order.status === 'closed' || order.status === 'cancelled') {
+                return {
+                    success: false,
+                    message: `O pedido #${orderNumber} já está ${order.status === 'closed' ? 'fechado' : 'cancelado'}.`
+                };
+            }
+
+            // Encaminha para o financeiro
+            const financial = container.get('financial');
+            await financial.forwardCase({
+                order_number: orderNumber,
+                reason: 'payment_proof',
+                customer_message: 'Cliente enviou comprovante de pagamento',
+                priority: 'medium',
+                additional_info: `Comprovante enviado via WhatsApp\nURL: ${imageUrl}`
+            });
+
+            return {
+                success: true,
+                message: `Comprovante vinculado ao pedido #${orderNumber}. ` +
+                        'Nossa equipe irá analisar e confirmar o pagamento em breve.'
+            };
+
+        } catch (error) {
+            console.error('[OrderValidation] Erro ao processar pedido pendente:', error);
+            return {
+                success: false,
+                message: 'Ocorreu um erro ao processar o pedido. Por favor, tente novamente.'
+            };
         }
     }
 
@@ -152,7 +314,7 @@ class OrderValidationService {
      */
     async findOrder(input) {
         try {
-            const orderNumber = await this.extractOrderNumber(input);
+            const { orderNumber } = await this.extractOrderNumber(input);
             if (!orderNumber) {
                 return null;
             }
@@ -637,6 +799,164 @@ class OrderValidationService {
                `- Digite apenas o número do pedido (ex: 12345)\n` +
                `- Verifique no seu email de confirmação\n` +
                `- Se acabou de fazer o pedido, aguarde alguns minutos`;
+    }
+
+    /**
+     * Processa uma imagem recebida
+     * @param {string} imageUrl URL da imagem
+     * @param {string} phoneNumber Número do WhatsApp do cliente
+     * @returns {Promise<{success: boolean, message: string, askForOrder: boolean, imageInfo: Object}>}
+     */
+    async processImage(imageUrl, phoneNumber) {
+        try {
+            // Analisa a imagem
+            const imageInfo = await this.imageProcessor.processImage(imageUrl);
+            
+            // Se for um comprovante de pagamento
+            if (imageInfo.isPaymentProof) {
+                const result = await this.processPaymentProof(imageUrl, phoneNumber);
+                return { ...result, imageInfo };
+            }
+            
+            // Monta mensagem baseada no tipo de imagem
+            let message = '';
+            switch (imageInfo.type) {
+                case 'product_photo':
+                    message = 'Recebi sua foto do calçado! ' +
+                             'Para melhor atendimento, por favor me informe o número do seu pedido.';
+                    break;
+                    
+                case 'foot_photo':
+                    message = 'Recebi sua foto! Para ajudar com a medida do calçado, ' +
+                             'por favor me informe o número do seu pedido.';
+                    break;
+                    
+                case 'size_chart':
+                    message = 'Recebi sua tabela de medidas! ' +
+                             'Por favor, me informe o número do pedido relacionado.';
+                    break;
+                    
+                case 'document':
+                    message = 'Recebi seu documento! ' +
+                             'Por favor, me informe o número do pedido para que eu possa vincular corretamente.';
+                    break;
+                    
+                default:
+                    message = 'Recebi sua imagem! ' +
+                             'Para que eu possa ajudar melhor, por favor me informe o número do seu pedido.';
+            }
+
+            // Se encontrou um número de pedido na imagem
+            if (imageInfo.orderNumber) {
+                const order = await this.nuvemshopService.getOrderByNumber(imageInfo.orderNumber);
+                if (order) {
+                    message += `\n\nIdentifiquei que esta imagem pode estar relacionada ao pedido #${imageInfo.orderNumber}. Isso está correto?`;
+                }
+            }
+
+            // Salva a imagem temporariamente
+            const key = `pending_image:${phoneNumber}`;
+            await this.redisStore.set(key, JSON.stringify({
+                url: imageUrl,
+                type: imageInfo.type,
+                description: imageInfo.description
+            }), 3600); // expira em 1 hora
+
+            return {
+                success: true,
+                askForOrder: true,
+                message,
+                imageInfo
+            };
+
+        } catch (error) {
+            console.error('[OrderValidation] Erro ao processar imagem:', error);
+            return {
+                success: false,
+                askForOrder: false,
+                message: 'Ocorreu um erro ao processar sua imagem. Por favor, tente novamente.',
+                imageInfo: null
+            };
+        }
+    }
+
+    /**
+     * Processa número do pedido para imagem pendente
+     * @param {string} orderNumber Número do pedido
+     * @param {string} phoneNumber Número do WhatsApp do cliente
+     * @returns {Promise<{success: boolean, message: string}>}
+     */
+    async processPendingImage(orderNumber, phoneNumber) {
+        try {
+            // Busca imagem pendente
+            const key = `pending_image:${phoneNumber}`;
+            const pendingImageStr = await this.redisStore.get(key);
+            
+            if (!pendingImageStr) {
+                return {
+                    success: false,
+                    message: 'Não encontrei nenhuma imagem pendente. Por favor, envie a imagem novamente.'
+                };
+            }
+
+            const pendingImage = JSON.parse(pendingImageStr);
+
+            // Remove a imagem pendente
+            await this.redisStore.del(key);
+
+            // Busca pedido
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            if (!order) {
+                return {
+                    success: false,
+                    message: 'Pedido não encontrado. Por favor, verifique o número e tente novamente.'
+                };
+            }
+
+            // Encaminha para o setor apropriado baseado no tipo de imagem
+            let message = '';
+            switch (pendingImage.type) {
+                case 'product_photo':
+                    message = `Foto do calçado vinculada ao pedido #${orderNumber}. ` +
+                             'Nossa equipe de atendimento irá analisar e retornar em breve.';
+                    // TODO: Encaminhar para atendimento
+                    break;
+                    
+                case 'foot_photo':
+                    message = `Foto vinculada ao pedido #${orderNumber}. ` +
+                             'Nossa equipe irá analisar as medidas e retornar em breve.';
+                    // TODO: Encaminhar para equipe de sizing
+                    break;
+                    
+                case 'size_chart':
+                    message = `Tabela de medidas vinculada ao pedido #${orderNumber}. ` +
+                             'Nossa equipe irá analisar e ajudar com a escolha do tamanho ideal.';
+                    // TODO: Encaminhar para equipe de sizing
+                    break;
+                    
+                case 'document':
+                    message = `Documento vinculado ao pedido #${orderNumber}. ` +
+                             'Nossa equipe irá analisar e retornar em breve.';
+                    // TODO: Encaminhar para setor administrativo
+                    break;
+                    
+                default:
+                    message = `Imagem vinculada ao pedido #${orderNumber}. ` +
+                             'Nossa equipe irá analisar e retornar em breve.';
+            }
+
+            return {
+                success: true,
+                message
+            };
+
+        } catch (error) {
+            console.error('[OrderValidation] Erro ao processar pedido para imagem:', error);
+            return {
+                success: false,
+                message: 'Ocorreu um erro ao processar o pedido. Por favor, tente novamente.'
+            };
+        }
     }
 }
 
