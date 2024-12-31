@@ -252,6 +252,32 @@ class OrderApi extends NuvemshopApiBase {
         });
     }
 
+    // Busca pedidos em aberto
+    async getOpenOrders() {
+        try {
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: {
+                    status: 'open',
+                    fields: this.defaultFields,
+                    per_page: 50
+                }
+            });
+
+            if (!response?.data) {
+                return [];
+            }
+
+            return response.data;
+
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao buscar pedidos em aberto:', {
+                error: error.message,
+                stack: error.stack
+            });
+            return [];
+        }
+    }
+
     // Métodos de atualização
     async updateOrderStatus(orderId, status, options = {}) {
         this.validateOrderId(orderId);

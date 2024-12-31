@@ -935,6 +935,11 @@ class NuvemshopService {
             return null;
         }
     }
+
+    // Busca pedidos em aberto
+    async getOpenOrders() {
+        return await this.orderApi.getOpenOrders();
+    }
 }
 
 module.exports = { NuvemshopService };
