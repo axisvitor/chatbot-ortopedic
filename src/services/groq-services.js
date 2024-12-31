@@ -14,7 +14,21 @@ class GroqServices {
             completions: {
                 create: async (params) => {
                     try {
-                        const response = await this.axios.post(GROQ_CONFIG.chatUrl, params, {
+                        // Garante que todos os parâmetros necessários estejam presentes
+                        const payload = {
+                            ...params,
+                            top_p: params.top_p || 1,
+                            stop: params.stop || null,
+                            stream: params.stream || false
+                        };
+
+                        console.log('📤 Enviando requisição para Groq:', {
+                            url: GROQ_CONFIG.chatUrl,
+                            model: payload.model,
+                            timestamp: new Date().toISOString()
+                        });
+
+                        const response = await this.axios.post(GROQ_CONFIG.chatUrl, payload, {
                             headers: {
                                 'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`,
                                 'Content-Type': 'application/json'
@@ -22,13 +36,27 @@ class GroqServices {
                         });
 
                         if (response.status !== 200) {
-                            console.error('❌ Erro na API Groq:', response.status, response.data);
+                            console.error('❌ Erro na API Groq:', {
+                                status: response.status,
+                                data: response.data,
+                                timestamp: new Date().toISOString()
+                            });
                             throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
                         }
 
+                        console.log('✅ Resposta recebida da Groq:', {
+                            status: response.status,
+                            hasChoices: !!response.data?.choices,
+                            timestamp: new Date().toISOString()
+                        });
+
                         return response.data;
                     } catch (error) {
-                        console.error('❌ Erro ao chamar Groq chat completions:', error.message);
+                        console.error('❌ Erro ao chamar Groq chat completions:', {
+                            error: error.message,
+                            stack: error.stack,
+                            timestamp: new Date().toISOString()
+                        });
                         throw error;
                     }
                 }
@@ -86,22 +114,20 @@ class GroqServices {
 
     async processImage(buffer, message, attempt = 1) {
         try {
-            const imageFormat = detectImageFormatFromBuffer(buffer);
+            // Detecta o formato da imagem
+            const imageFormat = await detectImageFormatFromBuffer(buffer);
             if (!imageFormat) {
-                throw new Error('Formato de imagem não suportado.');
+                throw new Error('Formato de imagem não suportado');
             }
-
-            // Log da URL e payload antes da chamada
-            console.log('🔍 Chamando API Groq:', {
-                url: GROQ_CONFIG.visionUrl,
-                model: GROQ_CONFIG.models.vision,
-                imageFormat,
-                bufferSize: buffer.length,
-                timestamp: new Date().toISOString()
-            });
 
             // Converte o buffer para base64
             const base64Image = buffer.toString('base64');
+
+            // Verifica o tamanho do payload base64
+            const base64Size = base64Image.length * 0.75; // Tamanho aproximado em bytes
+            if (base64Size > 4 * 1024 * 1024) { // 4MB limite
+                throw new Error('Imagem muito grande. Máximo permitido: 4MB');
+            }
 
             // Monta o payload no formato correto do Groq Vision
             const payload = {
@@ -113,16 +139,16 @@ class GroqServices {
                             {
                                 type: 'text',
                                 text: 'Analise esta imagem em detalhes. Determine:\n' +
-                                    '1. O tipo da imagem (comprovante de pagamento, foto de calçado, foto de pés para medidas, tabela de medidas/numeração, documento)\n' +
+                                    '1. O tipo da imagem (comprovante de pagamento, foto de calçado, foto de pés para medidas, tabela de medidas/numeração)\n' +
                                     '2. Uma descrição detalhada do que você vê\n' +
                                     '3. Se for um comprovante de pagamento, extraia: valor, data e ID da transação\n' +
-                                    (message?.extractedText ? `\nTexto extraído via OCR: ${message.extractedText}` : '') +
-                                    '\nResponda em formato JSON com os campos: type, description, isPaymentProof, paymentInfo (se aplicável)'
+                                    (message?.extractedText ? `\nTexto extraído via OCR: ${message.extractedText}` : '')
                             },
                             {
                                 type: 'image_url',
                                 image_url: {
-                                    url: `data:${imageFormat};base64,${base64Image}`
+                                    url: `data:${imageFormat};base64,${base64Image}`,
+                                    detail: "high"
                                 }
                             }
                         ]
@@ -131,8 +157,16 @@ class GroqServices {
                 temperature: 0.2,
                 max_tokens: 1024,
                 top_p: 0.2,
-                stream: false
+                stream: false,
+                response_format: { "type": "json_object" }
             };
+
+            console.log('📤 Enviando imagem para análise:', {
+                imageFormat,
+                base64Size: Math.round(base64Size / 1024) + 'KB',
+                hasOCR: !!message?.extractedText,
+                timestamp: new Date().toISOString()
+            });
 
             const response = await this.axios.post(GROQ_CONFIG.visionUrl, payload, {
                 headers: {
@@ -143,45 +177,39 @@ class GroqServices {
             });
 
             if (response.status !== 200) {
-                console.error(`❌ Erro na API Groq (Tentativa ${attempt}):`, response.status, response.data);
+                console.error(`❌ Erro na API Groq (Tentativa ${attempt}):`, {
+                    status: response.status,
+                    data: response.data,
+                    timestamp: new Date().toISOString()
+                });
                 throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
             }
 
             // Processa a resposta
             const content = response.data.choices[0].message.content;
-            let analysis;
-            try {
-                analysis = JSON.parse(content);
-            } catch (e) {
-                console.warn('⚠️ Erro ao parsear JSON da resposta:', e);
-                // Tenta extrair informações básicas mesmo se o JSON for inválido
-                analysis = {
-                    type: content.toLowerCase().includes('comprovante') ? 'payment_proof' : 'unknown',
-                    description: content,
-                    isPaymentProof: content.toLowerCase().includes('comprovante'),
-                    paymentInfo: null
-                };
-            }
-
-            return {
-                ...analysis,
-                originalMessage: message
-            };
-
-        } catch (error) {
-            console.error(`❌ Erro ao processar imagem (Tentativa ${attempt}):`, {
-                erro: error.message,
-                status: error.response?.status,
-                data: error.response?.data,
+            
+            console.log('✅ Análise concluída:', {
+                responseLength: content.length,
                 timestamp: new Date().toISOString()
             });
 
-            // Só tenta novamente se não for erro 404
-            if (error.response?.status !== 404 && attempt < 3) {
+            return JSON.parse(content); // Agora retorna um objeto JSON estruturado
+
+        } catch (error) {
+            console.error(`❌ Erro ao processar imagem (Tentativa ${attempt}):`, {
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+
+            // Tenta novamente se não excedeu o número máximo de tentativas
+            if (attempt < 3) {
+                console.log(`🔄 Tentando novamente (${attempt + 1}/3)...`);
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                 return this.processImage(buffer, message, attempt + 1);
             }
-            throw new Error(`Falha ao processar imagem após ${attempt} tentativas: ${error.message}`);
+
+            throw error;
         }
     }
 

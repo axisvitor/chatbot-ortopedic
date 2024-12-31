@@ -622,11 +622,11 @@ Por favor, forneça uma análise estruturada e detalhada focando no contexto de 
 
             console.log('📤 Enviando requisição para Groq Vision...', {
                 timestamp: new Date().toISOString(),
-                modelVersion: "llama-3.2-11b-vision-preview"
+                modelVersion: "llama-3.2-90b-vision-preview"
             });
 
             const response = await this.groqServices.chat.completions.create({
-                model: "llama-3.2-11b-vision-preview",
+                model: "llama-3.2-90b-vision-preview",
                 messages: messages,
                 temperature: 0.7,
                 max_tokens: 1024,
