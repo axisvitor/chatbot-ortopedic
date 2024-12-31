@@ -1,7 +1,7 @@
 const { createWorker } = require('tesseract.js');
 const axios = require('axios');
-const { OpenAI } = require('openai');
-const OPENAI_CONFIG = require('./openai.config');
+const OpenAI = require('openai');
+const { OPENAI_CONFIG } = require('../config/settings');
 
 class ImageProcessingService {
     constructor() {
