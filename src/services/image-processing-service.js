@@ -115,68 +115,101 @@ class ImageProcessingService {
     /**
      * Analisa uma imagem usando modelo fine-tuned com visão
      * @param {string} imageUrl URL da imagem
-     * @returns {Promise<{type: string, description: string}>} Tipo e descrição da imagem
+     * @returns {Promise<{type: string, description: string, extractedText: string, paymentInfo: {amount: string|null, date: string|null, transactionId: string|null}}>}
      */
     async analyzeImage(imageUrl) {
         try {
+            // Primeiro, vamos usar o OCR para extrair texto
+            const extractedText = await this.extractTextFromImage(imageUrl);
+
+            // Em seguida, vamos usar o GPT-4 Vision para análise visual
             const response = await this.openai.chat.completions.create({
-                model: "ft:gpt-4o-2024-08-06:gest-o-jd::AgY9wrxj",
+                model: "gpt-4-vision-preview",
                 messages: [
-                    {
-                        role: "system",
-                        content: "Você é um assistente especializado em analisar imagens para um e-commerce de calçados."
-                    },
                     {
                         role: "user",
                         content: [
                             {
                                 type: "text",
-                                text: "Identifique o tipo desta imagem:\n" +
-                                      "- Se for um comprovante de pagamento (PIX, transferência, etc)\n" +
-                                      "- Se for uma foto de calçado\n" + 
-                                      "- Se for uma foto de pés para medidas\n" +
-                                      "- Se for uma tabela de medidas/numeração\n" +
-                                      "- Se for um documento\n" +
-                                      "Descreva detalhadamente o que você vê na imagem."
+                                text: "Analise esta imagem e me diga o tipo dela. Pode ser:\n" +
+                                    "1. Comprovante de pagamento (PIX, transferência, etc)\n" +
+                                    "2. Foto de calçado\n" +
+                                    "3. Foto de pés para medidas\n" +
+                                    "4. Tabela de medidas/numeração\n" +
+                                    "5. Documento\n\n" +
+                                    "Texto extraído via OCR: " + extractedText
                             },
                             {
                                 type: "image_url",
-                                image_url: imageUrl
+                                image_url: imageUrl,
                             }
                         ]
                     }
                 ],
-                max_tokens: 300
+                max_tokens: 1000
             });
 
             const analysis = response.choices[0].message.content;
-            
-            // Categoriza a imagem com base na análise
-            const types = {
-                payment_proof: /(comprovante|recibo|pagamento|pix|transferência|transacao)/i,
-                product_photo: /(calçado|sapato|tênis|tenis|sandália|sandalia|chinelo|bota|sapatilha|tamanco)/i,
-                foot_photo: /(pé|pe|pés|pes|calcanhar|dedos|tornozelo|medida)/i,
-                size_chart: /(tabela|medida|tamanho|numeração|numeracao)/i,
-                document: /(documento|identidade|cpf|rg|carteira)/i
+
+            // Classificação da imagem baseada na análise do GPT e no texto OCR
+            let imageType = 'unknown';
+            let details = {
+                type: 'unknown',
+                description: analysis,
+                extractedText: extractedText
             };
 
-            let imageType = 'other';
-            for (const [type, pattern] of Object.entries(types)) {
-                if (pattern.test(analysis)) {
-                    imageType = type;
-                    break;
-                }
+            // Classificação baseada em palavras-chave do OCR e análise do GPT
+            if (
+                /comprovante|pagamento|transferência|pix|recibo/i.test(extractedText) ||
+                /comprovante|pagamento|transferência|pix|recibo/i.test(analysis)
+            ) {
+                details.type = 'payment_proof';
+                // Extrair informações específicas do comprovante
+                details.paymentInfo = {
+                    amount: this.extractAmount(extractedText),
+                    date: this.extractDate(extractedText),
+                    transactionId: this.extractTransactionId(extractedText)
+                };
+            } else if (
+                /calçado|sapato|tênis|chinelo/i.test(analysis)
+            ) {
+                details.type = 'product_photo';
+            } else if (
+                /medida.*p[ée]|p[ée].*medida/i.test(analysis)
+            ) {
+                details.type = 'foot_measurement';
+            } else if (
+                /tabela|numeração|tamanho/i.test(analysis)
+            ) {
+                details.type = 'size_chart';
+            } else if (
+                /documento|rg|cpf|identidade/i.test(analysis)
+            ) {
+                details.type = 'document';
             }
 
-            return {
-                type: imageType,
-                description: analysis
-            };
-
+            return details;
         } catch (error) {
             console.error('[ImageProcessing] Erro ao analisar imagem:', error);
             throw error;
         }
+    }
+
+    extractAmount(text) {
+        const match = text.match(/R\$\s*([\d,.]+)/i);
+        return match ? match[1] : null;
+    }
+
+    extractDate(text) {
+        const match = text.match(/\d{2}\/\d{2}\/\d{4}/);
+        return match ? match[0] : null;
+    }
+
+    extractTransactionId(text) {
+        const match = text.match(/ID:?\s*([A-Za-z0-9]+)/i) || 
+                     text.match(/Transação:?\s*([A-Za-z0-9]+)/i);
+        return match ? match[1] : null;
     }
 
     /**
@@ -187,7 +220,7 @@ class ImageProcessingService {
     async processImage(imageUrl) {
         try {
             // Analisa a imagem com Vision
-            const { type, description } = await this.analyzeImage(imageUrl);
+            const { type, description, extractedText, paymentInfo } = await this.analyzeImage(imageUrl);
             
             // Tenta extrair número do pedido
             const orderNumber = await this.extractOrderNumber(imageUrl);
@@ -199,7 +232,8 @@ class ImageProcessingService {
                 type,
                 description,
                 orderNumber,
-                isPaymentProof
+                isPaymentProof,
+                paymentInfo
             };
 
         } catch (error) {
