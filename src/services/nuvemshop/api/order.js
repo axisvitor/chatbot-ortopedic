@@ -56,14 +56,18 @@ class OrderApi extends NuvemshopApiBase {
     async getOrderByNumber(orderNumber) {
         this.validateOrderNumber(orderNumber);
         
+        // Remove tudo que não for número
+        const cleanNumber = String(orderNumber).replace(/[^\d]/g, '');
+        
         // Gera as chaves do cache
-        const cacheKey = `${this.cachePrefix}number:${orderNumber}`;
+        const cacheKey = `${this.cachePrefix}number:${cleanNumber}`;
         
         // Tenta buscar do cache primeiro
         const cachedOrder = await this.cacheService.get(cacheKey);
         if (cachedOrder) {
             console.log('[Nuvemshop] Pedido encontrado no cache:', {
-                numero: orderNumber,
+                numeroOriginal: orderNumber,
+                numeroLimpo: cleanNumber,
                 timestamp: new Date().toISOString()
             });
             return JSON.parse(cachedOrder);
@@ -71,51 +75,73 @@ class OrderApi extends NuvemshopApiBase {
 
         try {
             console.log('[Nuvemshop] Buscando pedido:', {
-                numero: orderNumber,
-                timestamp: new Date().toISOString(),
-                url: `${NUVEMSHOP_CONFIG.apiUrl}/orders`,
-                token: NUVEMSHOP_CONFIG.accessToken.substring(0, 10) + '...'
+                numeroOriginal: orderNumber,
+                numeroLimpo: cleanNumber,
+                timestamp: new Date().toISOString()
             });
 
-            // Busca pelo endpoint correto de busca
-            const response = await this.client.get('/orders', {
+            // Busca usando o endpoint de busca geral primeiro
+            const searchResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params: {
-                    number: orderNumber,
+                    q: cleanNumber,
                     fields: this.defaultFields
                 }
             });
 
-            if (!response?.data || !Array.isArray(response.data) || response.data.length === 0) {
+            // Se não encontrar nada, tenta buscar diretamente pelo número
+            if (!searchResponse?.data || !Array.isArray(searchResponse.data) || searchResponse.data.length === 0) {
+                const directResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                    params: {
+                        number: cleanNumber,
+                        fields: this.defaultFields
+                    }
+                });
+
+                if (!directResponse?.data || !Array.isArray(directResponse.data) || directResponse.data.length === 0) {
+                    console.log('[Nuvemshop] Pedido não encontrado:', {
+                        numeroOriginal: orderNumber,
+                        numeroLimpo: cleanNumber,
+                        timestamp: new Date().toISOString()
+                    });
+                    return null;
+                }
+
+                const order = directResponse.data[0];
+                await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
+                return order;
+            }
+
+            // Encontra o pedido com o número exato
+            const order = searchResponse.data.find(o => 
+                String(o.number).replace(/[^\d]/g, '') === cleanNumber
+            );
+
+            if (!order) {
                 console.log('[Nuvemshop] Pedido não encontrado:', {
-                    numero: orderNumber,
-                    timestamp: new Date().toISOString(),
-                    resposta: response.data
+                    numeroOriginal: orderNumber,
+                    numeroLimpo: cleanNumber,
+                    timestamp: new Date().toISOString()
                 });
                 return null;
             }
 
-            // Como filtramos pelo número exato, deve retornar apenas um pedido
-            const order = response.data[0];
-            
-            // Salva no cache por 5 minutos
+            // Salva no cache
             await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
-            
-            console.log('[Nuvemshop] Pedido encontrado:', {
-                numero: orderNumber,
-                id: order.id,
-                status: order.status,
-                rastreio: order.shipping_tracking_number
-            });
-            
             return order;
 
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
-                numero: orderNumber,
+                numeroOriginal: orderNumber,
+                numeroLimpo: cleanNumber,
                 erro: error.message,
-                status: error.response?.status,
+                stack: error.stack,
+                resposta: error.response?.data,
                 timestamp: new Date().toISOString()
             });
+
+            if (error.response?.status === 404) {
+                return null;
+            }
             throw error;
         }
     }

@@ -90,22 +90,10 @@ class NuvemshopService {
                 timestamp: new Date().toISOString()
             });
 
-            // Primeiro busca o ID do pedido usando o endpoint de busca
-            const searchResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
-                params: { q: cleanOrderNumber }
-            });
+            // Delega a busca para o OrderApi que já tem toda a lógica implementada
+            const order = await this.orderApi.getOrderByNumber(cleanOrderNumber);
 
-            if (!searchResponse?.data || !Array.isArray(searchResponse.data)) {
-                console.log('[Nuvemshop] Nenhum resultado encontrado na busca');
-                return null;
-            }
-
-            // Encontra o pedido com o número exato (comparando apenas números)
-            const matchingOrder = searchResponse.data.find(order => 
-                String(order.number).replace(/[^\d]/g, '') === cleanOrderNumber
-            );
-
-            if (!matchingOrder) {
+            if (!order) {
                 console.log('[Nuvemshop] Pedido não encontrado:', {
                     numeroOriginal: orderNumber,
                     numeroLimpo: cleanOrderNumber,
@@ -114,27 +102,17 @@ class NuvemshopService {
                 return null;
             }
 
-            // Busca os detalhes completos usando o ID do pedido
-            const detailResponse = await this.client.get(
-                `/${NUVEMSHOP_CONFIG.userId}/orders/${matchingOrder.id}`
-            );
-
-            if (!detailResponse?.data) {
-                console.log('[Nuvemshop] Detalhes do pedido não encontrados');
-                return matchingOrder; // Retorna os dados básicos se não conseguir os detalhes
-            }
-
             console.log('[Nuvemshop] Pedido encontrado:', {
                 numeroOriginal: orderNumber,
                 numeroLimpo: cleanOrderNumber,
-                numeroPedido: detailResponse.data.number,
-                id: detailResponse.data.id,
-                status: detailResponse.data.status,
-                cliente: detailResponse.data.customer?.name || 'Não informado',
+                numeroPedido: order.number,
+                id: order.id,
+                status: order.status,
+                cliente: order.customer?.name || 'Não informado',
                 timestamp: new Date().toISOString()
             });
 
-            return detailResponse.data;
+            return order;
 
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
