@@ -652,6 +652,86 @@ class OpenAIService {
             return false;
         }
     }
+
+    /**
+     * Obtém ou cria uma thread para o cliente
+     * @param {string} customerId - ID do cliente
+     * @returns {Promise<string>} ID da thread
+     */
+    async getOrCreateThreadForCustomer(customerId) {
+        try {
+            // Tenta obter thread existente
+            let threadId = await this.redisStore.getThreadForCustomer(customerId);
+            
+            if (!threadId) {
+                // Cria nova thread se não existir
+                const thread = await this.createThread();
+                threadId = thread.id;
+                
+                // Salva no Redis com TTL de 60 dias
+                await this.redisStore.setThreadForCustomer(customerId, threadId, 5184000); // 60 dias em segundos
+                
+                console.log('[OpenAI] Nova thread criada:', {
+                    customerId,
+                    threadId
+                });
+            } else {
+                console.log('[OpenAI] Thread existente recuperada:', {
+                    customerId,
+                    threadId
+                });
+            }
+            
+            return threadId;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao obter/criar thread:', {
+                customerId,
+                erro: error.message,
+                stack: error.stack
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Processa uma mensagem do cliente
+     * @param {string} customerId - ID do cliente
+     * @param {string} message - Mensagem do cliente
+     * @returns {Promise<string>} Resposta do assistant
+     */
+    async processCustomerMessage(customerId, message) {
+        try {
+            const threadId = await this.getOrCreateThreadForCustomer(customerId);
+            
+            return await this.addMessageAndRun(threadId, {
+                role: 'user',
+                content: message
+            });
+        } catch (error) {
+            console.error('[OpenAI] Erro ao processar mensagem:', {
+                customerId,
+                erro: error.message,
+                stack: error.stack
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Exporta todas as threads para análise
+     * @returns {Promise<Array>} Lista de metadados das threads
+     */
+    async exportThreadsMetadata() {
+        try {
+            return await this.redisStore.getAllThreadMetadata();
+        } catch (error) {
+            console.error('[OpenAI] Erro ao exportar metadados:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            return [];
+        }
+    }
 }
 
 module.exports = { OpenAIService };

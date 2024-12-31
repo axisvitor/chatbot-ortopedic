@@ -299,6 +299,86 @@ class RedisStore {
             return false;
         }
     }
+
+    async setThreadForCustomer(customerId, threadId) {
+        try {
+            const key = `openai:customer_threads:${customerId}`;
+            const ttl = 60 * 24 * 60 * 60; // 60 dias em segundos
+            await this.client.set(key, threadId, {
+                EX: ttl
+            });
+            
+            // Armazena também o timestamp de criação para análise
+            const metaKey = `openai:thread_meta:${threadId}`;
+            const metadata = {
+                customerId,
+                createdAt: new Date().toISOString(),
+                expiresAt: new Date(Date.now() + ttl * 1000).toISOString()
+            };
+            await this.client.set(metaKey, JSON.stringify(metadata), {
+                EX: ttl
+            });
+            
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao salvar thread do cliente:', {
+                customerId,
+                threadId,
+                erro: error.message,
+                stack: error.stack
+            });
+            return false;
+        }
+    }
+
+    async getThreadForCustomer(customerId) {
+        try {
+            const key = `openai:customer_threads:${customerId}`;
+            const threadId = await this.client.get(key);
+            
+            if (threadId) {
+                // Atualiza o TTL para mais 60 dias
+                const ttl = 60 * 24 * 60 * 60;
+                await this.client.expire(key, ttl);
+                
+                // Atualiza também o TTL dos metadados
+                const metaKey = `openai:thread_meta:${threadId}`;
+                await this.client.expire(metaKey, ttl);
+            }
+            
+            return threadId;
+        } catch (error) {
+            console.error('[Redis] Erro ao buscar thread do cliente:', {
+                customerId,
+                erro: error.message,
+                stack: error.stack
+            });
+            return null;
+        }
+    }
+
+    async getAllThreadMetadata() {
+        try {
+            const pattern = 'openai:thread_meta:*';
+            const keys = await this.client.keys(pattern);
+            const metadata = [];
+            
+            for (const key of keys) {
+                const value = await this.client.get(key);
+                if (value) {
+                    metadata.push(JSON.parse(value));
+                }
+            }
+            
+            return metadata;
+        } catch (error) {
+            console.error('[Redis] Erro ao buscar metadados das threads:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            return [];
+        }
+    }
 }
 
 module.exports = { RedisStore };
