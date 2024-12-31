@@ -408,6 +408,11 @@ class OpenAIService {
                                        ` - R$ ${price}`;
                             }).join('\n');
 
+                            // Formata o valor total com segurança
+                            const total = typeof order.total === 'number' ? 
+                                order.total.toFixed(2) : 
+                                String(order.total).replace(/[^\d.,]/g, '');
+
                             output = JSON.stringify({
                                 error: false,
                                 message: `🛍 Detalhes do Pedido #${order.number}\n\n` +
@@ -420,7 +425,7 @@ class OpenAIService {
                                             minute: '2-digit'
                                         })}\n` +
                                         `📦 Status: ${order.status}\n` +
-                                        `💰 Valor Total: R$ ${order.total.toFixed(2)}\n\n` +
+                                        `💰 Valor Total: R$ ${total}\n\n` +
                                         `Produtos:\n${products}` +
                                         `${deliveryStatus}`
                             });
@@ -546,6 +551,11 @@ class OpenAIService {
                                    ` - R$ ${price}`;
                         }).join('\n');
 
+                        // Formata o valor total com segurança
+                        const total = typeof extractedOrder.total === 'number' ? 
+                            extractedOrder.total.toFixed(2) : 
+                            String(extractedOrder.total).replace(/[^\d.,]/g, '');
+
                         output = JSON.stringify({
                             error: false,
                             message: `🛍 Detalhes do Pedido #${extractedOrder.number}\n\n` +
@@ -558,7 +568,7 @@ class OpenAIService {
                                         minute: '2-digit'
                                     })}\n` +
                                     `📦 Status: ${extractedOrder.status}\n` +
-                                    `💰 Valor Total: R$ ${extractedOrder.total.toFixed(2)}\n\n` +
+                                    `💰 Valor Total: R$ ${total}\n\n` +
                                     `Produtos:\n${products}` +
                                     `${deliveryStatus}`
                         });
