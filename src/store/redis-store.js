@@ -251,6 +251,54 @@ class RedisStore {
             throw error;
         }
     }
+
+    async getActiveRun(threadId) {
+        try {
+            const key = `openai:active_runs:${threadId}`;
+            const value = await this.client.get(key);
+            return value;
+        } catch (error) {
+            console.error('[Redis] Erro ao buscar run ativo:', {
+                threadId,
+                erro: error.message,
+                stack: error.stack
+            });
+            return null;
+        }
+    }
+
+    async setActiveRun(threadId, runId, ttl = 3600) {
+        try {
+            const key = `openai:active_runs:${threadId}`;
+            await this.client.set(key, runId, {
+                EX: ttl // expira em 1 hora por padrão
+            });
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao salvar run ativo:', {
+                threadId,
+                runId,
+                erro: error.message,
+                stack: error.stack
+            });
+            return false;
+        }
+    }
+
+    async removeActiveRun(threadId) {
+        try {
+            const key = `openai:active_runs:${threadId}`;
+            await this.client.del(key);
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao remover run ativo:', {
+                threadId,
+                erro: error.message,
+                stack: error.stack
+            });
+            return false;
+        }
+    }
 }
 
 module.exports = { RedisStore };
