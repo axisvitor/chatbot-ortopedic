@@ -411,282 +411,47 @@ class AIServices {
      */
     async handleImageMessage(message) {
         try {
-            if (!message) {
-                throw new Error('Mensagem inválida');
+            const { de: from } = message;
+            console.log('📨 Processando mensagem de imagem:', { de: from });
+
+            // Obtém o histórico do chat
+            const chatHistory = await this.getChatHistory(from);
+
+            // Baixa a imagem
+            const imageBuffer = await this.whatsAppImageService.downloadImage(message);
+            if (!imageBuffer) {
+                throw new Error('Não foi possível baixar a imagem');
             }
 
-            const { from, type, messageId } = message;
+            // Converte para base64
+            const base64Image = imageBuffer.toString('base64');
 
-            // Log detalhado da mensagem recebida
-            console.log('🖼️ Mensagem de imagem recebida:', {
-                messageId,
-                from,
-                type,
-                hasMessage: !!message.message,
-                hasImageMessage: !!message.message?.imageMessage,
-                timestamp: new Date().toISOString()
-            });
+            // Analisa a imagem com Groq Vision
+            const imageAnalysis = await this.analyzeImageWithGroq(base64Image);
+            console.log('📝 Análise da imagem:', imageAnalysis);
 
-            // Verifica se temos o objeto de mensagem completo
-            if (!message.message?.imageMessage) {
-                console.error('❌ Objeto de imagem não encontrado:', {
-                    messageId,
-                    from,
-                    messageKeys: Object.keys(message),
-                    timestamp: new Date().toISOString()
-                });
-                throw new Error('Objeto de imagem não encontrado na mensagem');
+            if (!imageAnalysis) {
+                throw new Error('Não foi possível analisar a imagem');
             }
-
-            // Baixa a imagem primeiro para evitar repetição de código
-            const buffer = await this.whatsAppService.downloadMediaMessage(message);
-            if (!buffer || buffer.length < 100) {
-                throw new Error('Buffer da imagem inválido ou muito pequeno');
-            }
-
-            // Converte para base64 uma única vez
-            const base64Image = buffer.toString('base64');
-
-            // Verifica se está esperando comprovante
-            const waitingFor = await this.redisStore.get(`waiting_order:${from}`);
-            const pendingOrder = await this.redisStore.get(`pending_order:${from}`);
-
-            // Analisa com Groq para verificar se é um comprovante
-            const analysis = await this.analyzeImageWithGroq(base64Image);
-            
-            console.log('🔍 Análise da imagem:', {
-                analysis,
-                hasContent: !!analysis,
-                analysisLength: analysis?.length,
-                timestamp: new Date().toISOString()
-            });
-
-            if (!analysis) {
-                console.error('❌ Análise da imagem retornou vazia');
-                await this.whatsAppService.sendText(
-                    from,
-                    'Desculpe, não consegui analisar esta imagem. Pode tentar enviar novamente?'
-                );
-                return;
-            }
-
-            // Formata a mensagem para o OpenAI
-            const messageContent = [
-                {
-                    type: "text",
-                    text: `[Análise de Imagem]\n${analysis}`
-                }
-            ];
-            
-            // Obtém ou cria thread para o usuário
-            const threadId = await this.openAIService.getOrCreateThreadForCustomer(from);
-            
-            console.log('📝 Enviando análise para OpenAI:', {
-                threadId,
-                contentLength: JSON.stringify(messageContent).length,
-                timestamp: new Date().toISOString() 
-            });
 
             // Envia a análise para o OpenAI Assistant
-            await this.openAIService.addMessageAndRun(threadId, {
+            const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
                 role: 'user',
-                content: messageContent
-            });
-
-            const isPaymentProof = analysis.toLowerCase().includes('comprovante') || 
-                                 analysis.toLowerCase().includes('pagamento') ||
-                                 analysis.toLowerCase().includes('transferência') ||
-                                 analysis.toLowerCase().includes('pix');
-
-            if (isPaymentProof) {
-                console.log('💰 Comprovante de pagamento detectado');
-
-                // Se já está esperando comprovante e tem número do pedido
-                if (waitingFor === 'payment_proof' && pendingOrder) {
-                    // Valida o pedido
-                    const order = await this.validateOrderForReceipt(from, pendingOrder);
-                    if (order) {
-                        // Encaminha para o financeiro
-                        await this.openAIService.handleToolCalls({
-                            function_call: {
-                                name: 'forward_to_financial',
-                                arguments: JSON.stringify({
-                                    order_number: pendingOrder,
-                                    reason: 'payment_proof',
-                                    customer_message: `Cliente enviou comprovante de pagamento.\n\nAnálise da imagem:\n${analysis}`,
-                                    priority: 'high',
-                                    additional_info: analysis
-                                })
-                            }
-                        }, from);
-
-                        // Limpa o estado
-                        await this.redisStore.del(`waiting_order:${from}`);
-                        await this.redisStore.del(`pending_order:${from}`);
-
-                        await this.whatsAppService.sendText(
-                            from,
-                            '✅ Comprovante recebido e encaminhado para análise! Em breve nossa equipe financeira irá verificar.'
-                        );
-                        return;
-                    } else {
-                        await this.whatsAppService.sendText(
-                            from,
-                            '❌ Não encontrei o pedido informado ou ele não pertence a você. Por favor, verifique o número e tente novamente.'
-                        );
-                        return;
-                    }
-                }
-                
-                // Se não estava esperando ou não tem número do pedido
-                await this.openAIService.handleToolCalls({
-                    function_call: {
-                        name: 'request_payment_proof',
-                        arguments: JSON.stringify({
-                            action: 'request',
-                            reason: 'payment_analysis'
-                        })
-                    }
-                }, from);
-
-                // Salva o comprovante temporariamente
-                const proofKey = `payment_proof:${from}`;
-                await this.redisStore.set(proofKey, base64Image, 'EX', 300); // Expira em 5 minutos
-
-                return;
-            }
-
-            // Se não é comprovante ou não estava esperando um
-            // Tenta extrair número do pedido
-            const orderNumber = await this.orderValidationService.extractOrderNumber(buffer);
-            if (orderNumber) {
-                console.log(`🔍 Número do pedido encontrado na imagem: ${orderNumber}`);
-                const orderInfo = await this.orderValidationService.findOrder(orderNumber);
-                
-                if (orderInfo) {
-                    await this.handleOrderInfo(from, orderInfo);
-                    return;
-                }
-            }
-
-            // Se chegou aqui, é uma imagem comum
-            // Atualiza o histórico com a análise
-            const threadKey = `chat:${from}`;
-            let chatHistory = await this.getChatHistory(from);
-            
-            chatHistory.messages = chatHistory.messages || [];
-            chatHistory.messages.unshift(
-                {
-                    role: 'user',
-                    content: 'Analisar imagem',
-                    type: 'image',
-                    timestamp: new Date().toISOString()
-                },
-                {
-                    role: 'assistant',
-                    content: analysis,
-                    timestamp: new Date().toISOString()
-                }
-            );
-
-            chatHistory.lastUpdate = new Date().toISOString();
-            await this.redisStore.set(threadKey, JSON.stringify(chatHistory));
-
-            // Envia a análise para o usuário
-            await this.whatsAppService.sendText(
-                from,
-                `🖼️ *Análise da imagem:*\n\n${analysis}`
-            );
-
-        } catch (error) {
-            console.error('[AI] Erro ao processar imagem:', error);
-            try {
-                await this.whatsAppService.sendText(
-                    message.from,
-                    'Desculpe, não consegui processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.'
-                );
-            } catch (sendError) {
-                console.error('❌ Erro ao enviar mensagem de erro:', sendError);
-            }
-        }
-    }
-
-    /**
-     * Analisa uma imagem usando o Groq Vision
-     * @param {string} base64Image Imagem em base64
-     * @returns {Promise<string>} Análise da imagem
-     */
-    async analyzeImageWithGroq(base64Image) {
-        try {
-            console.log('📸 Iniciando análise de imagem com Groq...');
-            
-            if (!base64Image) {
-                throw new Error('Imagem não fornecida para análise');
-            }
-
-            const response = await this.groqServices.chat.completions.create({
-                model: "llama-3.2-90b-vision-preview",
-                messages: [
+                content: [
                     {
-                        role: "user",
-                        content: [
-                            {
-                            type: "text",
-                            text: `Analise esta imagem detalhadamente e me forneça as seguintes informações:
-
-1. Tipo de Imagem/Documento:
-   - Identifique se é um comprovante de pagamento
-   - Foto de calçado
-   - Foto dos pés para medidas
-   - Tabela de medidas/numeração
-   - Outro tipo de documento
-
-2. Se for um comprovante de pagamento:
-   - Valor da transação
-   - Data e hora
-   - Tipo de transação (PIX, TED, etc)
-   - Banco ou instituição
-   - Nome do beneficiário (se visível)
-   - Status da transação
-
-3. Se for uma foto de calçado ou pés:
-   - Descrição do calçado ou características dos pés
-   - Detalhes visíveis importantes
-   - Qualidade e clareza da imagem
-   - Ângulo da foto
-   - Se há régua ou referência de medida
-
-4. Se for uma tabela de medidas:
-   - Tipo de medida (comprimento, largura)
-   - Numerações visíveis
-   - Clareza das informações
-
-Por favor, forneça uma análise estruturada e detalhada focando no contexto de uma loja de calçados.`
-                        },
-                        {
-                            type: "image_url",
-                            image_url: {
-                                "url": `data:image/jpeg;base64,${base64Image}`,
-                                "detail": "high"
-                            }
-                            }
-                        ]
+                        type: 'text',
+                        text: 'Análise da imagem enviada:\n' + imageAnalysis
                     }
-                ],
-                max_tokens: 1000,
-                temperature: 0.7
+                ]
             });
 
-            console.log('✅ Análise de imagem concluída com sucesso');
-            
-            if (!response?.choices?.[0]?.message?.content) {
-                throw new Error('Resposta inválida da API Groq');
+            if (response) {
+                await this.sendResponse(from, response);
             }
 
-            return response.choices[0].message.content;
         } catch (error) {
-            console.error('❌ Erro ao analisar imagem com Groq:', error);
-            throw new Error('Não foi possível analisar a imagem no momento.');
+            console.error('❌ Erro ao processar imagem:', error);
+            throw error;
         }
     }
 

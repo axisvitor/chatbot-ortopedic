@@ -22,9 +22,29 @@ class GroqServices {
                             stream: params.stream || false
                         };
 
+                        // Valida a presença de mensagens
+                        if (!payload.messages || !Array.isArray(payload.messages) || payload.messages.length === 0) {
+                            throw new Error('Messages array é obrigatório e não pode estar vazio');
+                        }
+
+                        // Valida cada mensagem
+                        payload.messages.forEach((msg, index) => {
+                            if (!msg.role || !msg.content) {
+                                throw new Error(`Mensagem ${index} inválida: role e content são obrigatórios`);
+                            }
+                            if (Array.isArray(msg.content)) {
+                                msg.content.forEach((content, contentIndex) => {
+                                    if (!content.type || (content.type === 'text' && !content.text)) {
+                                        throw new Error(`Conteúdo ${contentIndex} da mensagem ${index} inválido`);
+                                    }
+                                });
+                            }
+                        });
+
                         console.log('📤 Enviando requisição para Groq:', {
                             url: GROQ_CONFIG.chatUrl,
                             model: payload.model,
+                            messagesCount: payload.messages.length,
                             timestamp: new Date().toISOString()
                         });
 
@@ -35,29 +55,30 @@ class GroqServices {
                             }
                         });
 
-                        if (response.status !== 200) {
-                            console.error('❌ Erro na API Groq:', {
-                                status: response.status,
-                                data: response.data,
-                                timestamp: new Date().toISOString()
-                            });
-                            throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
+                        if (!response.data || !response.data.choices || response.data.choices.length === 0) {
+                            throw new Error('Resposta da API Groq não contém choices');
                         }
 
                         console.log('✅ Resposta recebida da Groq:', {
                             status: response.status,
-                            hasChoices: !!response.data?.choices,
+                            choicesCount: response.data.choices.length,
+                            firstChoiceLength: response.data.choices[0]?.message?.content?.length,
                             timestamp: new Date().toISOString()
                         });
 
                         return response.data;
+
                     } catch (error) {
-                        console.error('❌ Erro ao chamar Groq chat completions:', {
-                            error: error.message,
-                            stack: error.stack,
+                        console.error('❌ Erro ao chamar API Groq:', {
+                            message: error.message,
+                            status: error.response?.status,
+                            data: error.response?.data,
                             timestamp: new Date().toISOString()
                         });
-                        throw error;
+                        
+                        // Formata a mensagem de erro para ser mais útil
+                        const errorMessage = error.response?.data?.error?.message || error.message;
+                        throw new Error(`Erro na API Groq: ${errorMessage}`);
                     }
                 }
             }

@@ -306,15 +306,35 @@ class OpenAIService {
                     message.content?.length
             });
 
-            // Se o conteúdo for uma string, converte para o formato esperado
-            const content = typeof message.content === 'string' ? 
-                [{ type: 'text', text: message.content }] : 
-                message.content;
+            // Valida a mensagem
+            if (!message.content) {
+                throw new Error('Conteúdo da mensagem não pode ser vazio');
+            }
 
+            // Se o conteúdo for uma string, converte para o formato esperado
+            let content = message.content;
+            if (typeof content === 'string') {
+                content = [{ type: 'text', text: content }];
+            }
+
+            // Valida o formato do conteúdo
+            if (!Array.isArray(content)) {
+                throw new Error('Conteúdo da mensagem deve ser uma string ou um array de objetos');
+            }
+
+            // Valida cada item do array
+            content.forEach((item, index) => {
+                if (!item.type || !item.text) {
+                    throw new Error(`Item ${index} do conteúdo inválido: deve ter type e text`);
+                }
+            });
+
+            // Cria a mensagem
             await this.client.beta.threads.messages.create(threadId, {
                 role: message.role,
                 content: content
             });
+
         } catch (error) {
             console.error('[OpenAI] Erro ao adicionar mensagem:', error);
             throw error;
