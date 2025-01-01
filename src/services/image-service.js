@@ -132,6 +132,37 @@ class ImageService {
     }
 
     /**
+     * Processa e prepara uma imagem para envio à API Groq
+     * @param {Buffer} buffer - Buffer da imagem
+     * @param {string} mimetype - Tipo MIME da imagem
+     * @returns {Promise<string>} Imagem em base64 pronta para Groq
+     */
+    async processImageForGroq(buffer, mimetype) {
+        try {
+            console.log('🔄 Processando imagem para Groq:', {
+                tamanhoOriginal: buffer.length,
+                tipo: mimetype
+            });
+
+            // Validação
+            await this.validateImage(buffer, mimetype);
+            
+            // Compressão se necessário
+            const processedBuffer = await this.compressImage(buffer);
+            
+            console.log('✅ Imagem processada com sucesso:', {
+                tamanhoFinal: processedBuffer.length
+            });
+
+            // Conversão para base64
+            return processedBuffer.toString('base64');
+        } catch (error) {
+            console.error('❌ Erro ao processar imagem para Groq:', error);
+            throw new Error('Falha ao processar imagem para análise');
+        }
+    }
+
+    /**
      * Detecta se uma imagem é um comprovante
      * @param {string} analysis - Análise da imagem pelo Groq
      * @returns {boolean} true se for comprovante

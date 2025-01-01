@@ -8,6 +8,7 @@ const { OrderValidationService } = require('./order-validation-service');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { GroqServices } = require('./groq-services');
 const { AudioService } = require('./audio-service');
+const { ImageService } = require('./image-service');
 
 class AIServices {
     constructor(whatsAppService, whatsAppImageService, redisStore, openAIService, trackingService, orderValidationService, nuvemshopService, businessHoursService) {
@@ -26,6 +27,7 @@ class AIServices {
         );
         this.audioService = new AudioService();
         this.groqServices = new GroqServices();
+        this.imageService = new ImageService();
     }
 
     /**
@@ -92,6 +94,39 @@ class AIServices {
 
     async handleMessage(messageData) {
         try {
+            console.log('📨 Processando mensagem:', {
+                tipo: messageData.type,
+                de: messageData.from,
+                temImagem: !!messageData.imageUrl
+            });
+
+            // Se for mensagem de imagem
+            if (messageData.type === 'image' && messageData.imageUrl) {
+                console.log('🖼️ Processando mensagem de imagem...');
+                try {
+                    // Download da imagem
+                    const imageBuffer = await this.whatsAppImageService.downloadImage(messageData.imageUrl);
+                    
+                    // Processa e valida a imagem
+                    const processedImage = await this.imageService.processImageForGroq(imageBuffer, 'image/jpeg');
+                    
+                    // Análise com Groq
+                    const analysis = await this.analyzeImageWithGroq(processedImage);
+                    
+                    // Envia resposta
+                    await this.sendResponse(messageData.from, analysis);
+                    return;
+                } catch (error) {
+                    console.error('❌ Erro ao processar imagem:', error);
+                    await this.sendResponse(
+                        messageData.from,
+                        'Desculpe, não consegui analisar sua imagem. Por favor, verifique se a imagem está nítida e tente novamente.'
+                    );
+                    return;
+                }
+            }
+
+            // Continua com o processamento normal para outros tipos de mensagem
             // Extrai dados da mensagem
             let from, text;
 
@@ -567,95 +602,45 @@ class AIServices {
      */
     async analyzeImageWithGroq(base64Image) {
         try {
-            console.log('🔄 Iniciando análise de imagem com Groq Vision...', {
-                timestamp: new Date().toISOString(),
-                imageSize: base64Image.length
-            });
-
-            const messages = [
-                {
-                    role: "user", 
-                    content: [
-                        {
-                            type: "text",
-                            text: `Analise esta imagem detalhadamente e me forneça as seguintes informações:
-
-1. Tipo de Imagem/Documento:
-   - Identifique se é um comprovante de pagamento
-   - Foto de calçado
-   - Foto dos pés para medidas
-   - Tabela de medidas/numeração
-   - Outro tipo de documento
-
-2. Se for um comprovante de pagamento:
-   - Valor da transação
-   - Data e hora
-   - Tipo de transação (PIX, TED, etc)
-   - Banco ou instituição
-   - Nome do beneficiário (se visível)
-   - Status da transação
-
-3. Se for uma foto de calçado ou pés:
-   - Descrição do calçado ou características dos pés
-   - Detalhes visíveis importantes
-   - Qualidade e clareza da imagem
-   - Ângulo da foto
-   - Se há régua ou referência de medida
-
-4. Se for uma tabela de medidas:
-   - Tipo de medida (comprimento, largura)
-   - Numerações visíveis
-   - Clareza das informações
-
-Por favor, forneça uma análise estruturada e detalhada focando no contexto de uma loja de calçados.`
-                        },
-                        {
-                            type: "image_url",
-                            image_url: {
-                                "url": `data:image/jpeg;base64,${base64Image}`,
-                                "detail": "high"
-                            }
-                        }
-                    ]
-                }
-            ];
-
-            console.log('📤 Enviando requisição para Groq Vision...', {
-                timestamp: new Date().toISOString(),
-                modelVersion: "llama-3.2-90b-vision-preview"
-            });
-
-            const response = await this.groqServices.chat.completions.create({
-                model: "llama-3.2-90b-vision-preview",
-                messages: messages,
-                temperature: 0.7,
-                max_tokens: 1024,
-                stream: false
-            });
-
-            if (!response?.choices?.[0]?.message?.content) {
-                console.error('❌ Resposta inválida da Groq:', {
-                    response,
-                    timestamp: new Date().toISOString()
-                });
-                throw new Error('Resposta inválida da Groq');
+            console.log('📸 Iniciando análise de imagem com Groq...');
+            
+            if (!base64Image) {
+                throw new Error('Imagem não fornecida para análise');
             }
 
-            const analysis = response.choices[0].message.content;
-            
-            console.log('✅ Análise concluída com sucesso:', {
-                analysisLength: analysis.length,
-                timestamp: new Date().toISOString()
+            const response = await this.groqServices.chat.completions.create({
+                model: "mixtral-8x7b-32768",
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "image",
+                                image_url: {
+                                    url: `data:image/jpeg;base64,${base64Image}`
+                                }
+                            },
+                            {
+                                type: "text",
+                                text: "Analise esta imagem de calçado e forneça detalhes sobre: tipo, cor, marca (se visível), características principais e condição geral."
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 1000,
+                temperature: 0.7
             });
 
-            return analysis;
+            console.log('✅ Análise de imagem concluída com sucesso');
+            
+            if (!response?.choices?.[0]?.message?.content) {
+                throw new Error('Resposta inválida da API Groq');
+            }
+
+            return response.choices[0].message.content;
         } catch (error) {
-            console.error('❌ Erro ao analisar imagem com Groq:', {
-                error: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
-            throw error;
+            console.error('❌ Erro ao analisar imagem com Groq:', error);
+            throw new Error('Não foi possível analisar a imagem no momento.');
         }
     }
 

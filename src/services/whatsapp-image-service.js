@@ -68,12 +68,50 @@ class WhatsAppImageService {
     }
 
     /**
+     * Faz o download de uma imagem do WhatsApp
+     * @param {string} url URL da imagem
+     * @returns {Promise<Buffer>} Buffer da imagem
+     */
+    async downloadImage(url) {
+        try {
+            console.log('📥 Iniciando download da imagem:', {
+                url: url.substring(0, 50) + '...' // Log parcial da URL por segurança
+            });
+
+            const response = await this.axios.get(url, {
+                responseType: 'arraybuffer',
+                timeout: 30000 // 30 segundos
+            });
+
+            if (!response.data) {
+                throw new Error('Download da imagem falhou - sem dados');
+            }
+
+            const buffer = Buffer.from(response.data);
+
+            console.log('✅ Download concluído:', {
+                tamanho: buffer.length,
+                tipo: response.headers['content-type']
+            });
+
+            return buffer;
+        } catch (error) {
+            console.error('❌ Erro ao fazer download da imagem:', {
+                erro: error.message,
+                status: error.response?.status,
+                headers: error.response?.headers
+            });
+            throw new Error('Não foi possível baixar a imagem do WhatsApp');
+        }
+    }
+
+    /**
      * Baixa uma imagem do WhatsApp com retry e validação completa
      * @param {string} url - URL da imagem
      * @param {Object} mediaInfo - Informações da mídia do WhatsApp
      * @returns {Promise<{buffer: Buffer, metadata: Object}>} Buffer da imagem e metadados
      */
-    async downloadImage(url, mediaInfo) {
+    async downloadImageWithValidation(url, mediaInfo) {
         try {
             // Valida e processa atributos
             const validatedMedia = this.validateMediaAttributes(mediaInfo);
