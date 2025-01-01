@@ -297,12 +297,26 @@ class OpenAIService {
      */
     async addMessage(threadId, message) {
         try {
+            console.log('[OpenAI] Adicionando mensagem:', {
+                threadId,
+                role: message.role,
+                contentType: Array.isArray(message.content) ? 'array' : typeof message.content,
+                contentLength: Array.isArray(message.content) ? 
+                    JSON.stringify(message.content).length : 
+                    message.content?.length
+            });
+
+            // Se o conteúdo for uma string, converte para o formato esperado
+            const content = typeof message.content === 'string' ? 
+                [{ type: 'text', text: message.content }] : 
+                message.content;
+
             await this.client.beta.threads.messages.create(threadId, {
                 role: message.role,
-                content: message.content
+                content: content
             });
         } catch (error) {
-            console.error(' Erro ao adicionar mensagem:', error);
+            console.error('[OpenAI] Erro ao adicionar mensagem:', error);
             throw error;
         }
     }

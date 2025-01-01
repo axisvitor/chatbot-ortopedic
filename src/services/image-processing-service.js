@@ -32,14 +32,23 @@ class ImageProcessingService {
                 messages: [
                     {
                         role: "system",
-                        content: "Você é um assistente especializado em analisar imagens. Extraia todo o texto visível da imagem e forneça uma descrição detalhada do que você vê. Se for um comprovante de pagamento, extraia informações relevantes como valor, data e tipo de transação."
+                        content: [
+                            "Você é um assistente especializado em analisar imagens e extrair informações relevantes.",
+                            "Se for um comprovante de pagamento:",
+                            "- Extraia o valor, data, tipo de transação e outras informações relevantes",
+                            "- Indique claramente se é um comprovante válido",
+                            "Se for outro tipo de imagem:",
+                            "- Descreva o conteúdo em detalhes",
+                            "- Extraia qualquer texto visível",
+                            "Sempre forneça uma resposta estruturada e clara."
+                        ].join("\n")
                     },
                     {
                         role: "user",
                         content: [
                             {
                                 type: "text",
-                                text: "Por favor, analise esta imagem em detalhes, extraindo todo o texto visível e descrevendo o que você vê."
+                                text: "Analise esta imagem em detalhes, extraindo todo o texto visível e descrevendo o que você vê."
                             },
                             {
                                 type: "image_url",
@@ -54,22 +63,37 @@ class ImageProcessingService {
                 temperature: 0.2
             });
 
-            console.log('[ImageProcessing] Resposta completa da Groq:', JSON.stringify(completion, null, 2));
+            console.log('[ImageProcessing] Resposta da Groq recebida');
             
             const analysis = completion.choices[0]?.message?.content;
             
-            if (!analysis) {
+            if (!analysis || analysis.trim().length === 0) {
                 console.error('[ImageProcessing] Resposta da Groq não contém análise:', completion);
                 throw new Error('Análise da imagem retornou vazia');
             }
 
-            console.log('[ImageProcessing] Análise da imagem:', analysis);
-            console.log('[ImageProcessing] Análise concluída com sucesso');
+            // Valida se a resposta tem um tamanho mínimo razoável
+            if (analysis.length < 50) {
+                console.warn('[ImageProcessing] Análise muito curta:', analysis);
+                throw new Error('Análise da imagem muito curta ou incompleta');
+            }
+
+            console.log('[ImageProcessing] Análise da imagem:', {
+                length: analysis.length,
+                preview: analysis.substring(0, 100) + '...'
+            });
+
             return analysis;
 
         } catch (error) {
-            console.error('[ImageProcessing] Erro ao extrair texto da imagem:', error);
-            throw error;
+            console.error('[ImageProcessing] Erro ao extrair texto da imagem:', {
+                message: error.message,
+                stack: error.stack,
+                response: error.response?.data
+            });
+            
+            // Retorna uma mensagem mais amigável para o usuário
+            throw new Error('Não foi possível analisar a imagem. Por favor, tente enviar novamente ou envie uma imagem diferente.');
         }
     }
 

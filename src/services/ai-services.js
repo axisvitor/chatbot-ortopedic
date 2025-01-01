@@ -471,14 +471,19 @@ class AIServices {
             }
 
             // Formata a mensagem para o OpenAI
-            const messageContent = `[Análise de Imagem]\n${analysis}`;
+            const messageContent = [
+                {
+                    type: "text",
+                    text: `[Análise de Imagem]\n${analysis}`
+                }
+            ];
             
             // Obtém ou cria thread para o usuário
             const threadId = await this.openAIService.getOrCreateThreadForCustomer(from);
             
             console.log('📝 Enviando análise para OpenAI:', {
                 threadId,
-                contentLength: messageContent.length,
+                contentLength: JSON.stringify(messageContent).length,
                 timestamp: new Date().toISOString() 
             });
 
