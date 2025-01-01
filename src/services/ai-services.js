@@ -456,8 +456,19 @@ class AIServices {
             
             console.log('🔍 Análise da imagem:', {
                 analysis,
+                hasContent: !!analysis,
+                analysisLength: analysis?.length,
                 timestamp: new Date().toISOString()
             });
+
+            if (!analysis) {
+                console.error('❌ Análise da imagem retornou vazia');
+                await this.whatsAppService.sendText(
+                    from,
+                    'Desculpe, não consegui analisar esta imagem. Pode tentar enviar novamente?'
+                );
+                return;
+            }
 
             // Formata a mensagem para o OpenAI
             const messageContent = `[Análise de Imagem]\n${analysis}`;
