@@ -40,7 +40,6 @@
     "openai": "^4.26.0",
     "redis": "^4.6.12",
     "sharp": "^0.33.2",
-    "tesseract.js": "^5.0.4",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

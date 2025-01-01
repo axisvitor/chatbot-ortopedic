@@ -1,42 +1,68 @@
-const { createWorker } = require('tesseract.js');
 const axios = require('axios');
 const OpenAI = require('openai');
 const { OPENAI_CONFIG, GROQ_CONFIG } = require('../config/settings');
 
 class ImageProcessingService {
     constructor() {
-        this.worker = null;
         this.openai = new OpenAI({
             apiKey: GROQ_CONFIG.apiKey,
             baseURL: GROQ_CONFIG.baseUrl
         });
     }
 
-    async initialize() {
-        if (!this.worker) {
-            this.worker = await createWorker('por');
-            await this.worker.loadLanguage('por');
-            await this.worker.initialize('por');
-        }
-    }
-
     /**
-     * Extrai texto de uma imagem
+     * Extrai texto de uma imagem usando Groq Vision
      * @param {string} imageUrl URL da imagem
-     * @returns {Promise<string>} Texto extraído
+     * @returns {Promise<string>} Texto extraído e análise da imagem
      */
     async extractTextFromImage(imageUrl) {
         try {
-            await this.initialize();
+            console.log('[ImageProcessing] Iniciando extração de texto com Groq Vision:', {
+                url: imageUrl.substring(0, 50) + '...'
+            });
             
             // Baixa a imagem
             const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
             const buffer = Buffer.from(response.data);
+            const base64Image = buffer.toString('base64');
 
-            // Processa a imagem com Tesseract
-            const { data: { text } } = await this.worker.recognize(buffer);
+            // Analisa a imagem com Groq Vision
+            const completion = await this.openai.chat.completions.create({
+                model: "mixtral-8x7b-32768",
+                messages: [
+                    {
+                        role: "system",
+                        content: "Você é um assistente especializado em analisar imagens. Extraia todo o texto visível da imagem e forneça uma descrição detalhada do que você vê. Se for um comprovante de pagamento, extraia informações relevantes como valor, data e tipo de transação."
+                    },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: "Por favor, analise esta imagem em detalhes, extraindo todo o texto visível e descrevendo o que você vê."
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:image/jpeg;base64,${base64Image}`
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 1024,
+                temperature: 0.2
+            });
+
+            const analysis = completion.choices[0]?.message?.content;
             
-            return text;
+            if (!analysis) {
+                throw new Error('Análise da imagem retornou vazia');
+            }
+
+            console.log('[ImageProcessing] Análise concluída com sucesso');
+            return analysis;
+
         } catch (error) {
             console.error('[ImageProcessing] Erro ao extrair texto da imagem:', error);
             throw error;
@@ -44,46 +70,13 @@ class ImageProcessingService {
     }
 
     /**
-     * Extrai número do pedido de uma imagem
+     * Verifica se uma imagem é um comprovante de pagamento
      * @param {string} imageUrl URL da imagem
-     * @returns {Promise<string|null>} Número do pedido ou null se não encontrado
-     */
-    async extractOrderNumber(imageUrl) {
-        try {
-            const text = await this.extractTextFromImage(imageUrl);
-            
-            // Procura por padrões comuns de número de pedido
-            const patterns = [
-                /pedido\s+(\d{4,})/i,           // "pedido 1234"
-                /pedido\s+número\s+(\d{4,})/i,  // "pedido número 1234"
-                /pedido\s+#?(\d{4,})/i,         // "pedido #1234"
-                /número\s+(\d{4,})/i,           // "número 1234"
-                /[#]?(\d{4,})/                  // apenas dígitos ou #1234
-            ];
-
-            for (const pattern of patterns) {
-                const match = text.match(pattern);
-                if (match && match[1]) {
-                    return match[1];
-                }
-            }
-
-            console.log('[ImageProcessing] Texto extraído mas número não encontrado:', text);
-            return null;
-        } catch (error) {
-            console.error('[ImageProcessing] Erro ao extrair número do pedido:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Verifica se uma imagem parece ser um comprovante de pagamento
-     * @param {string} imageUrl URL da imagem
-     * @returns {Promise<boolean>} True se parece ser um comprovante
+     * @returns {Promise<boolean>} true se for um comprovante
      */
     async isPaymentProof(imageUrl) {
         try {
-            const text = await this.extractTextFromImage(imageUrl);
+            const analysis = await this.extractTextFromImage(imageUrl);
             
             // Lista de palavras-chave comuns em comprovantes
             const keywords = [
@@ -102,7 +95,7 @@ class ImageProcessingService {
             ];
 
             // Conta quantas palavras-chave foram encontradas
-            const matches = keywords.filter(keyword => keyword.test(text)).length;
+            const matches = keywords.filter(keyword => keyword.test(analysis)).length;
             
             // Se encontrou pelo menos 3 palavras-chave, considera como comprovante
             return matches >= 3;
@@ -110,6 +103,37 @@ class ImageProcessingService {
         } catch (error) {
             console.error('[ImageProcessing] Erro ao verificar comprovante:', error);
             return false;
+        }
+    }
+
+    /**
+     * Extrai número do pedido de uma imagem
+     * @param {string} imageUrl URL da imagem
+     * @returns {Promise<string|null>} Número do pedido ou null se não encontrado
+     */
+    async extractOrderNumber(imageUrl) {
+        try {
+            const analysis = await this.extractTextFromImage(imageUrl);
+            
+            // Procura por padrões de número de pedido
+            const patterns = [
+                /pedido[:\s]+#?(\d+)/i,
+                /ordem[:\s]+#?(\d+)/i,
+                /order[:\s]+#?(\d+)/i,
+                /#(\d{4,})/
+            ];
+
+            for (const pattern of patterns) {
+                const match = analysis.match(pattern);
+                if (match && match[1]) {
+                    return match[1];
+                }
+            }
+
+            return null;
+        } catch (error) {
+            console.error('[ImageProcessing] Erro ao extrair número do pedido:', error);
+            return null;
         }
     }
 
@@ -240,13 +264,6 @@ class ImageProcessingService {
         } catch (error) {
             console.error('[ImageProcessing] Erro ao processar imagem:', error);
             throw error;
-        }
-    }
-
-    async terminate() {
-        if (this.worker) {
-            await this.worker.terminate();
-            this.worker = null;
         }
     }
 }
