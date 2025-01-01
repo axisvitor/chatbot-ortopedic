@@ -434,15 +434,13 @@ class AIServices {
                 throw new Error('Não foi possível analisar a imagem');
             }
 
+            // Formata a mensagem para o OpenAI Assistant
+            const messageContent = `Análise da imagem enviada pelo usuário:\n\n${imageAnalysis}\n\nPor favor, analise essas informações e responda ao usuário de forma clara e objetiva.`;
+
             // Envia a análise para o OpenAI Assistant
             const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
                 role: 'user',
-                content: [
-                    {
-                        type: 'text',
-                        text: 'Análise da imagem enviada:\n' + imageAnalysis
-                    }
-                ]
+                content: messageContent
             });
 
             if (response) {
@@ -451,7 +449,7 @@ class AIServices {
 
         } catch (error) {
             console.error('❌ Erro ao processar imagem:', error);
-            throw error;
+            await this.sendResponse(from, 'Desculpe, não consegui processar sua imagem. Por favor, tente enviar novamente ou envie uma mensagem de texto.');
         }
     }
 
@@ -630,6 +628,66 @@ class AIServices {
             `  Preço unitário: R$ ${(item.price / 100).toFixed(2)}\n` +
             `  Total: R$ ${(item.total / 100).toFixed(2)}`
         ).join('\n\n');
+    }
+
+    /**
+     * Analisa uma imagem usando o Groq Vision
+     * @param {string} base64Image Imagem em base64
+     * @returns {Promise<string>} Análise da imagem
+     */
+    async analyzeImageWithGroq(base64Image) {
+        try {
+            const response = await this.groqServices.chat.completions.create({
+                model: "llama-3.2-90b-vision-preview",
+                messages: [
+                    {
+                        role: "system",
+                        content: [
+                            {
+                                type: "text",
+                                text: [
+                                    "Você é um assistente especializado em analisar imagens e extrair informações relevantes.",
+                                    "Se for um comprovante de pagamento:",
+                                    "- Extraia o valor, data, tipo de transação e outras informações relevantes",
+                                    "- Indique claramente se é um comprovante válido",
+                                    "Se for outro tipo de imagem:",
+                                    "- Descreva o conteúdo em detalhes",
+                                    "- Extraia qualquer texto visível",
+                                    "Sempre forneça uma resposta estruturada e clara."
+                                ].join("\n")
+                            }
+                        ]
+                    },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: "Analise esta imagem em detalhes, extraindo todo o texto visível e descrevendo o que você vê."
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:image/jpeg;base64,${base64Image}`
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 1024,
+                temperature: 0.2
+            });
+
+            if (!response?.choices?.[0]?.message?.content) {
+                throw new Error('Resposta inválida do Groq Vision');
+            }
+
+            return response.choices[0].message.content;
+
+        } catch (error) {
+            console.error('❌ Erro ao analisar imagem com Groq:', error);
+            throw error;
+        }
     }
 }
 
