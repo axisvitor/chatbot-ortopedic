@@ -638,7 +638,7 @@ class AIServices {
                         content: [
                             {
                                 type: "text",
-                                text: "Você é um assistente especializado em analisar imagens e extrair informações relevantes. Forneça uma análise clara e objetiva do que você vê na imagem."
+                                text: "Você é um assistente especializado em analisar imagens. Para comprovantes de pagamento: extraia valor, data, tipo de transação e outras informações relevantes. Para outras imagens: descreva o conteúdo detalhadamente e extraia qualquer texto visível. Sempre forneça uma resposta estruturada e clara."
                             }
                         ]
                     },
@@ -647,7 +647,7 @@ class AIServices {
                         content: [
                             {
                                 type: "text",
-                                text: "Analise esta imagem em detalhes, extraindo todo o texto visível e descrevendo o que você vê."
+                                text: "Por favor, analise esta imagem em detalhes. Se for um comprovante de pagamento, extraia todas as informações relevantes como valor, data, tipo de transação, etc. Se for outro tipo de imagem, descreva seu conteúdo e extraia qualquer texto visível."
                             },
                             {
                                 type: "image_url",

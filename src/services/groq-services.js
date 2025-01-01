@@ -17,7 +17,8 @@ class GroqServices {
                         // Garante que todos os parâmetros necessários estejam presentes
                         const payload = {
                             ...params,
-                            top_p: params.top_p || 1,
+                            top_p: params.top_p || 0.8,
+                            temperature: params.temperature || 0.2,
                             stop: params.stop || null,
                             stream: params.stream || false
                         };
@@ -27,19 +28,15 @@ class GroqServices {
                             throw new Error('Messages array é obrigatório e não pode estar vazio');
                         }
 
-                        // Valida cada mensagem
-                        payload.messages.forEach((msg, index) => {
-                            if (!msg.role || !msg.content) {
-                                throw new Error(`Mensagem ${index} inválida: role e content são obrigatórios`);
-                            }
-                            if (Array.isArray(msg.content)) {
-                                msg.content.forEach((content, contentIndex) => {
-                                    if (!content.type || (content.type === 'text' && !content.text)) {
-                                        throw new Error(`Conteúdo ${contentIndex} da mensagem ${index} inválido`);
-                                    }
-                                });
-                            }
-                        });
+                        // Adiciona instruções específicas para análise de imagem
+                        if (payload.messages[0].role === 'system') {
+                            payload.messages[0].content = [
+                                {
+                                    type: "text",
+                                    text: "Você é um assistente especializado em analisar imagens. Para comprovantes de pagamento: extraia valor, data, tipo de transação e outras informações relevantes. Para outras imagens: descreva o conteúdo detalhadamente e extraia qualquer texto visível. Sempre forneça uma resposta estruturada e clara."
+                                }
+                            ];
+                        }
 
                         console.log('📤 Enviando requisição para Groq:', {
                             url: GROQ_CONFIG.chatUrl,
@@ -75,10 +72,7 @@ class GroqServices {
                             data: error.response?.data,
                             timestamp: new Date().toISOString()
                         });
-                        
-                        // Formata a mensagem de erro para ser mais útil
-                        const errorMessage = error.response?.data?.error?.message || error.message;
-                        throw new Error(`Erro na API Groq: ${errorMessage}`);
+                        throw new Error(`Erro na API Groq: ${error.response?.data?.error?.message || error.message}`);
                     }
                 }
             }
