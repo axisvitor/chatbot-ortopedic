@@ -405,10 +405,6 @@ class AIServices {
         }
     }
 
-    /**
-     * Processa uma mensagem de imagem
-     * @param {Object} message Mensagem recebida
-     */
     async handleImageMessage(message) {
         try {
             const { de: from } = message;
@@ -434,13 +430,10 @@ class AIServices {
                 throw new Error('Não foi possível analisar a imagem');
             }
 
-            // Formata a mensagem para o OpenAI Assistant
-            const messageContent = `Análise da imagem enviada pelo usuário:\n\n${imageAnalysis}\n\nPor favor, analise essas informações e responda ao usuário de forma clara e objetiva.`;
-
             // Envia a análise para o OpenAI Assistant
             const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
                 role: 'user',
-                content: messageContent
+                content: imageAnalysis
             });
 
             if (response) {
@@ -645,16 +638,7 @@ class AIServices {
                         content: [
                             {
                                 type: "text",
-                                text: [
-                                    "Você é um assistente especializado em analisar imagens e extrair informações relevantes.",
-                                    "Se for um comprovante de pagamento:",
-                                    "- Extraia o valor, data, tipo de transação e outras informações relevantes",
-                                    "- Indique claramente se é um comprovante válido",
-                                    "Se for outro tipo de imagem:",
-                                    "- Descreva o conteúdo em detalhes",
-                                    "- Extraia qualquer texto visível",
-                                    "Sempre forneça uma resposta estruturada e clara."
-                                ].join("\n")
+                                text: "Você é um assistente especializado em analisar imagens e extrair informações relevantes. Forneça uma análise clara e objetiva do que você vê na imagem."
                             }
                         ]
                     },
@@ -675,7 +659,8 @@ class AIServices {
                     }
                 ],
                 max_tokens: 1024,
-                temperature: 0.2
+                temperature: 0.2,
+                top_p: 0.8
             });
 
             if (!response?.choices?.[0]?.message?.content) {
