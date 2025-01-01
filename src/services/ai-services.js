@@ -97,11 +97,12 @@ class AIServices {
             console.log('📨 Processando mensagem:', {
                 tipo: messageData.type,
                 de: messageData.from,
-                temImagem: !!messageData.imageUrl
+                temImagem: !!messageData.imageUrl,
+                temTexto: !!messageData.text
             });
 
             // Se for mensagem de imagem
-            if (messageData.type === 'image' && messageData.imageUrl) {
+            if (messageData.type === 'image') {
                 console.log('🖼️ Processando mensagem de imagem...');
                 try {
                     // Download da imagem
@@ -112,9 +113,21 @@ class AIServices {
                     
                     // Análise com Groq
                     const analysis = await this.analyzeImageWithGroq(processedImage);
+
+                    // Se tiver texto junto com a imagem, inclui na análise
+                    let response;
+                    if (messageData.text) {
+                        response = await this.openAIService.addMessageAndRun({
+                            role: "user",
+                            content: `Analisando a imagem enviada: ${analysis}\n\nMensagem do usuário: ${messageData.text}`
+                        });
+                    } else {
+                        // Se não tiver texto, envia apenas a análise da imagem
+                        response = analysis;
+                    }
                     
                     // Envia resposta
-                    await this.sendResponse(messageData.from, analysis);
+                    await this.sendResponse(messageData.from, response);
                     return;
                 } catch (error) {
                     console.error('❌ Erro ao processar imagem:', error);
@@ -126,7 +139,13 @@ class AIServices {
                 }
             }
 
-            // Continua com o processamento normal para outros tipos de mensagem
+            // Se não tiver texto, não envia para o ChatGPT
+            if (!messageData.text) {
+                console.log('⚠️ Mensagem sem texto, ignorando ChatGPT');
+                return;
+            }
+
+            // Continua com o processamento normal para mensagens de texto
             // Extrai dados da mensagem
             let from, text;
 
