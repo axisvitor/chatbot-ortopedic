@@ -8,12 +8,7 @@ const ImageProcessingService = require('./image-processing-service');
 
 class ImageService {
     constructor(groqServices, whatsappClient) {
-        if (!groqServices) {
-            throw new Error('GroqServices é obrigatório');
-        }
-        if (!whatsappClient) {
-            throw new Error('WhatsappClient é obrigatório');
-        }
+        // Removendo validações obrigatórias
         this.groqServices = groqServices;
         this.whatsappClient = whatsappClient;
         this.MAX_RETRIES = 3;

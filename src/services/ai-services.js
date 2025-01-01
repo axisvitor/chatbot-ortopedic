@@ -27,7 +27,7 @@ class AIServices {
         );
         this.audioService = new AudioService();
         this.groqServices = new GroqServices();
-        this.imageService = new ImageService();
+        this.imageService = new ImageService(this.groqServices, this.whatsAppService);
     }
 
     /**
@@ -609,20 +609,50 @@ class AIServices {
             }
 
             const response = await this.groqServices.chat.completions.create({
-                model: "mixtral-8x7b-32768",
+                model: "llama-3.2-90b-vision-preview",
                 messages: [
                     {
                         role: "user",
                         content: [
                             {
-                                type: "image",
-                                image_url: {
-                                    url: `data:image/jpeg;base64,${base64Image}`
-                                }
-                            },
-                            {
-                                type: "text",
-                                text: "Analise esta imagem de calçado e forneça detalhes sobre: tipo, cor, marca (se visível), características principais e condição geral."
+                            type: "text",
+                            text: `Analise esta imagem detalhadamente e me forneça as seguintes informações:
+
+1. Tipo de Imagem/Documento:
+   - Identifique se é um comprovante de pagamento
+   - Foto de calçado
+   - Foto dos pés para medidas
+   - Tabela de medidas/numeração
+   - Outro tipo de documento
+
+2. Se for um comprovante de pagamento:
+   - Valor da transação
+   - Data e hora
+   - Tipo de transação (PIX, TED, etc)
+   - Banco ou instituição
+   - Nome do beneficiário (se visível)
+   - Status da transação
+
+3. Se for uma foto de calçado ou pés:
+   - Descrição do calçado ou características dos pés
+   - Detalhes visíveis importantes
+   - Qualidade e clareza da imagem
+   - Ângulo da foto
+   - Se há régua ou referência de medida
+
+4. Se for uma tabela de medidas:
+   - Tipo de medida (comprimento, largura)
+   - Numerações visíveis
+   - Clareza das informações
+
+Por favor, forneça uma análise estruturada e detalhada focando no contexto de uma loja de calçados.`
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                "url": `data:image/jpeg;base64,${base64Image}`,
+                                "detail": "high"
+                            }
                             }
                         ]
                     }
