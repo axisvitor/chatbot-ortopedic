@@ -1,12 +1,14 @@
 const axios = require('axios');
-const OpenAI = require('openai');
-const { OPENAI_CONFIG, GROQ_CONFIG } = require('../config/settings');
+const { GROQ_CONFIG } = require('../config/settings');
 
 class ImageProcessingService {
     constructor() {
-        this.openai = new OpenAI({
-            apiKey: GROQ_CONFIG.apiKey,
-            baseURL: GROQ_CONFIG.baseUrl
+        this.axios = axios.create({
+            baseURL: GROQ_CONFIG.baseUrl,
+            headers: {
+                'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`,
+                'Content-Type': 'application/json'
+            }
         });
     }
 
@@ -26,22 +28,27 @@ class ImageProcessingService {
             const buffer = Buffer.from(response.data);
             const base64Image = buffer.toString('base64');
 
-            // Analisa a imagem com Groq Vision
-            const completion = await this.openai.chat.completions.create({
-                model: GROQ_CONFIG.models.vision,
+            // Prepara o payload para o Groq Vision
+            const payload = {
+                model: "llama-3.2-11b-vision-preview",
                 messages: [
                     {
                         role: "system",
                         content: [
-                            "Você é um assistente especializado em analisar imagens e extrair informações relevantes.",
-                            "Se for um comprovante de pagamento:",
-                            "- Extraia o valor, data, tipo de transação e outras informações relevantes",
-                            "- Indique claramente se é um comprovante válido",
-                            "Se for outro tipo de imagem:",
-                            "- Descreva o conteúdo em detalhes",
-                            "- Extraia qualquer texto visível",
-                            "Sempre forneça uma resposta estruturada e clara."
-                        ].join("\n")
+                            {
+                                type: "text",
+                                text: [
+                                    "Você é um assistente especializado em analisar imagens e extrair informações relevantes.",
+                                    "Se for um comprovante de pagamento:",
+                                    "- Extraia o valor, data, tipo de transação e outras informações relevantes",
+                                    "- Indique claramente se é um comprovante válido",
+                                    "Se for outro tipo de imagem:",
+                                    "- Descreva o conteúdo em detalhes",
+                                    "- Extraia qualquer texto visível",
+                                    "Sempre forneça uma resposta estruturada e clara."
+                                ].join("\n")
+                            }
+                        ]
                     },
                     {
                         role: "user",
@@ -61,14 +68,21 @@ class ImageProcessingService {
                 ],
                 max_tokens: 1024,
                 temperature: 0.2
-            });
+            };
 
-            console.log('[ImageProcessing] Resposta da Groq recebida');
+            console.log('[ImageProcessing] Enviando requisição para Groq Vision');
             
-            const analysis = completion.choices[0]?.message?.content;
+            // Faz a requisição para o Groq Vision
+            const completion = await this.axios.post('/chat/completions', payload);
+
+            if (!completion.data || !completion.data.choices || !completion.data.choices[0]?.message?.content) {
+                throw new Error('Resposta inválida do Groq Vision');
+            }
+
+            const analysis = completion.data.choices[0].message.content;
             
             if (!analysis || analysis.trim().length === 0) {
-                console.error('[ImageProcessing] Resposta da Groq não contém análise:', completion);
+                console.error('[ImageProcessing] Resposta do Groq não contém análise:', completion.data);
                 throw new Error('Análise da imagem retornou vazia');
             }
 
