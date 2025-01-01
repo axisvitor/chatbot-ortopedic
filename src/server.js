@@ -155,7 +155,7 @@ async function initializeServices() {
             whatsappImageService = new WhatsAppImageService(whatsappService);
             console.log('✅ WhatsAppImageService inicializado');
 
-            imageService = new ImageService(groqServices, whatsappService);
+            imageService = new ImageService(whatsappService);
             console.log('✅ ImageService inicializado');
 
             mediaManagerService = new MediaManagerService(audioService, imageService);

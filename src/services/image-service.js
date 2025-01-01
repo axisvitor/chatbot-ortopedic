@@ -2,14 +2,11 @@ const axios = require('axios');
 const sharp = require('sharp');
 const crypto = require('crypto');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
-const groqServices = require('./groq-services');
 const settings = require('../config/settings');
 const ImageProcessingService = require('./image-processing-service');
 
 class ImageService {
-    constructor(groqServices, whatsappClient) {
-        // Removendo validações obrigatórias
-        this.groqServices = groqServices;
+    constructor(whatsappClient) {
         this.whatsappClient = whatsappClient;
         this.MAX_RETRIES = 3;
         this.RETRY_DELAY = 1000; // 1 second
@@ -290,34 +287,34 @@ class ImageService {
             });
 
             // Depois analisa com Groq Vision, passando o texto extraído
-            const analysis = await this.groqServices.processImage(base64Image, {
-                extractedText,
-                originalMessage: imageMessage
-            });
+            // const analysis = await this.groqServices.processImage(base64Image, {
+            //     extractedText,
+            //     originalMessage: imageMessage
+            // });
             
-            console.log('[ImageService] Análise da imagem concluída:', {
-                imageType: analysis.type,
-                hasText: !!extractedText,
-                description: analysis.description?.substring(0, 100) + '...'
-            });
+            // console.log('[ImageService] Análise da imagem concluída:', {
+            //     imageType: analysis.type,
+            //     hasText: !!extractedText,
+            //     description: analysis.description?.substring(0, 100) + '...'
+            // });
 
             // Verifica se é um comprovante
-            const isReceipt = this.isPaymentReceipt(analysis);
+            // const isReceipt = this.isPaymentReceipt(analysis);
 
-            if (isReceipt) {
-                console.log('💰 Comprovante detectado, extraindo informações...');
-                const receiptInfo = this.extractReceiptInfo(analysis);
+            // if (isReceipt) {
+            //     console.log('💰 Comprovante detectado, extraindo informações...');
+            //     const receiptInfo = this.extractReceiptInfo(analysis);
                 
-                return {
-                    type: 'receipt',
-                    analysis,
-                    info: receiptInfo
-                };
-            }
+            //     return {
+            //         type: 'receipt',
+            //         analysis,
+            //         info: receiptInfo
+            //     };
+            // }
 
             return {
                 type: 'image',
-                analysis
+                // analysis
             };
 
         } catch (error) {

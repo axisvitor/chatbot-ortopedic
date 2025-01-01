@@ -13,7 +13,7 @@ const { ImageService } = require('./image-service');
 class AIServices {
     constructor(whatsAppService, whatsAppImageService, redisStore, openAIService, trackingService, orderValidationService, nuvemshopService, businessHoursService) {
         this.whatsAppService = whatsAppService || new WhatsAppService();
-        this.whatsAppImageService = whatsAppImageService || new WhatsAppImageService(this.whatsAppService, new GroqServices());
+        this.whatsAppImageService = whatsAppImageService || new WhatsAppImageService(this.whatsAppService);
         this.redisStore = redisStore || new RedisStore();
         this.trackingService = trackingService || new TrackingService();
         this.businessHoursService = businessHoursService || new BusinessHoursService();
