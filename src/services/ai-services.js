@@ -405,7 +405,7 @@ class AIServices {
             const base64Image = imageBuffer.toString('base64');
             const caption = imageMessage?.imageMessage?.caption || '';
 
-            // Prepara dados da imagem para GPT-4o
+            // Prepara dados da imagem para GPT-4V
             const imageData = {
                 text: caption || 'O que você vê nesta imagem?',
                 image: {
@@ -414,27 +414,33 @@ class AIServices {
                 }
             };
 
-            // Primeiro analisa com GPT-4o
+            // Primeiro analisa com GPT-4V 
             const imageAnalysis = await this.imageService.analyzeWithGPT4V(imageData);
+            
+            if (!imageAnalysis) {
+                throw new Error('Análise da imagem retornou vazia');
+            }
+
             console.log('📝 Análise da imagem:', {
                 tamanhoAnalise: imageAnalysis?.length,
-                primeirasLinhas: imageAnalysis?.split('\n').slice(0, 2).join('\n')
+                primeirasLinhas: imageAnalysis.split('\n').slice(0, 2).join('\n')
             });
 
-            if (!imageAnalysis) {
-                throw new Error('Não foi possível analisar a imagem');
-            }
+            // Prepara o contexto para o Assistant
+            const context = `
+            Contexto: Você está analisando uma imagem enviada por um cliente.
+            ${caption ? `O cliente disse: "${caption}"` : ''}
+            
+            Análise da imagem:
+            ${imageAnalysis}
+            
+            Responda de forma natural e amigável, como se estivesse conversando com o cliente.
+            `;
 
-            // Envia a análise para o Assistant processar e responder
-            const response = await this.openAIService.processCustomerMessage(
-                from,
-                `[ANÁLISE DA IMAGEM]\n${imageAnalysis}\n\n[CONTEXTO]\n${caption || 'Imagem enviada pelo usuário.'}`
-            );
-
-            if (response) {
-                await this.sendResponse(from, response);
-            }
-
+            // Gera resposta com o Assistant
+            const response = await this.openAIService.processCustomerMessage(context);
+            
+            return response;
         } catch (error) {
             console.error('❌ Erro ao processar imagem:', error);
             

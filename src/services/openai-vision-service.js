@@ -15,9 +15,9 @@ class OpenAIVisionService {
     }
 
     /**
-     * Processa uma imagem e retorna a análise
-     * @param {Object} message Mensagem com informações adicionais
-     * @returns {Promise<Object>} Resultado da análise
+     * Processa uma imagem usando o GPT-4 Vision API
+     * @param {Object} message Mensagem contendo a imagem e informações adicionais
+     * @returns {Promise<Object>} Resultado da análise da imagem
      */
     async processImage(message) {
         try {
@@ -26,23 +26,18 @@ class OpenAIVisionService {
                 timestamp: new Date().toISOString()
             });
 
-            // Monta o payload para a OpenAI Vision
             const payload = {
-                model: "gpt-4o",
+                model: "gpt-4o-mini",
                 messages: [
                     {
-                        role: 'system',
-                        content: 'Você é um assistente especializado em análise de imagens. Analise a imagem em detalhes e forneça uma descrição completa e precisa do que você vê.'
-                    },
-                    {
-                        role: 'user',
+                        role: "user",
                         content: [
                             {
-                                type: 'text',
-                                text: message.imageMessage.caption || 'O que você vê nesta imagem?'
+                                type: "text",
+                                text: message.imageMessage.caption || "Você é um assistente especializado em análise de imagens. Analise a imagem em detalhes e forneça uma descrição completa e precisa do que você vê."
                             },
                             {
-                                type: 'image_url',
+                                type: "image_url",
                                 image_url: {
                                     url: `data:${message.imageMessage.mimetype};base64,${message.imageMessage.base64}`
                                 }
@@ -50,13 +45,12 @@ class OpenAIVisionService {
                         ]
                     }
                 ],
-                max_tokens: 1000,
-                temperature: 0.7
+                max_tokens: 1000
             };
 
             console.log('📤 [OpenAIVision] Enviando para API:', {
                 messageId: message.key?.id,
-                modelo: 'gpt-4o',
+                modelo: payload.model,
                 timestamp: new Date().toISOString()
             });
 
@@ -84,7 +78,7 @@ class OpenAIVisionService {
                 success: true,
                 analysis,
                 metadata: {
-                    model: 'gpt-4o',
+                    model: payload.model,
                     tokens: response.data.usage,
                     messageId: message.key?.id
                 }
