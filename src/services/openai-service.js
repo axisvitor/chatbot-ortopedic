@@ -145,8 +145,44 @@ class OpenAIService {
      * @returns {Promise<boolean>} 
      */
     async hasActiveRun(threadId) {
-        const runId = await this.redisStore.getActiveRun(threadId);
-        return !!runId;
+        try {
+            const runId = await this.redisStore.get(`run:${threadId}`);
+            if (!runId) return false;
+
+            // Verifica se o run ainda está ativo
+            try {
+                const run = await this.client.beta.threads.runs.retrieve(
+                    threadId,
+                    runId
+                );
+
+                // Se o run estiver completo ou falhou, remove-o
+                if (['completed', 'failed', 'expired', 'cancelled'].includes(run.status)) {
+                    console.log('[OpenAI] Removendo run inativo:', {
+                        threadId,
+                        runId,
+                        status: run.status,
+                        timestamp: new Date().toISOString()
+                    });
+                    await this.removeActiveRun(threadId);
+                    return false;
+                }
+
+                return true;
+            } catch (error) {
+                // Se der erro ao buscar o run, provavelmente ele não existe mais
+                console.warn('[OpenAI] Erro ao verificar run, removendo:', {
+                    threadId,
+                    runId,
+                    erro: error.message
+                });
+                await this.removeActiveRun(threadId);
+                return false;
+            }
+        } catch (error) {
+            console.error('[OpenAI] Erro ao verificar run ativo:', error);
+            return false;
+        }
     }
 
     /**
@@ -155,7 +191,7 @@ class OpenAIService {
      * @param {string} runId - ID do run
      */
     async registerActiveRun(threadId, runId) {
-        await this.redisStore.setActiveRun(threadId, runId);
+        await this.redisStore.set(`run:${threadId}`, runId);
     }
 
     /**
@@ -163,8 +199,21 @@ class OpenAIService {
      * @param {string} threadId - ID da thread
      */
     async removeActiveRun(threadId) {
-        await this.redisStore.removeActiveRun(threadId);
-        await this.processQueuedMessages(threadId);
+        try {
+            // Remove o run do Redis
+            await this.redisStore.del(`run:${threadId}`);
+            
+            // Processa mensagens na fila se houver
+            if (this.messageQueue.has(threadId) && this.messageQueue.get(threadId).length > 0) {
+                console.log('[OpenAI] Processando mensagens na fila após remoção do run:', {
+                    threadId,
+                    queueSize: this.messageQueue.get(threadId).length
+                });
+                await this.processQueuedMessages(threadId);
+            }
+        } catch (error) {
+            console.error('[OpenAI] Erro ao remover run ativo:', error);
+        }
     }
 
     /**
@@ -402,50 +451,50 @@ class OpenAIService {
      */
     async waitForResponse(threadId, runId) {
         try {
-            let run = await this.checkRunStatus(threadId, runId);
-            
-            while (run.status === 'queued' || run.status === 'in_progress') {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                run = await this.checkRunStatus(threadId, runId);
-            }
+            let attempts = 0;
+            const maxAttempts = 30; // 30 segundos no máximo
 
-            if (run.status === 'requires_action') {
-                console.log('[OpenAI] Ação requerida, processando tool calls...');
-                
-                if (run.required_action?.type === 'submit_tool_outputs') {
-                    const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
-                    console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => `'${t.function.name}'`));
-                    
-                    const toolOutputs = await this.handleToolCalls(run, threadId);
-                    
-                    await this.client.beta.threads.runs.submitToolOutputs(
+            while (attempts < maxAttempts) {
+                const run = await this.client.beta.threads.runs.retrieve(
+                    threadId,
+                    runId
+                );
+
+                if (run.status === 'completed') {
+                    // Busca as mensagens mais recentes
+                    const messages = await this.client.beta.threads.messages.list(
+                        threadId
+                    );
+
+                    // Retorna a última mensagem do assistente
+                    const assistantMessage = messages.data.find(
+                        msg => msg.role === 'assistant'
+                    );
+
+                    return assistantMessage?.content[0]?.text?.value || null;
+                }
+
+                if (['failed', 'expired', 'cancelled'].includes(run.status)) {
+                    console.error('[OpenAI] Run falhou:', {
                         threadId,
                         runId,
-                        { tool_outputs: toolOutputs }
-                    );
-                    
-                    return await this.waitForResponse(threadId, runId);
+                        status: run.status
+                    });
+                    throw new Error(`Run falhou com status: ${run.status}`);
                 }
+
+                // Aguarda 1 segundo antes de tentar novamente
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                attempts++;
             }
 
-            if (run.status === 'completed') {
-                const messages = await this.listMessages(threadId);
-                if (messages.data && messages.data.length > 0) {
-                    return messages.data[0].content[0].text.value;
-                }
-            }
-
-            if (run.status === 'failed') {
-                console.error('[OpenAI] Run falhou:', run.last_error);
-                throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
-            }
-
-            throw new Error(`Run terminou com status inesperado: ${run.status}`);
-            
+            throw new Error('Timeout ao aguardar resposta do assistente');
         } catch (error) {
             console.error('[OpenAI] Erro ao aguardar resposta:', error);
-            await this.removeActiveRun(threadId); // Garante remoção do run em caso de erro
             throw error;
+        } finally {
+            // Sempre remove o run ao finalizar
+            await this.removeActiveRun(threadId);
         }
     }
 
