@@ -3,10 +3,10 @@ const sharp = require('sharp');
 const crypto = require('crypto');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const settings = require('../config/settings');
-const ImageProcessingService = require('./image-processing-service');
 
 class ImageService {
-    constructor(whatsappClient) {
+    constructor(groqServices, whatsappClient) {
+        this.groqServices = groqServices;
         this.whatsappClient = whatsappClient;
         this.MAX_RETRIES = 3;
         this.RETRY_DELAY = 1000; // 1 second
@@ -244,15 +244,19 @@ class ImageService {
                         const cleanUrl = media.url?.replace(/";,$/g, '') || '';
                         
                         console.log('[ImageService] Tentando baixar mídia:', {
-                            url: cleanUrl.substring(0, 50) + '...',
-                            headers: media.headers
+                            url: cleanUrl,
+                            mediaId: media.id,
+                            timestamp: new Date().toISOString()
                         });
-                        
+
                         const response = await axios.get(cleanUrl, {
                             responseType: 'arraybuffer',
-                            headers: { Origin: 'https://web.whatsapp.com' }
+                            headers: {
+                                'User-Agent': 'WhatsApp/2.24.8.78 A',
+                                'Authorization': `Bearer ${settings.WHATSAPP_CONFIG.token}`
+                            }
                         });
-                        
+
                         console.log('[ImageService] Mídia baixada com sucesso:', {
                             contentType: response.headers['content-type'],
                             contentLength: response.data.length
@@ -272,55 +276,66 @@ class ImageService {
             // Converte para base64
             const base64Image = compressedBuffer.toString('base64');
             
-            console.log('[ImageService] Imagem processada:', {
-                base64Length: base64Image?.length,
-                preview: base64Image?.substring(0, 50) + '...'
+            // Configura a requisição para a Groq
+            const messages = [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: "Analise esta imagem em detalhes e me diga se parece ser um comprovante de pagamento. Se for um comprovante, extraia informações como valor, data, tipo de transação (PIX, TED, etc). Se não for um comprovante, descreva o que você vê na imagem."
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: `data:image/jpeg;base64,${base64Image}`
+                            }
+                        }
+                    ]
+                }
+            ];
+
+            // Analisa com Groq Vision
+            const response = await this.groqServices.chat.completions.create({
+                model: "llama-3.2-11b-vision-preview",
+                messages: messages,
+                temperature: 0.5,
+                max_tokens: 1024,
+                stream: false
             });
 
-            // Primeiro usa OCR para extrair texto
-            const imageProcessingService = new ImageProcessingService();
-            const extractedText = await imageProcessingService.extractTextFromImage(base64Image);
-            
-            console.log('[ImageService] Texto extraído via OCR:', {
-                hasText: !!extractedText,
-                preview: extractedText?.substring(0, 100) + '...'
-            });
+            if (!response?.choices?.[0]?.message?.content) {
+                throw new Error('Resposta inválida da Groq');
+            }
 
-            // Depois analisa com Groq Vision, passando o texto extraído
-            // const analysis = await this.groqServices.processImage(base64Image, {
-            //     extractedText,
-            //     originalMessage: imageMessage
-            // });
+            const analysis = response.choices[0].message.content;
             
-            // console.log('[ImageService] Análise da imagem concluída:', {
-            //     imageType: analysis.type,
-            //     hasText: !!extractedText,
-            //     description: analysis.description?.substring(0, 100) + '...'
-            // });
+            console.log('[ImageService] Análise da imagem concluída:', {
+                analysis: analysis?.substring(0, 100) + '...'
+            });
 
             // Verifica se é um comprovante
-            // const isReceipt = this.isPaymentReceipt(analysis);
+            const isReceipt = this.isPaymentReceipt(analysis);
 
-            // if (isReceipt) {
-            //     console.log('💰 Comprovante detectado, extraindo informações...');
-            //     const receiptInfo = this.extractReceiptInfo(analysis);
+            if (isReceipt) {
+                console.log('💰 Comprovante detectado, extraindo informações...');
+                const receiptInfo = this.extractReceiptInfo(analysis);
                 
-            //     return {
-            //         type: 'receipt',
-            //         analysis,
-            //         info: receiptInfo
-            //     };
-            // }
+                return {
+                    type: 'receipt',
+                    analysis,
+                    info: receiptInfo
+                };
+            }
 
             return {
                 type: 'image',
-                // analysis
+                analysis
             };
 
         } catch (error) {
             console.error('[ImageService] Erro ao processar imagem:', error);
             
-            // Mensagens de erro mais específicas
             if (error.message.includes('14 dias')) {
                 throw new Error('Esta imagem não está mais disponível pois foi enviada há mais de 14 dias.');
             } else if (error.message.includes('autenticação')) {

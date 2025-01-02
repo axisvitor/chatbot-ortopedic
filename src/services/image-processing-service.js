@@ -30,7 +30,7 @@ class ImageProcessingService {
 
             // Prepara o payload para o Groq Vision
             const payload = {
-                model: "llama-3.2-11b-vision-preview",
+                model: "llama-3.2-90b-vision-preview",
                 messages: [
                     {
                         role: "system",

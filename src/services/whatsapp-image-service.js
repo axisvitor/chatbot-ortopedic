@@ -344,6 +344,60 @@ class WhatsAppImageService {
         }
     }
 
+    async processPaymentProof(imageBuffer, orderNumber) {
+        try {
+            // Converte buffer para base64
+            const base64Image = imageBuffer.toString('base64');
+            
+            // Analisa a imagem com Groq
+            const messages = [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: "Analise este comprovante de pagamento e extraia as seguintes informações:\n" +
+                                  "1. Valor do pagamento\n" +
+                                  "2. Data e hora da transação\n" +
+                                  "3. Tipo de transação (PIX, TED, etc)\n" +
+                                  "4. Banco de origem\n" +
+                                  "5. Status da transação"
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: `data:image/jpeg;base64,${base64Image}`
+                            }
+                        }
+                    ]
+                }
+            ];
+
+            const analysis = await this.groqService.generateText(messages);
+            
+            console.log('✅ Análise do comprovante:', {
+                pedido: orderNumber,
+                analise: analysis,
+                timestamp: new Date().toISOString()
+            });
+
+            return {
+                success: true,
+                analysis,
+                orderNumber
+            };
+
+        } catch (error) {
+            console.error('❌ Erro ao processar comprovante:', {
+                erro: error.message,
+                pedido: orderNumber,
+                timestamp: new Date().toISOString()
+            });
+            
+            throw new Error(`Erro ao processar comprovante: ${error.message}`);
+        }
+    }
+
     async isLikelyPaymentProof(mediaMessage) {
         try {
             if (!mediaMessage?.imageMessage) return false;
@@ -431,60 +485,6 @@ class WhatsAppImageService {
 
     async downloadMediaMessage(message) {
         return this.whatsAppService.downloadMediaMessage(message);
-    }
-
-    async processPaymentProof(imageBuffer, orderNumber) {
-        try {
-            // Converte buffer para base64
-            const base64Image = imageBuffer.toString('base64');
-            
-            // Analisa a imagem com Groq
-            const messages = [
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "text",
-                            text: "Analise este comprovante de pagamento e extraia as seguintes informações:\n" +
-                                  "1. Valor do pagamento\n" +
-                                  "2. Data e hora da transação\n" +
-                                  "3. Tipo de transação (PIX, TED, etc)\n" +
-                                  "4. Banco de origem\n" +
-                                  "5. Status da transação"
-                        },
-                        {
-                            type: "image",
-                            image_url: {
-                                url: `data:image/jpeg;base64,${base64Image}`
-                            }
-                        }
-                    ]
-                }
-            ];
-
-            const analysis = await this.groqService.generateText(messages);
-            
-            console.log('✅ Análise do comprovante:', {
-                pedido: orderNumber,
-                analise: analysis,
-                timestamp: new Date().toISOString()
-            });
-
-            return {
-                success: true,
-                analysis,
-                orderNumber
-            };
-
-        } catch (error) {
-            console.error('❌ Erro ao processar comprovante:', {
-                erro: error.message,
-                pedido: orderNumber,
-                timestamp: new Date().toISOString()
-            });
-            
-            throw new Error(`Erro ao processar comprovante: ${error.message}`);
-        }
     }
 }
 
