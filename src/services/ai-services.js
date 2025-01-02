@@ -92,27 +92,61 @@ class AIServices {
             console.log('📨 Processando mensagem:', {
                 tipo: messageData.type,
                 de: messageData.from,
-                temImagem: !!messageData.imageUrl
+                temImagem: !!messageData.imageUrl || !!messageData.body?.message?.imageMessage
             });
 
+            // Extrai dados da mensagem
+            let from, text, imageMessage;
+
+            // Se vier no formato antigo
+            if (messageData.from) {
+                from = messageData.from;
+                text = messageData.text;
+                imageMessage = messageData.imageUrl ? { url: messageData.imageUrl } : null;
+            } 
+            // Se vier no formato novo
+            else if (messageData.body?.key?.remoteJid) {
+                from = messageData.body.key.remoteJid.replace('@s.whatsapp.net', '');
+                text = messageData.body.message?.extendedTextMessage?.text || 
+                       messageData.body.message?.conversation ||
+                       messageData.body.message?.text;
+                imageMessage = messageData.body.message?.imageMessage;
+            }
+
+            // Verifica se é uma mensagem de imagem
+            const isImage = !!imageMessage;
+
             // Se for mensagem de imagem
-            if (messageData.type === 'image' && messageData.imageUrl) {
+            if (isImage) {
                 console.log('🖼️ Processando mensagem de imagem...');
                 try {
                     // 1. Download da imagem
-                    const imageBuffer = await this.whatsAppImageService.downloadImage(messageData.imageUrl);
+                    console.log('📥 Baixando imagem...');
+                    const imageBuffer = await this.whatsAppImageService.downloadMediaMessage(messageData);
                     
+                    if (!imageBuffer) {
+                        throw new Error('Falha ao baixar a imagem');
+                    }
+
                     // 2. Análise com Groq Vision
-                    const analysis = await this.analyzeImageWithGroq(imageBuffer);
+                    console.log('🔍 Iniciando análise com Groq Vision...');
+                    const analysis = await this.whatsAppImageService.analyzeImage(imageBuffer);
+                    
+                    if (!analysis) {
+                        throw new Error('Análise da imagem falhou');
+                    }
+
                     console.log('✅ Análise Groq Vision concluída:', {
                         preview: analysis.substring(0, 100) + '...'
                     });
 
                     // 3. Extração de informações
+                    console.log('🔍 Extraindo informações do comprovante...');
                     const extractedInfo = await this.extractPaymentInfo(analysis);
                     console.log('📋 Informações extraídas:', extractedInfo);
 
                     // 4. Validação do comprovante
+                    console.log('⚖️ Validando comprovante...');
                     const validationResult = await this.orderValidationService.validatePayment(extractedInfo);
                     console.log('🔍 Resultado da validação:', validationResult);
 
@@ -140,44 +174,72 @@ class AIServices {
                     }
 
                     // 6. Enviar resposta
-                    await this.whatsAppService.sendText(messageData.from, responseMessage);
+                    await this.whatsAppService.sendText(from, responseMessage);
+
+                    // 7. Se necessário, adiciona ao histórico do OpenAI apenas após a validação
+                    if (validationResult.success) {
+                        const chatHistory = await this.getChatHistory(from);
+                        
+                        // Prepara a mensagem para o OpenAI com todas as informações relevantes
+                        const openAIMessage = {
+                            role: "user",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Análise de comprovante de pagamento:
+                                    
+Informações extraídas:
+- Valor: ${extractedInfo.valor || 'Não identificado'}
+- Data: ${extractedInfo.data || 'Não identificada'}
+- Tipo de Transação: ${extractedInfo.tipoTransacao || 'Não identificado'}
+- Banco de Origem: ${extractedInfo.bancoOrigem || 'Não identificado'}
+- Status: ${extractedInfo.status || 'Não identificado'}
+
+Resultado da Validação:
+- Status: ${validationResult.success ? 'Validado' : 'Não validado'}
+- Mensagem: ${validationResult.message || 'N/A'}
+
+Análise Original Groq Vision:
+${analysis}
+
+Por favor, analise estas informações e me ajude a:
+1. Confirmar se todas as informações essenciais estão presentes
+2. Identificar qualquer inconsistência nos dados
+3. Sugerir próximos passos baseados na validação`
+                                }
+                            ]
+                        };
+
+                        // Adiciona a mensagem ao histórico do OpenAI
+                        await this.openAIService.addMessageAndRun(
+                            chatHistory.threadId,
+                            'user',
+                            openAIMessage.content[0].text
+                        );
+
+                        console.log('✅ Mensagem adicionada ao histórico do OpenAI:', {
+                            threadId: chatHistory.threadId,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+
                     return;
                 } catch (error) {
                     console.error('❌ Erro ao processar imagem:', error);
                     await this.whatsAppService.sendText(
-                        messageData.from,
+                        from,
                         '❌ Desculpe, não consegui analisar sua imagem. Por favor, verifique se a imagem está nítida e tente novamente.'
                     );
                     return;
                 }
             }
 
-            // Continua com o processamento normal para outros tipos de mensagem
-            // Extrai dados da mensagem
-            let from, text;
-
-            // Se vier no formato antigo
-            if (messageData.from) {
-                from = messageData.from;
-                text = messageData.text;
-            } 
-            // Se vier no formato novo
-            else if (messageData.body?.key?.remoteJid) {
-                from = messageData.body.key.remoteJid.replace('@s.whatsapp.net', '');
-                text = messageData.body.message?.extendedTextMessage?.text || 
-                       messageData.body.message?.conversation ||
-                       messageData.body.message?.text;
-            }
-
-            // Verifica se é uma mensagem de imagem
-            const isImage = messageData.body?.message?.imageMessage || messageData.type === 'image';
-
+            // Continua com o processamento normal para mensagens de texto
             // Valida dados essenciais
-            if (!from || (!text && !isImage)) {
+            if (!from || !text) {
                 console.log('⚠️ Dados inválidos na mensagem:', {
                     from,
                     text,
-                    isImage,
                     messageData: JSON.stringify(messageData, null, 2)
                 });
                 return null;
@@ -185,7 +247,7 @@ class AIServices {
 
             console.log('📨 Mensagem recebida:', {
                 de: from,
-                tipo: isImage ? 'imagem' : 'texto',
+                tipo: 'texto',
                 texto: text || '(sem texto)',
                 timestamp: new Date().toISOString()
             });
