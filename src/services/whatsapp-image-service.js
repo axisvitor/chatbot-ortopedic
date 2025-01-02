@@ -119,8 +119,7 @@ class WhatsAppImageService {
                     ...imagesData.map(imageData => ({
                         type: 'image_url',
                         image_url: {
-                            url: `data:${imageData.mimetype};base64,${imageData.base64}`,
-                            detail: 'high'
+                            url: `data:${imageData.mimetype};base64,${imageData.base64}`
                         }
                     }))
                 ]
@@ -129,26 +128,31 @@ class WhatsAppImageService {
             // 3. Envia para análise na OpenAI Vision
             console.log('🤖 Enviando para análise na OpenAI Vision...');
             const response = await this.openaiAxios.post('/chat/completions', {
-                model: OPENAI_CONFIG.models.vision,
+                model: "gpt-4o",
                 messages: messages,
-                temperature: 0.7,
-                max_tokens: 1024
+                max_tokens: 1024,
+                temperature: 0.7
             });
 
             // 4. Limpa arquivos temporários
             await Promise.all(imagesData.map(async (imageData) => {
-                await fs.unlink(imageData.filePath);
-                await fs.rmdir(path.dirname(imageData.filePath));
+                try {
+                    await fs.unlink(imageData.filePath);
+                    await fs.rmdir(path.dirname(imageData.filePath));
+                } catch (error) {
+                    console.warn('⚠️ Erro ao limpar arquivos temporários:', error.message);
+                }
             }));
 
-            console.log('✅ Análise concluída');
+            console.log('✅ Análise concluída:', response.data);
 
             return response.data.choices[0].message.content;
 
         } catch (error) {
             console.error('❌ Erro ao analisar imagens:', {
                 erro: error.message,
-                stack: error.stack
+                stack: error.stack,
+                detalhes: error.response?.data
             });
             throw error;
         }

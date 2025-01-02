@@ -13,14 +13,12 @@ const OPENAI_CONFIG = {
     assistantId: validateEnvVar('ASSISTANT_ID'),
     baseUrl: 'https://api.openai.com/v1',
     models: {
-        vision: 'gpt-4o',
-        chat: 'gpt-4o-mini'
+        chat: 'gpt-4o',
+        vision: 'gpt-4o'
     },
     visionConfig: {
-        detail: "high",
         max_tokens: 1024,
-        temperature: 0.2,
-        response_format: { type: "json_object" }
+        temperature: 0.7
     }
 };
 

@@ -89,7 +89,61 @@ class AIServices {
 
     async handleMessage(messageData) {
         try {
-            console.log('📨 Processando mensagem:', {
+            if (!messageData || !messageData.from) {
+                console.error('❌ Dados da mensagem inválidos:', messageData);
+                return;
+            }
+
+            // Verifica se é o comando #resetid
+            if (messageData.type === 'text' && messageData.text === '#resetid') {
+                console.log('🔄 Processando comando #resetid para:', messageData.from);
+                try {
+                    // Recupera o histórico do chat
+                    const chatHistory = await this.getChatHistory(messageData.from);
+                    if (!chatHistory?.threadId) {
+                        throw new Error('Thread ID não encontrado');
+                    }
+
+                    // Remove o run ativo se houver
+                    await this.openAIService.removeActiveRun(chatHistory.threadId);
+                    
+                    // Deleta a thread antiga
+                    await this.openAIService.deleteThread(chatHistory.threadId);
+                    
+                    // Limpa todos os dados do Redis relacionados ao usuário e thread
+                    await Promise.all([
+                        this.redisStore.deleteUserData(messageData.from),
+                        this.redisStore.deleteThreadData(chatHistory.threadId)
+                    ]);
+                    
+                    // Cria uma nova thread
+                    const thread = await this.openAIService.createThread();
+                    
+                    // Atualiza o histórico com a nova thread
+                    await this.redisStore.set(`chat:${messageData.from}`, JSON.stringify({
+                        threadId: thread.id,
+                        lastUpdate: new Date().toISOString(),
+                        messageCount: 0,
+                        context: {}
+                    }));
+
+                    // Envia confirmação para o usuário
+                    await this.whatsAppService.sendText(
+                        messageData.from,
+                        'Conversa reiniciada com sucesso! Como posso ajudar?'
+                    );
+                    return;
+                } catch (error) {
+                    console.error('❌ Erro ao processar comando #resetid:', error);
+                    await this.whatsAppService.sendText(
+                        messageData.from,
+                        'Desculpe, ocorreu um erro ao reiniciar a conversa. Por favor, tente novamente.'
+                    );
+                    return;
+                }
+            }
+
+            console.log('🤖 Processando mensagem:', {
                 tipo: messageData.type,
                 conteudo: JSON.stringify(messageData.message, null, 2)
             });
