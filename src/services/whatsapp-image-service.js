@@ -636,4 +636,4 @@ class WhatsAppImageService {
     }
 }
 
-module.exports = WhatsAppImageService;
+module.exports = { WhatsAppImageService };
