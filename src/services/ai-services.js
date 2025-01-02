@@ -39,7 +39,10 @@ class AIServices {
             `;
 
             // Gera resposta personalizada via Assistant
-            const response = await this.openAIService.processCustomerMessage(context);
+            const response = await this.openAIService.processCustomerMessage(from, {
+                role: 'user',
+                content: context
+            });
 
             return {
                 type: 'image_analysis',
@@ -77,9 +80,10 @@ class AIServices {
                 }
 
                 // Processa a transcrição com o OpenAI
-                const response = await this.openAIService.processCustomerMessage(
-                    `Transcrição do áudio do cliente: "${result}"`
-                );
+                const response = await this.openAIService.processCustomerMessage(message.from, {
+                    role: 'user',
+                    content: `Transcrição do áudio do cliente: "${result}"`
+                });
 
                 return {
                     type: 'audio',
@@ -91,7 +95,10 @@ class AIServices {
 
             // Se for mensagem de texto
             if (message.type === 'text') {
-                const response = await this.openAIService.processCustomerMessage(message.text);
+                const response = await this.openAIService.processCustomerMessage(message.from, {
+                    role: 'user',
+                    content: message.text
+                });
                 return {
                     type: 'text',
                     response: response,
@@ -123,7 +130,10 @@ class AIServices {
 
             try {
                 // Tenta gerar uma mensagem personalizada via Assistant
-                const errorResponse = await this.openAIService.processCustomerMessage(errorContext);
+                const errorResponse = await this.openAIService.processCustomerMessage(to, {
+                    role: 'user',
+                    content: errorContext
+                });
                 await this.whatsAppService.sendText(to, errorResponse);
             } catch (assistantError) {
                 // Fallback para mensagem padrão em caso de erro do Assistant
