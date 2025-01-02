@@ -3,9 +3,9 @@ const { WHATSAPP_CONFIG } = require('../config/settings');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { container } = require('./service-container');
 const FormData = require('form-data');
-const WhatsAppImageService = require('./whatsapp-image-service');
-const WhatsAppAudioService = require('./whatsapp-audio-service');
-const MediaManagerService = require('./media-manager-service');
+const { WhatsAppImageService } = require('./whatsapp-image-service');
+const { WhatsAppAudioService } = require('./whatsapp-audio-service');
+const { MediaManagerService } = require('./media-manager-service');
 
 class WhatsAppService {
     constructor() {
