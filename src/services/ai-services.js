@@ -99,23 +99,54 @@ class AIServices {
             if (messageData.type === 'image' && messageData.imageUrl) {
                 console.log('🖼️ Processando mensagem de imagem...');
                 try {
-                    // Download da imagem
+                    // 1. Download da imagem
                     const imageBuffer = await this.whatsAppImageService.downloadImage(messageData.imageUrl);
                     
-                    // Processa e valida a imagem
-                    const processedImage = await this.imageService.processImageForGroq(imageBuffer, 'image/jpeg');
+                    // 2. Análise com Groq Vision
+                    const analysis = await this.analyzeImageWithGroq(imageBuffer);
+                    console.log('✅ Análise Groq Vision concluída:', {
+                        preview: analysis.substring(0, 100) + '...'
+                    });
+
+                    // 3. Extração de informações
+                    const extractedInfo = await this.extractPaymentInfo(analysis);
+                    console.log('📋 Informações extraídas:', extractedInfo);
+
+                    // 4. Validação do comprovante
+                    const validationResult = await this.orderValidationService.validatePayment(extractedInfo);
+                    console.log('🔍 Resultado da validação:', validationResult);
+
+                    // 5. Preparar resposta
+                    let responseMessage = '📝 *Análise do Comprovante*\n\n';
                     
-                    // Análise com Groq
-                    const analysis = await this.analyzeImageWithGroq(processedImage);
-                    
-                    // Envia resposta
-                    await this.sendResponse(messageData.from, analysis);
+                    responseMessage += '*Informações Extraídas:*\n';
+                    responseMessage += `💰 Valor: ${extractedInfo.valor || 'Não identificado'}\n`;
+                    responseMessage += `📅 Data: ${extractedInfo.data || 'Não identificada'}\n`;
+                    responseMessage += `💳 Tipo: ${extractedInfo.tipoTransacao || 'Não identificado'}\n`;
+                    responseMessage += `🏦 Banco: ${extractedInfo.bancoOrigem || 'Não identificado'}\n`;
+                    responseMessage += `✨ Status: ${extractedInfo.status}\n\n`;
+
+                    if (validationResult.success) {
+                        responseMessage += '✅ *Comprovante validado com sucesso!*\n';
+                        if (validationResult.message) {
+                            responseMessage += validationResult.message;
+                        }
+                    } else {
+                        responseMessage += '❌ *Comprovante não validado*\n';
+                        if (validationResult.message) {
+                            responseMessage += `Motivo: ${validationResult.message}\n`;
+                        }
+                        responseMessage += '\nPor favor, verifique as informações e tente novamente.';
+                    }
+
+                    // 6. Enviar resposta
+                    await this.whatsAppService.sendText(messageData.from, responseMessage);
                     return;
                 } catch (error) {
                     console.error('❌ Erro ao processar imagem:', error);
-                    await this.sendResponse(
+                    await this.whatsAppService.sendText(
                         messageData.from,
-                        'Desculpe, não consegui analisar sua imagem. Por favor, verifique se a imagem está nítida e tente novamente.'
+                        '❌ Desculpe, não consegui analisar sua imagem. Por favor, verifique se a imagem está nítida e tente novamente.'
                     );
                     return;
                 }
@@ -618,56 +649,60 @@ class AIServices {
         ).join('\n\n');
     }
 
-    /**
-     * Analisa uma imagem usando o Groq Vision
-     * @param {string} base64Image Imagem em base64
-     * @returns {Promise<string>} Análise da imagem
-     */
-    async analyzeImageWithGroq(base64Image) {
+    async analyzeImageWithGroq(imageBuffer) {
         try {
-            const response = await this.groqServices.chat.completions.create({
-                model: "llama-3.2-90b-vision-preview",
-                messages: [
-                    {
-                        role: "system",
-                        content: [
-                            {
-                                type: "text",
-                                text: "Você é um assistente especializado em analisar imagens. Para comprovantes de pagamento: extraia valor, data, tipo de transação e outras informações relevantes. Para outras imagens: descreva o conteúdo detalhadamente e extraia qualquer texto visível. Sempre forneça uma resposta estruturada e clara."
-                            }
-                        ]
-                    },
-                    {
-                        role: "user",
-                        content: [
-                            {
-                                type: "text",
-                                text: "Por favor, analise esta imagem em detalhes. Se for um comprovante de pagamento, extraia todas as informações relevantes como valor, data, tipo de transação, etc. Se for outro tipo de imagem, descreva seu conteúdo e extraia qualquer texto visível."
-                            },
-                            {
-                                type: "image_url",
-                                image_url: {
-                                    url: `data:image/jpeg;base64,${base64Image}`
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens: 1024,
-                temperature: 0.2,
-                top_p: 0.8
-            });
-
-            if (!response?.choices?.[0]?.message?.content) {
-                throw new Error('Resposta inválida do Groq Vision');
-            }
-
-            return response.choices[0].message.content;
-
+            const analysis = await this.whatsAppImageService.analyzeImage(imageBuffer);
+            return analysis;
         } catch (error) {
             console.error('❌ Erro ao analisar imagem com Groq:', error);
-            throw error;
+            throw new Error('Não foi possível analisar a imagem com Groq Vision');
         }
+    }
+
+    async extractPaymentInfo(analysis) {
+        try {
+            // Extrai informações relevantes do texto da análise
+            const info = {
+                valor: this.extractValue(analysis),
+                data: this.extractDate(analysis),
+                tipoTransacao: this.extractTransactionType(analysis),
+                bancoOrigem: this.extractBank(analysis),
+                status: this.extractStatus(analysis)
+            };
+
+            return info;
+        } catch (error) {
+            console.error('❌ Erro ao extrair informações do pagamento:', error);
+            throw new Error('Não foi possível extrair as informações do comprovante');
+        }
+    }
+
+    extractValue(text) {
+        const valueMatch = text.match(/R\$\s*(\d+(?:\.\d{3})*(?:,\d{2})?)/);
+        return valueMatch ? valueMatch[0] : null;
+    }
+
+    extractDate(text) {
+        const dateMatch = text.match(/\d{2}\/\d{2}\/\d{4}/);
+        return dateMatch ? dateMatch[0] : null;
+    }
+
+    extractTransactionType(text) {
+        const types = ['PIX', 'TED', 'DOC', 'Transferência'];
+        for (const type of types) {
+            if (text.includes(type)) return type;
+        }
+        return null;
+    }
+
+    extractBank(text) {
+        const bankMatch = text.match(/(?:Banco|BANCO)\s+([^\n.,]+)/);
+        return bankMatch ? bankMatch[1].trim() : null;
+    }
+
+    extractStatus(text) {
+        const statusMatch = text.match(/(?:Status|STATUS):\s*([^\n.,]+)/);
+        return statusMatch ? statusMatch[1].trim() : 'Não identificado';
     }
 }
 
