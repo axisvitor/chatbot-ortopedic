@@ -15,7 +15,8 @@ const {
     WebhookService,
     WhatsAppImageService,
     OpenAIService,
-    CacheService
+    CacheService,
+    BusinessHoursService
 } = require('./services');
 
 // Importação dos novos serviços

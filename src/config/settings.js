@@ -128,15 +128,25 @@ const TRACKING_CONFIG = {
 const BUSINESS_HOURS = {
     timezone: 'America/Sao_Paulo',
     schedule: {
-        segunda: { start: '09:00', end: '18:00' },
-        terca: { start: '09:00', end: '18:00' },
-        quarta: { start: '09:00', end: '18:00' },
-        quinta: { start: '09:00', end: '18:00' },
-        sexta: { start: '09:00', end: '18:00' },
-        sabado: { start: null, end: null },
-        domingo: { start: null, end: null }
+        domingo: null,
+        segunda: { start: '08:00', end: '18:00' },
+        terca: { start: '08:00', end: '18:00' },
+        quarta: { start: '08:00', end: '18:00' },
+        quinta: { start: '08:00', end: '18:00' },
+        sexta: { start: '08:00', end: '18:00' },
+        sabado: { start: '08:00', end: '12:00' }
     },
-    holidays: [],
+    holidays: [
+        // Feriados fixos
+        '2025-01-01', // Ano Novo
+        '2025-04-21', // Tiradentes
+        '2025-05-01', // Dia do Trabalho
+        '2025-09-07', // Independência
+        '2025-10-12', // Nossa Senhora
+        '2025-11-02', // Finados
+        '2025-11-15', // Proclamação da República
+        '2025-12-25'  // Natal
+    ],
     messages: {
         outOfHours: "Nosso horário de atendimento é de segunda a sexta, das 9h às 18h. Por favor, envie sua mensagem durante o horário comercial.",
         holiday: "Hoje é feriado. Por favor, envie sua mensagem em um dia útil.",
@@ -323,17 +333,10 @@ const REQUIRED_ENV_VARS = [
 
 module.exports = {
     OPENAI_CONFIG,
+    GROQ_CONFIG,
     REDIS_CONFIG,
-    WHATSAPP_CONFIG,
-    TRACKING_CONFIG,
-    MEDIA_CONFIG,
-    NUVEMSHOP_CONFIG,
-    FFMPEG_CONFIG,
-    BUSINESS_HOURS,
     RATE_LIMIT_CONFIG,
-    LOGGING_CONFIG,
-    validateEnvVar,
-    REQUIRED_ENV_VARS,
-    CACHE_CONFIG,
-    GROQ_CONFIG
+    BUSINESS_HOURS,
+    NUVEMSHOP_CONFIG,
+    REQUIRED_ENV_VARS
 };
