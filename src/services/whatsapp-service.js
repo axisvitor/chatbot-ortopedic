@@ -688,11 +688,6 @@ class WhatsAppService {
             // Usa o MediaManager para processar a imagem
             const result = await this._mediaManager.processMedia(message);
 
-            // Se não houver resultado (caso de comprovante já tratado pelo MediaManager)
-            if (!result) {
-                return;
-            }
-
             // Se houve erro no processamento
             if (!result.success) {
                 console.error('❌ Erro ao processar imagem:', result.error);
@@ -703,7 +698,33 @@ class WhatsAppService {
                 return;
             }
 
-            // Envia a análise para o usuário
+            // Verifica se é um comprovante de pagamento
+            const isPaymentProof = this._isPaymentProof(result.analysis);
+            
+            if (isPaymentProof) {
+                console.log('💰 Comprovante de pagamento detectado');
+                
+                // Encaminha para o financeiro se configurado
+                const financialNumber = process.env.FINANCIAL_DEPT_NUMBER;
+                if (financialNumber) {
+                    await this.forwardMessage(message, financialNumber);
+                    await this.sendText(
+                        financialNumber,
+                        `*Novo Comprovante Recebido*\nCliente: ${message.key.remoteJid}\nData: ${new Date().toLocaleString('pt-BR')}\n\nAnálise:\n${result.analysis}`
+                    );
+                }
+
+                // Responde ao cliente
+                await this.sendText(
+                    message.key.remoteJid,
+                    'Recebi seu comprovante e já encaminhei para nossa equipe financeira! ' +
+                    'Para agilizar o processo, por favor me informe o número do seu pedido.'
+                );
+                return;
+            }
+
+            // Se não for comprovante, envia a análise
+            console.log('✅ Enviando análise da imagem');
             await this.sendText(message.key.remoteJid, result.analysis);
 
         } catch (error) {
@@ -721,6 +742,32 @@ class WhatsAppService {
                 console.error('❌ Erro ao enviar mensagem de erro:', sendError);
             }
         }
+    }
+
+    /**
+     * Verifica se a análise indica um comprovante de pagamento
+     * @private
+     * @param {string} analysis Análise da imagem
+     * @returns {boolean}
+     */
+    _isPaymentProof(analysis) {
+        const keywords = [
+            'comprovante',
+            'pagamento',
+            'transferência',
+            'pix',
+            'recibo',
+            'valor',
+            'data',
+            'beneficiário'
+        ];
+
+        const lowerAnalysis = analysis.toLowerCase();
+        const matchCount = keywords.reduce((count, keyword) => {
+            return count + (lowerAnalysis.includes(keyword) ? 1 : 0);
+        }, 0);
+
+        return matchCount >= 3;
     }
 
     /**

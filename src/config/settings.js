@@ -18,7 +18,8 @@ const OPENAI_CONFIG = {
     },
     visionConfig: {
         max_tokens: 1024,
-        temperature: 0.7
+        temperature: 0.2,
+        detail: "high"
     }
 };
 
@@ -274,7 +275,6 @@ const CACHE_CONFIG = {
 const REQUIRED_ENV_VARS = [
     'OPENAI_API_KEY',
     'ASSISTANT_ID',
-    'GROQ_API_KEY',
     'REDIS_HOST',
     'REDIS_PORT',
     'REDIS_PASSWORD',
@@ -289,7 +289,6 @@ const REQUIRED_ENV_VARS = [
 
 module.exports = {
     OPENAI_CONFIG,
-    GROQ_CONFIG,
     REDIS_CONFIG,
     WHATSAPP_CONFIG,
     TRACKING_CONFIG,

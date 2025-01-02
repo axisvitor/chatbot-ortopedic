@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { RedisStore } = require('../store/redis-store');
 const { WhatsAppService } = require('./whatsapp-service');
+const { OpenAIVisionService } = require('./openai-vision-service');
 
 class MediaManagerService {
     constructor(audioService, imageService) {
@@ -10,6 +11,7 @@ class MediaManagerService {
         this.audioService = audioService;
         this.imageService = imageService;
         this.redisStore = new RedisStore();
+        this.visionService = new OpenAIVisionService();
         
         // Configurações
         this.MAX_AUDIO_DURATION = 300; // 5 minutos
@@ -123,15 +125,12 @@ class MediaManagerService {
                 throw new Error(`Imagem muito grande. Máximo: ${this.MAX_IMAGE_SIZE / (1024 * 1024)}MB`);
             }
 
-            // Processa a imagem
-            const result = await this.imageService.processWhatsAppImage(message);
+            // Processa a imagem usando OpenAI Vision
+            const result = await this.visionService.processImage(message);
 
-            // Se for comprovante, encaminha para o WhatsApp Service
-            if (result && result.isPaymentProof) {
-                const whatsapp = new WhatsAppService();
-                await whatsapp.handleImageMessage(message);
-                return null;
-            }
+            // Cache do resultado
+            const mediaId = this.generateMediaId(message);
+            await this.cacheResult(mediaId, 'image', result);
 
             return result;
         } catch (error) {
