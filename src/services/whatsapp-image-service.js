@@ -6,8 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { OPENAI_CONFIG } = require('../config/settings');
 
 class WhatsAppImageService {
-    constructor(groqServices) {
-        this.groqServices = groqServices;
+    constructor() {
         this.openaiAxios = axios.create({
             baseURL: 'https://api.openai.com/v1',
             headers: {
@@ -19,20 +18,31 @@ class WhatsAppImageService {
 
     async downloadImages(imageMessages) {
         try {
-            console.log('📥 Iniciando download das imagens do WhatsApp...');
+            console.log('📥 Iniciando download das imagens do WhatsApp...', {
+                mensagens: JSON.stringify(imageMessages, null, 2)
+            });
             
             if (!Array.isArray(imageMessages)) {
                 imageMessages = [imageMessages];
             }
 
+            // Valida se há mensagens
+            if (!imageMessages?.length) {
+                throw new Error('Nenhuma mensagem de imagem fornecida');
+            }
+
             const downloadedImages = await Promise.all(imageMessages.map(async (imageMessage) => {
-                if (!imageMessage?.url) {
+                console.log('Processando mensagem:', JSON.stringify(imageMessage, null, 2));
+
+                // Extrai URL da mensagem
+                const url = imageMessage?.url || imageMessage?.imageMessage?.url;
+                if (!url) {
                     throw new Error('URL da imagem não encontrada na mensagem');
                 }
 
                 // Garante que o mimetype é suportado
                 const supportedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-                const mimetype = imageMessage.mimetype || 'image/jpeg';
+                const mimetype = imageMessage?.mimetype || imageMessage?.imageMessage?.mimetype || 'image/jpeg';
                 
                 if (!supportedTypes.includes(mimetype)) {
                     throw new Error(`Tipo de imagem não suportado: ${mimetype}. Use: ${supportedTypes.join(', ')}`);
@@ -46,7 +56,7 @@ class WhatsAppImageService {
                 // Faz o download da imagem
                 const response = await axios({
                     method: 'get',
-                    url: imageMessage.url,
+                    url: url,
                     responseType: 'arraybuffer',
                     headers: {
                         'User-Agent': 'WhatsApp/2.23.24.82'
@@ -68,7 +78,7 @@ class WhatsAppImageService {
                 return {
                     filePath: tempFile,
                     mimetype: mimetype,
-                    caption: imageMessage.caption,
+                    caption: imageMessage?.caption || imageMessage?.imageMessage?.caption,
                     base64: base64Image
                 };
             }));
