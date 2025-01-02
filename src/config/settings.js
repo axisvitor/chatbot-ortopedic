@@ -59,6 +59,20 @@ const WHATSAPP_CONFIG = {
     connectionKey: validateEnvVar('WAPI_CONNECTION_KEY'),
     messageDelay: 3000, // delay padrão entre mensagens em ms
     retryAttempts: 3,
+    retryDelay: 1000,
+    connectionTimeout: 30000,
+    qrTimeout: 60000,
+    reconnectInterval: 5000,
+    maxReconnectAttempts: 5,
+    messageOptions: {
+        quoted: true,
+        sendSeen: true,
+        waitForAck: true
+    },
+    downloadOptions: {
+        maxRetries: 3,
+        timeout: 30000
+    },
     endpoints: {
         text: {
             path: 'message/send-text',
@@ -338,5 +352,6 @@ module.exports = {
     RATE_LIMIT_CONFIG,
     BUSINESS_HOURS,
     NUVEMSHOP_CONFIG,
+    WHATSAPP_CONFIG,
     REQUIRED_ENV_VARS
 };
