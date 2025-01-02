@@ -39,6 +39,7 @@
     "moment-timezone": "^0.5.45",
     "morgan": "^1.10.0",
     "openai": "^4.26.0",
+    "rate-limit-redis": "^4.1.1",
     "redis": "^4.6.12",
     "sharp": "^0.33.2",
     "uuid": "^9.0.0"
