@@ -134,17 +134,44 @@ class AIServices {
 
             // Para outros tipos de mensagem, continua o processamento normal
             const response = await this.generateResponse(messageData.from, messageData.text);
-            await this.whatsAppService.sendTextMessage(messageData.from, response);
+            await this.whatsAppService.sendText(messageData.from, response);
 
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', error);
             
             // Envia mensagem de erro para o usuário
-            await this.whatsAppService.sendTextMessage(
+            await this.whatsAppService.sendText(
                 messageData.from,
                 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
             );
             
+            throw error;
+        }
+    }
+
+    /**
+     * Gera uma resposta para a mensagem do usuário
+     * @param {string} from Número do usuário
+     * @param {string} message Mensagem do usuário
+     * @returns {Promise<string>} Resposta gerada
+     */
+    async generateResponse(from, message) {
+        try {
+            // Recupera ou cria histórico do chat
+            const chatHistory = await this.getChatHistory(from);
+
+            // Adiciona mensagem do usuário ao thread
+            await this.openAIService.addMessage(chatHistory.threadId, message);
+
+            // Gera resposta usando o modelo
+            const response = await this.openAIService.generateResponse(chatHistory.threadId);
+
+            // Atualiza histórico com a nova resposta
+            await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
+
+            return response;
+        } catch (error) {
+            console.error('❌ Erro ao gerar resposta:', error);
             throw error;
         }
     }
