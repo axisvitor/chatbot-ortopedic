@@ -21,10 +21,22 @@ class OpenAIVisionService {
      */
     async processImage(message) {
         try {
+            // Validação inicial dos dados da imagem
+            if (!message?.imageMessage?.base64 || !message?.imageMessage?.mimetype) {
+                throw new Error('Mensagem inválida: faltam dados da imagem');
+            }
+
             console.log('🎯 [OpenAIVision] Iniciando processamento:', {
                 messageId: message.key?.id,
                 timestamp: new Date().toISOString()
             });
+
+            // Garantir que o formato da imagem está correto
+            const base64Image = message.imageMessage.base64;
+            const mimeType = message.imageMessage.mimetype;
+
+            // Construir a URL da imagem em base64
+            const imageUrl = `data:${mimeType};base64,${base64Image}`;
 
             const payload = {
                 model: "gpt-4o-mini",
@@ -34,12 +46,12 @@ class OpenAIVisionService {
                         content: [
                             {
                                 type: "text",
-                                text: message.imageMessage.caption || "Você é um assistente especializado em análise de imagens. Analise a imagem em detalhes e forneça uma descrição completa e precisa do que você vê."
+                                text: message.imageMessage.caption || "Analise esta imagem em detalhes e descreva o que você vê."
                             },
                             {
                                 type: "image_url",
                                 image_url: {
-                                    url: `data:${message.imageMessage.mimetype};base64,${message.imageMessage.base64}`
+                                    url: imageUrl
                                 }
                             }
                         ]
@@ -51,36 +63,38 @@ class OpenAIVisionService {
             console.log('📤 [OpenAIVision] Enviando para API:', {
                 messageId: message.key?.id,
                 modelo: payload.model,
+                mimeType: mimeType,
                 timestamp: new Date().toISOString()
             });
 
             const response = await this.axios.post('/chat/completions', payload);
 
-            if (!response.data?.choices?.[0]?.message?.content) {
+            // Validação da resposta usando optional chaining
+            const content = response?.data?.choices?.[0]?.message?.content;
+            if (!content) {
                 console.error('❌ [OpenAIVision] Resposta inválida:', {
                     messageId: message.key?.id,
-                    status: response.status,
-                    data: response.data
+                    status: response?.status,
+                    data: response?.data
                 });
                 throw new Error('Resposta inválida da API OpenAI Vision');
             }
 
-            const analysis = response.data.choices[0].message.content;
-
             console.log('✅ [OpenAIVision] Análise concluída:', {
                 messageId: message.key?.id,
-                tamanhoResposta: analysis.length,
-                preview: analysis.substring(0, 100) + '...',
+                tamanhoResposta: content.length,
+                preview: content.substring(0, 100) + '...',
                 timestamp: new Date().toISOString()
             });
 
             return {
                 success: true,
-                analysis,
+                analysis: content,
                 metadata: {
                     model: payload.model,
                     tokens: response.data.usage,
-                    messageId: message.key?.id
+                    messageId: message.key?.id,
+                    mimeType: mimeType
                 }
             };
 
