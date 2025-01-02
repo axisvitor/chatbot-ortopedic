@@ -570,11 +570,11 @@ class WhatsAppImageService {
                                 - Se é um comprovante de pagamento
                                 - Se contém texto legível
                                 - Elementos visuais importantes
-                                - Qualquer informação médica ou relacionada à ortopedia`;
+                                - Qualquer informação`;
 
             // Envia para análise
             const response = await this.openaiAxios.post('/v1/chat/completions', {
-                model: "gpt-4-vision-preview",
+                model: "gpt-4o",
                 messages: [
                     {
                         role: "system",
@@ -604,7 +604,7 @@ class WhatsAppImageService {
                 success: true,
                 analysis: response.data.choices[0].message.content,
                 metadata: {
-                    model: "gpt-4-vision-preview",
+                    model: "gpt-4o",
                     tokens: response.data.usage,
                     from: from,
                     messageId: messageData.key?.id

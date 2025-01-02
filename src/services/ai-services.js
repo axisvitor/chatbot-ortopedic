@@ -213,14 +213,8 @@ class AIServices {
                 throw new Error('Thread ID não encontrado no histórico do chat');
             }
 
-            // Adiciona a mensagem ao thread do Assistant
-            await this.openAIService.addMessage(chatHistory.threadId, {
-                role: 'user',
-                content: message
-            });
-
-            // Executa o Assistant e aguarda a resposta
-            const response = await this.openAIService.runAssistant(chatHistory.threadId);
+            // Processa a mensagem com o Assistant
+            const response = await this.openAIService.processCustomerMessage(from, message);
 
             if (!response) {
                 console.warn(`[AIServices] Resposta vazia recebida para ${from}`);
