@@ -1,46 +1,35 @@
 const express = require('express');
-const rateLimit = require('express-rate-limit');
-const helmet = require('helmet');
-const morgan = require('morgan');
 const cors = require('cors');
-const bodyParser = require('body-parser');
-const { RedisStore } = require('./store/redis-store');
-
-// Importa todos os serviços do arquivo centralizado
-const {
-    GroqServices,
-    WebhookService,
+const rateLimit = require('express-rate-limit');
+const { createClient } = require('redis');
+const { RedisStore } = require('rate-limit-redis');
+const { 
     WhatsAppService,
-    AIServices,
-    AudioService,
-    WhatsAppImageService,
-    ImageService,
-    BusinessHoursService,
-    OrderValidationService,
-    NuvemshopService,
     TrackingService,
-    CacheService,
-    MediaManagerService
+    OrderValidationService,
+    GroqServices,
+    AudioService,
+    ImageService,
+    MediaManagerService,
+    NuvemshopService,
+    AIServices,
+    WebhookService,
+    WhatsAppImageService,
+    OpenAIService
 } = require('./services');
 
-// Importação dos serviços de imagem
-const { WhatsAppImageService } = require('./services/whatsapp-image-service');
+// Importação dos novos serviços
 const { OpenAIVisionService } = require('./services/openai-vision-service');
-const { AIServices } = require('./services/ai-services');
-const { WhatsAppService } = require('./services/whatsapp-service');
-const { OpenAIService } = require('./services/openai-service');
 
 // Configurações
 const { 
     RATE_LIMIT_CONFIG,
     REDIS_CONFIG,
-    BUSINESS_HOURS,
-    REQUIRED_ENV_VARS
+    PORT
 } = require('./config/settings');
 
 // Lista de variáveis de ambiente requeridas
 const requiredEnvVars = [
-    ...REQUIRED_ENV_VARS,
     'PORT'
 ];
 
@@ -132,9 +121,18 @@ async function initializeServices() {
             cacheService = new CacheService(redisStore);
             console.log('✅ CacheService inicializado');
             
-            // Inicializa os serviços principais
+            // Inicialização dos serviços
             const whatsAppService = new WhatsAppService();
             console.log('✅ WhatsAppService criado');
+
+            const whatsAppImageService = new WhatsAppImageService();
+            console.log('✅ WhatsAppImageService criado');
+
+            const openAIService = new OpenAIService();
+            console.log('✅ OpenAIService criado');
+
+            const openAIVisionService = new OpenAIVisionService();
+            console.log('✅ OpenAIVisionService criado');
 
             const trackingService = new TrackingService(whatsAppService);
             console.log('✅ TrackingService criado');
@@ -152,15 +150,23 @@ async function initializeServices() {
                 throw new Error('WhatsAppService não inicializou corretamente');
             }
 
+            // Inicializa os serviços de IA
+            const aiServices = new AIServices(
+                whatsAppService,
+                whatsAppImageService,
+                openAIVisionService,
+                openAIService,
+                trackingService,
+                orderValidationService
+            );
+            console.log('✅ AIServices inicializado');
+
             // Inicializa outros serviços
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
             audioService = new AudioService(groqServices, whatsAppService);
             console.log('✅ AudioService inicializado');
-
-            const whatsappImageService = new WhatsAppImageService(groqServices);
-            console.log('✅ WhatsAppImageService inicializado');
 
             imageService = new ImageService(whatsAppService);
             console.log('✅ ImageService inicializado');
@@ -173,23 +179,6 @@ async function initializeServices() {
 
             nuvemshopService = new NuvemshopService(cacheService);
             console.log('✅ NuvemshopService inicializado');
-
-            const openAIService = new OpenAIService();
-            const openAIVisionService = new OpenAIVisionService();
-
-            aiServices = new AIServices(
-                whatsAppService,
-                whatsappImageService,
-                openAIVisionService,
-                openAIService,
-                trackingService,
-                orderValidationService,
-                nuvemshopService,
-                audioService,
-                imageService,
-                businessHoursService
-            );
-            console.log('✅ AIServices inicializado');
 
             webhookService = new WebhookService(whatsAppService, aiServices, audioService);
             console.log('✅ WebhookService inicializado');
@@ -207,13 +196,11 @@ async function initializeServices() {
 }
 
 // Middlewares
-app.use(helmet());
-app.use(morgan('dev'));
 app.use(cors());
 
 // Aumenta o limite do body-parser para 50MB
-app.use(bodyParser.json({ limit: '50mb' }));
-app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Healthcheck endpoint
 app.get('/', async (req, res) => {
