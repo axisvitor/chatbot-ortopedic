@@ -574,6 +574,81 @@ class WhatsAppService {
         }
     }
 
+    async handleImageMessage(message) {
+        try {
+            console.log('📸 [WhatsApp] Recebido mensagem com imagem:', {
+                messageId: message.key?.id,
+                from: message.key?.remoteJid,
+                timestamp: new Date().toISOString()
+            });
+
+            // Valida se é uma imagem
+            if (!message.imageMessage) {
+                console.error('❌ [WhatsApp] Mensagem não contém imagem:', {
+                    messageId: message.key?.id,
+                    tipo: message.type
+                });
+                throw new Error('Mensagem não contém imagem');
+            }
+
+            console.log('🔄 [WhatsApp] Enviando para MediaManager:', {
+                messageId: message.key?.id,
+                timestamp: new Date().toISOString()
+            });
+
+            // Processa a imagem
+            const result = await this._mediaManager.processImage(message);
+
+            if (!result.success) {
+                console.error('❌ [WhatsApp] Falha no processamento:', {
+                    messageId: message.key?.id,
+                    erro: result.error,
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error(result.error || 'Erro ao processar imagem');
+            }
+
+            console.log('✅ [WhatsApp] Processamento concluído:', {
+                messageId: message.key?.id,
+                temAnalise: !!result.analysis,
+                tamanhoAnalise: result.analysis?.length,
+                timestamp: new Date().toISOString()
+            });
+
+            // Identifica se é um comprovante de pagamento
+            const isPaymentProof = result.analysis.toLowerCase().includes('comprovante de pagamento');
+            
+            console.log('🔍 [WhatsApp] Análise de tipo:', {
+                messageId: message.key?.id,
+                isPaymentProof,
+                timestamp: new Date().toISOString()
+            });
+
+            if (isPaymentProof) {
+                await this.handlePaymentProof(message, result.analysis);
+            } else {
+                await this.sendTextMessage(message.key.remoteJid, 'Desculpe, mas não identifiquei um comprovante de pagamento válido nesta imagem.');
+            }
+
+            return result;
+
+        } catch (error) {
+            console.error('❌ [WhatsApp] Erro ao processar imagem:', {
+                erro: error.message,
+                stack: error.stack,
+                messageId: message.key?.id,
+                timestamp: new Date().toISOString()
+            });
+
+            await this.sendTextMessage(
+                message.key.remoteJid,
+                `Desculpe, ocorreu um erro ao processar sua imagem: ${error.message}`
+            );
+
+            throw error;
+        }
+    }
+
     /**
      * Processa comprovante de pagamento com número do pedido
      * @param {string} from - Número do remetente
@@ -673,77 +748,6 @@ class WhatsAppService {
         } catch (error) {
             console.error(' Erro ao processar número do pedido:', error);
             throw error;
-        }
-    }
-
-    /**
-     * Processa uma mensagem de imagem
-     * @param {Object} message Mensagem do WhatsApp
-     */
-    async handleImageMessage(message) {
-        try {
-            console.log('📸 Recebida mensagem com imagem:', {
-                messageId: message.key?.id,
-                from: message.key?.remoteJid,
-                timestamp: new Date().toISOString()
-            });
-
-            // Usa o MediaManager para processar a imagem
-            const result = await this._mediaManager.processMedia(message);
-
-            // Se houve erro no processamento
-            if (!result.success) {
-                console.error('❌ Erro ao processar imagem:', result.error);
-                await this.sendText(
-                    message.key.remoteJid,
-                    'Desculpe, não consegui processar sua imagem. Por favor, tente novamente.'
-                );
-                return;
-            }
-
-            // Verifica se é um comprovante de pagamento
-            const isPaymentProof = this._isPaymentProof(result.analysis);
-            
-            if (isPaymentProof) {
-                console.log('💰 Comprovante de pagamento detectado');
-                
-                // Encaminha para o financeiro se configurado
-                const financialNumber = process.env.FINANCIAL_DEPT_NUMBER;
-                if (financialNumber) {
-                    await this.forwardMessage(message, financialNumber);
-                    await this.sendText(
-                        financialNumber,
-                        `*Novo Comprovante Recebido*\nCliente: ${message.key.remoteJid}\nData: ${new Date().toLocaleString('pt-BR')}\n\nAnálise:\n${result.analysis}`
-                    );
-                }
-
-                // Responde ao cliente
-                await this.sendText(
-                    message.key.remoteJid,
-                    'Recebi seu comprovante e já encaminhei para nossa equipe financeira! ' +
-                    'Para agilizar o processo, por favor me informe o número do seu pedido.'
-                );
-                return;
-            }
-
-            // Se não for comprovante, envia a análise
-            console.log('✅ Enviando análise da imagem');
-            await this.sendText(message.key.remoteJid, result.analysis);
-
-        } catch (error) {
-            console.error('❌ Erro ao processar mensagem de imagem:', {
-                erro: error.message,
-                stack: error.stack
-            });
-            
-            try {
-                await this.sendText(
-                    message.key.remoteJid,
-                    'Desculpe, ocorreu um erro ao processar sua imagem. Por favor, tente novamente em alguns instantes.'
-                );
-            } catch (sendError) {
-                console.error('❌ Erro ao enviar mensagem de erro:', sendError);
-            }
         }
     }
 

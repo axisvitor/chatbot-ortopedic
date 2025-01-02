@@ -16,27 +16,38 @@ class OpenAIVisionService {
 
     /**
      * Processa uma imagem e retorna a análise
-     * @param {Buffer} buffer Buffer da imagem
      * @param {Object} message Mensagem com informações adicionais
-     * @param {number} attempt Número da tentativa (para retry)
      * @returns {Promise<Object>} Resultado da análise
      */
-    async processImage(buffer, message, attempt = 1) {
+    async processImage(message) {
         try {
-            // Detecta o formato da imagem
-            const imageFormat = await detectImageFormatFromBuffer(buffer);
-            if (!imageFormat) {
-                throw new Error('Formato de imagem não suportado');
-            }
+            console.log('🎯 [OpenAIVision] Iniciando processamento:', {
+                messageId: message.key?.id,
+                from: message.key?.remoteJid,
+                timestamp: new Date().toISOString()
+            });
 
-            // Converte o buffer para base64
+            // Download da imagem
+            console.log('📥 [OpenAIVision] Baixando mídia...', {
+                messageId: message.key?.id
+            });
+
+            const buffer = await downloadMediaMessage(message, 'buffer');
+
+            console.log('✅ [OpenAIVision] Download concluído:', {
+                messageId: message.key?.id,
+                tamanho: buffer.length,
+                tamanhoMB: (buffer.length / (1024 * 1024)).toFixed(2) + 'MB'
+            });
+
+            // Converte para base64
             const base64Image = buffer.toString('base64');
-
-            // Verifica o tamanho do payload base64
-            const base64Size = base64Image.length * 0.75; // Tamanho aproximado em bytes
-            if (base64Size > 20 * 1024 * 1024) { // 20MB limite OpenAI
-                throw new Error('Imagem muito grande. Máximo permitido: 20MB');
-            }
+            
+            console.log('🔄 [OpenAIVision] Preparando payload:', {
+                messageId: message.key?.id,
+                tamanhoBase64: base64Image.length,
+                timestamp: new Date().toISOString()
+            });
 
             // Monta o payload para a OpenAI Vision
             const payload = {
@@ -50,13 +61,12 @@ class OpenAIVisionService {
                                 text: 'Analise esta imagem em detalhes. Determine:\n' +
                                     '1. O tipo da imagem (comprovante de pagamento, foto de calçado, foto de pés para medidas, tabela de medidas/numeração)\n' +
                                     '2. Uma descrição detalhada do que você vê\n' +
-                                    '3. Se for um comprovante de pagamento, extraia: valor, data e ID da transação\n' +
-                                    (message?.extractedText ? `\nTexto extraído via OCR: ${message.extractedText}` : '')
+                                    '3. Se for um comprovante de pagamento, extraia: valor, data e ID da transação'
                             },
                             {
                                 type: 'image_url',
                                 image_url: {
-                                    url: `data:${imageFormat};base64,${base64Image}`,
+                                    url: `data:${message.imageMessage.mimetype};base64,${base64Image}`,
                                     detail: OPENAI_CONFIG.visionConfig.detail
                                 }
                             }
@@ -66,49 +76,51 @@ class OpenAIVisionService {
                 ...OPENAI_CONFIG.visionConfig
             };
 
-            console.log('📤 Enviando imagem para análise:', {
-                imageFormat,
-                base64Size: Math.round(base64Size / 1024) + 'KB',
-                hasOCR: !!message?.extractedText,
+            console.log('📤 [OpenAIVision] Enviando para API:', {
+                messageId: message.key?.id,
+                modelo: OPENAI_CONFIG.models.vision,
                 timestamp: new Date().toISOString()
             });
 
             const response = await this.axios.post('/chat/completions', payload);
 
-            if (response.status !== 200) {
-                console.error(`❌ Erro na API OpenAI (Tentativa ${attempt}):`, {
+            if (!response.data?.choices?.[0]?.message?.content) {
+                console.error('❌ [OpenAIVision] Resposta inválida:', {
+                    messageId: message.key?.id,
                     status: response.status,
-                    data: response.data,
-                    timestamp: new Date().toISOString()
+                    data: response.data
                 });
-                throw new Error(`Erro na API OpenAI: ${response.status} - ${JSON.stringify(response.data)}`);
+                throw new Error('Resposta inválida da API OpenAI Vision');
             }
 
-            // Processa a resposta
-            const content = response.data.choices[0].message.content;
-            
-            console.log('✅ Análise concluída:', {
-                responseLength: content.length,
+            const analysis = response.data.choices[0].message.content;
+
+            console.log('✅ [OpenAIVision] Análise concluída:', {
+                messageId: message.key?.id,
+                tamanhoResposta: analysis.length,
+                preview: analysis.substring(0, 100) + '...',
                 timestamp: new Date().toISOString()
             });
 
-            return JSON.parse(content);
+            return {
+                success: true,
+                analysis
+            };
 
         } catch (error) {
-            console.error(`❌ Erro ao processar imagem (Tentativa ${attempt}):`, {
-                error: error.message,
+            console.error('❌ [OpenAIVision] Erro no processamento:', {
+                erro: error.message,
                 stack: error.stack,
+                status: error.response?.status,
+                data: error.response?.data,
+                messageId: message.key?.id,
                 timestamp: new Date().toISOString()
             });
 
-            // Tenta novamente se não excedeu o número máximo de tentativas
-            if (attempt < 3) {
-                console.log(`🔄 Tentando novamente (${attempt + 1}/3)...`);
-                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                return this.processImage(buffer, message, attempt + 1);
-            }
-
-            throw error;
+            return {
+                success: false,
+                error: error.message
+            };
         }
     }
 
@@ -192,4 +204,4 @@ class OpenAIVisionService {
     }
 }
 
-module.exports = { OpenAIVisionService }; 
+module.exports = { OpenAIVisionService };

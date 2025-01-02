@@ -115,26 +115,72 @@ class MediaManagerService {
      */
     async processImage(message) {
         try {
+            console.log('🖼️ [MediaManager] Iniciando processamento de imagem:', {
+                messageId: message.key?.id,
+                from: message.key?.remoteJid,
+                mimetype: message.imageMessage?.mimetype,
+                fileSize: message.imageMessage?.fileLength,
+                timestamp: new Date().toISOString()
+            });
+
             // Validação de tipo
             if (!this.ALLOWED_IMAGE_TYPES.includes(message.imageMessage.mimetype)) {
+                console.error('❌ [MediaManager] Tipo de imagem não suportado:', {
+                    tipo: message.imageMessage.mimetype,
+                    permitidos: this.ALLOWED_IMAGE_TYPES
+                });
                 throw new Error(`Formato não suportado. Use: ${this.ALLOWED_IMAGE_TYPES.join(', ')}`);
             }
 
             // Validação de tamanho
             if (message.imageMessage.fileLength > this.MAX_IMAGE_SIZE) {
+                console.error('❌ [MediaManager] Imagem muito grande:', {
+                    tamanho: message.imageMessage.fileLength,
+                    maximo: this.MAX_IMAGE_SIZE,
+                    tamanhoMB: (message.imageMessage.fileLength / (1024 * 1024)).toFixed(2) + 'MB',
+                    maximoMB: (this.MAX_IMAGE_SIZE / (1024 * 1024)).toFixed(2) + 'MB'
+                });
                 throw new Error(`Imagem muito grande. Máximo: ${this.MAX_IMAGE_SIZE / (1024 * 1024)}MB`);
             }
 
+            console.log('✅ [MediaManager] Validações iniciais OK:', {
+                messageId: message.key?.id,
+                timestamp: new Date().toISOString()
+            });
+
             // Processa a imagem usando OpenAI Vision
+            console.log('🔄 [MediaManager] Enviando para processamento Vision:', {
+                messageId: message.key?.id,
+                timestamp: new Date().toISOString()
+            });
+
             const result = await this.visionService.processImage(message);
+
+            console.log('✅ [MediaManager] Processamento Vision concluído:', {
+                messageId: message.key?.id,
+                temAnalise: !!result?.analysis,
+                tamanhoAnalise: result?.analysis?.length,
+                timestamp: new Date().toISOString()
+            });
 
             // Cache do resultado
             const mediaId = this.generateMediaId(message);
+            console.log('💾 [MediaManager] Salvando no cache:', {
+                mediaId,
+                messageId: message.key?.id,
+                timestamp: new Date().toISOString()
+            });
+
             await this.cacheResult(mediaId, 'image', result);
 
             return result;
         } catch (error) {
-            console.error('[MediaManager] Erro ao processar imagem:', error);
+            console.error('❌ [MediaManager] Erro ao processar imagem:', {
+                erro: error.message,
+                stack: error.stack,
+                messageId: message.key?.id,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }
