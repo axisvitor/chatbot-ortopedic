@@ -1,8 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const { createClient } = require('redis');
-const { RedisStore } = require('rate-limit-redis');
+const { RedisStore } = require('./store/redis-store');
 const { 
     WhatsAppService,
     TrackingService,
@@ -15,7 +14,8 @@ const {
     AIServices,
     WebhookService,
     WhatsAppImageService,
-    OpenAIService
+    OpenAIService,
+    CacheService
 } = require('./services');
 
 // Importação dos novos serviços
@@ -35,6 +35,15 @@ const requiredEnvVars = [
 
 // Inicializa o Redis Store
 const redisStore = new RedisStore();
+
+// Configuração do rate limiter
+const limiter = rateLimit({
+    windowMs: RATE_LIMIT_CONFIG.windowMs || 15 * 60 * 1000, // 15 minutos por padrão
+    max: RATE_LIMIT_CONFIG.max || 100, // limite de 100 requisições por windowMs
+    message: 'Muitas requisições deste IP, por favor tente novamente mais tarde.',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 // Tratamento de erros não capturados
 process.on('uncaughtException', (error) => {
@@ -197,8 +206,7 @@ async function initializeServices() {
 
 // Middlewares
 app.use(cors());
-
-// Aumenta o limite do body-parser para 50MB
+app.use(limiter); // Aplica rate limiting
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
