@@ -123,7 +123,8 @@ class AIServices {
                 await this.handleImageMessage({
                     message: messageContent,
                     key: messageKey,
-                    pushName
+                    pushName,
+                    de: from
                 });
             } 
             else if (messageContent?.audioMessage) {
@@ -131,7 +132,8 @@ class AIServices {
                 await this.handleAudioMessage({
                     message: messageContent,
                     key: messageKey,
-                    pushName
+                    pushName,
+                    de: from
                 });
             }
             else if (messageContent?.extendedTextMessage || messageContent?.conversation) {
@@ -386,11 +388,12 @@ class AIServices {
 
     async handleImageMessage(message) {
         try {
-            const { de: from } = message;
-            console.log('📨 Processando mensagem de imagem:', { de: from });
+            const { de: from, message: imageMessage } = message;
+            if (!from) {
+                throw new Error('Remetente não encontrado na mensagem');
+            }
 
-            // Obtém o histórico do chat
-            const chatHistory = await this.getChatHistory(from);
+            console.log('📨 Processando mensagem de imagem:', { de: from });
 
             // Baixa a imagem
             const imageBuffer = await this.whatsAppImageService.downloadImage(message);
@@ -400,20 +403,33 @@ class AIServices {
 
             // Converte para base64
             const base64Image = imageBuffer.toString('base64');
+            const caption = imageMessage?.imageMessage?.caption || '';
 
-            // Analisa a imagem com Groq Vision
-            const imageAnalysis = await this.analyzeImageWithGroq(base64Image);
-            console.log('📝 Análise da imagem:', imageAnalysis);
+            // Prepara dados da imagem para GPT-4V
+            const imageData = {
+                text: caption || 'O que você vê nesta imagem?',
+                image: {
+                    base64: base64Image,
+                    mimetype: imageMessage?.imageMessage?.mimetype || 'image/jpeg'
+                }
+            };
+
+            // Primeiro analisa com GPT-4V
+            const imageAnalysis = await this.imageService.analyzeWithGPT4V(imageData);
+            console.log('📝 Análise da imagem:', {
+                tamanhoAnalise: imageAnalysis?.length,
+                primeirasLinhas: imageAnalysis?.split('\n').slice(0, 2).join('\n')
+            });
 
             if (!imageAnalysis) {
                 throw new Error('Não foi possível analisar a imagem');
             }
 
-            // Envia a análise para o OpenAI Assistant
-            const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
-                role: 'user',
-                content: imageAnalysis
-            });
+            // Envia a análise para o Assistant processar e responder
+            const response = await this.openAIService.processCustomerMessage(
+                from,
+                `[ANÁLISE DA IMAGEM]\n${imageAnalysis}\n\n[CONTEXTO]\n${caption || 'Imagem enviada pelo usuário.'}`
+            );
 
             if (response) {
                 await this.sendResponse(from, response);
@@ -421,7 +437,14 @@ class AIServices {
 
         } catch (error) {
             console.error('❌ Erro ao processar imagem:', error);
-            await this.sendResponse(from, 'Desculpe, não consegui processar sua imagem. Por favor, tente enviar novamente ou envie uma mensagem de texto.');
+            
+            const from = message?.de || message?.key?.remoteJid?.replace('@s.whatsapp.net', '');
+            if (from) {
+                await this.sendResponse(
+                    from,
+                    'Desculpe, não consegui processar sua imagem. Por favor, tente enviar novamente ou envie uma mensagem de texto.'
+                );
+            }
         }
     }
 
