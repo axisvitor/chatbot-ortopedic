@@ -452,7 +452,7 @@ class OpenAIService {
     async waitForResponse(threadId, runId) {
         try {
             let attempts = 0;
-            const maxAttempts = 45; // 45 segundos no máximo
+            const maxAttempts = 180; // 180 segundos (3 minutos)
 
             while (attempts < maxAttempts) {
                 const run = await this.client.beta.threads.runs.retrieve(
