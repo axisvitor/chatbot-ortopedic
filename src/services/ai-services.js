@@ -747,7 +747,7 @@ class AIServices {
     }
 
     /**
-     * Processa uma imagem genérica usando GPT-4 Vision
+     * Processa uma imagem genérica usando GPT-4o Vision
      * @param {string} from Remetente
      * @param {Array} imageMessages Array de mensagens com imagens
      * @param {Object} imageAnalysis Análise prévia da imagem
@@ -755,7 +755,7 @@ class AIServices {
      */
     async processGenericImage(from, imageMessages, imageAnalysis) {
         try {
-            // A imagem já foi analisada pelo GPT-4 Vision, podemos usar a análise
+            // A imagem já foi analisada pelo GPT-4o Vision, podemos usar a análise
             const response = await this.generateResponse(from, '', {
                 messageType: 'generic_image',
                 imageAnalysis: imageAnalysis.analysis

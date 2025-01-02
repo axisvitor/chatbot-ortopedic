@@ -3,7 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const { v4: uuidv4 } = require('uuid');
-const { OPENAI_CONFIG } = require('../config/settings');
+const { OPENAI_CONFIG, WHATSAPP_CONFIG } = require('../config/settings');
 
 class WhatsAppImageService {
     constructor() {
@@ -11,6 +11,14 @@ class WhatsAppImageService {
             baseURL: 'https://api.openai.com/v1',
             headers: {
                 'Authorization': `Bearer ${OPENAI_CONFIG.apiKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        this.whatsappAxios = axios.create({
+            baseURL: 'https://graph.facebook.com/v13.0/',
+            headers: {
+                'Authorization': `Bearer ${WHATSAPP_CONFIG.apiKey}`,
                 'Content-Type': 'application/json'
             }
         });
@@ -50,6 +58,64 @@ class WhatsAppImageService {
         }
     }
 
+    /**
+     * Faz download de uma mídia do WhatsApp usando o endpoint oficial
+     * @param {string} mediaId ID da mídia
+     * @returns {Promise<Buffer>} Buffer com o conteúdo da mídia
+     */
+    async downloadMedia(mediaId) {
+        try {
+            console.log('📥 Iniciando download de mídia:', { mediaId });
+            
+            // 1. Solicita o download da mídia
+            const downloadResponse = await this.whatsappAxios.get(`/v1/media/${mediaId}/download`);
+            
+            if (downloadResponse.data?.errors) {
+                throw new Error(`Erro ao solicitar download: ${JSON.stringify(downloadResponse.data.errors)}`);
+            }
+
+            // 2. Aguarda até 30 segundos pelo download (com retry)
+            let retryCount = 0;
+            const maxRetries = 6; // 6 tentativas = 30 segundos total
+            
+            while (retryCount < maxRetries) {
+                try {
+                    // Verifica o status do download
+                    const statusResponse = await this.whatsappAxios.get(`/v1/media/${mediaId}`);
+                    
+                    if (statusResponse.data?.media_items?.[0]?.status === 'downloaded') {
+                        // Mídia baixada com sucesso, retorna o buffer
+                        const mediaResponse = await this.whatsappAxios.get(`/v1/media/${mediaId}/content`, {
+                            responseType: 'arraybuffer'
+                        });
+                        
+                        return mediaResponse.data;
+                    }
+                    
+                    // Se ainda não baixou, aguarda 5 segundos
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                    retryCount++;
+                    
+                } catch (error) {
+                    console.warn(`⚠️ Tentativa ${retryCount + 1} falhou:`, error.message);
+                    if (retryCount === maxRetries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                    retryCount++;
+                }
+            }
+            
+            throw new Error(`Timeout ao aguardar download da mídia após ${maxRetries} tentativas`);
+
+        } catch (error) {
+            console.error('❌ Erro ao baixar mídia:', {
+                erro: error.message,
+                mediaId,
+                stack: error.stack
+            });
+            throw error;
+        }
+    }
+
     async downloadImages(imageMessages) {
         try {
             console.log('📥 Iniciando download das imagens do WhatsApp...', {
@@ -71,13 +137,13 @@ class WhatsAppImageService {
                 // Extrai o remetente usando a nova função robusta
                 const from = this.extractSenderNumber(imageMessage);
 
-                // Extrai URL da mensagem
-                const url = imageMessage?.url || 
-                          imageMessage?.imageMessage?.url || 
-                          imageMessage?.directPath;  // Adicionado directPath como fallback
+                // Extrai ID da mídia
+                const mediaId = imageMessage?.imageMessage?.mediaKey || 
+                              imageMessage?.mediaKey ||
+                              imageMessage?.id;
 
-                if (!url) {
-                    throw new Error('URL da imagem não encontrada na mensagem');
+                if (!mediaId) {
+                    throw new Error('ID da mídia não encontrado na mensagem');
                 }
 
                 // Garante que o mimetype é suportado
@@ -90,43 +156,22 @@ class WhatsAppImageService {
                     throw new Error(`Tipo de imagem não suportado: ${mimetype}. Use: ${supportedTypes.join(', ')}`);
                 }
 
-                // Gera um nome único para o arquivo temporário com a extensão correta
+                // Gera um nome único para o arquivo temporário
                 const extension = mimetype.split('/')[1];
                 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'whatsapp-'));
                 const tempFile = path.join(tempDir, `${uuidv4()}.${extension}`);
 
-                // Faz o download da imagem com retry em caso de falha
-                let response;
-                let retryCount = 0;
-                const maxRetries = 3;
-
-                while (retryCount < maxRetries) {
-                    try {
-                        response = await axios({
-                            method: 'get',
-                            url: url,
-                            responseType: 'arraybuffer',
-                            headers: {
-                                'User-Agent': 'WhatsApp/2.23.24.82'
-                            },
-                            timeout: 10000 // 10 segundos
-                        });
-                        break;
-                    } catch (error) {
-                        retryCount++;
-                        if (retryCount === maxRetries) throw error;
-                        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                    }
-                }
+                // Faz o download usando o endpoint oficial
+                const mediaBuffer = await this.downloadMedia(mediaId);
 
                 // Salva a imagem no arquivo temporário
-                await fs.writeFile(tempFile, response.data);
+                await fs.writeFile(tempFile, mediaBuffer);
 
                 // Converte para base64
-                const base64Image = Buffer.from(response.data).toString('base64');
+                const base64Image = mediaBuffer.toString('base64');
 
                 console.log('✅ Download da imagem concluído:', {
-                    tamanho: response.data.length,
+                    tamanho: mediaBuffer.length,
                     arquivo: tempFile,
                     mimetype: mimetype,
                     from: from
@@ -137,7 +182,8 @@ class WhatsAppImageService {
                     mimetype: mimetype,
                     caption: imageMessage?.caption || imageMessage?.imageMessage?.caption,
                     base64: base64Image,
-                    from: from
+                    from: from,
+                    mediaId: mediaId
                 };
             }));
 
@@ -215,7 +261,7 @@ class WhatsAppImageService {
                 success: true,
                 analysis: response.data.choices[0].message.content,
                 metadata: {
-                    model: "gpt-4-vision-preview",
+                    model: "gpt-4o",
                     tokens: response.data.usage,
                     from: from
                 }
