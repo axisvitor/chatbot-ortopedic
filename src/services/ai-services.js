@@ -9,6 +9,7 @@ const { NuvemshopService } = require('./nuvemshop-service');
 const { GroqServices } = require('./groq-services');
 const { AudioService } = require('./audio-service');
 const { ImageService } = require('./image-service');
+const { OpenAIVisionService } = require('./openai-vision-service');
 
 class AIServices {
     constructor(whatsAppService, whatsAppImageService, redisStore, openAIService, trackingService, orderValidationService, nuvemshopService, businessHoursService) {
@@ -23,6 +24,7 @@ class AIServices {
         this.audioService = new AudioService();
         this.groqServices = new GroqServices();
         this.imageService = new ImageService(this.groqServices, this.whatsAppService);
+        this.visionService = new OpenAIVisionService();
     }
 
     /**
@@ -388,69 +390,110 @@ class AIServices {
 
     async handleImageMessage(message) {
         try {
-            const { de: from, message: imageMessage } = message;
-            if (!from) {
-                throw new Error('Remetente não encontrado na mensagem');
-            }
+            const from = message.key?.remoteJid?.replace('@s.whatsapp.net', '') || message.de;
+            
+            console.log('🖼️ [AIServices] Processando mensagem de imagem:', { from });
 
-            console.log('📨 Processando mensagem de imagem:', { de: from });
-
-            // Baixa a imagem
-            const imageBuffer = await this.whatsAppImageService.downloadImage(message);
-            if (!imageBuffer) {
-                throw new Error('Não foi possível baixar a imagem');
-            }
-
-            // Converte para base64
-            const base64Image = imageBuffer.toString('base64');
-            const caption = imageMessage?.imageMessage?.caption || '';
-
-            // Prepara dados da imagem para GPT-4V
-            const imageData = {
-                text: caption || 'O que você vê nesta imagem?',
-                image: {
-                    base64: base64Image,
-                    mimetype: imageMessage?.imageMessage?.mimetype || 'image/jpeg'
+            // Download e processamento da imagem usando Baileys
+            const imageData = await this.whatsAppImageService.downloadImage(message);
+            
+            // Prepara os dados para análise
+            const analysisData = {
+                buffer: imageData.buffer,
+                caption: imageData.caption,
+                metadata: {
+                    mimetype: imageData.mimetype,
+                    size: imageData.processedSize,
+                    from: from
                 }
             };
 
-            // Primeiro analisa com GPT-4V 
-            const imageAnalysis = await this.imageService.analyzeWithGPT4V(imageData);
-            
-            if (!imageAnalysis) {
-                throw new Error('Análise da imagem retornou vazia');
+            // Analisa a imagem com o serviço de visão
+            const imageAnalysis = await this.visionService.processImage(analysisData);
+
+            // Verifica se é um comprovante de pagamento
+            if (this.isPaymentReceipt(imageAnalysis)) {
+                const paymentInfo = this.extractPaymentInfo(imageAnalysis);
+                
+                // Prepara contexto específico para comprovantes
+                const context = `
+                Contexto: Analisando um comprovante de pagamento.
+                
+                Detalhes do comprovante:
+                - Valor: ${paymentInfo.amount || 'Não identificado'}
+                - Data: ${paymentInfo.date || 'Não identificada'}
+                - Tipo: ${paymentInfo.type}
+                - Status: ${paymentInfo.status}
+                
+                Análise completa da imagem:
+                ${imageAnalysis}
+                
+                Por favor, confirme o recebimento do comprovante e forneça as informações relevantes ao cliente.
+                `;
+                
+                // Gera resposta personalizada via Assistant
+                const response = await this.openAIService.processCustomerMessage(context);
+                
+                return {
+                    type: 'receipt',
+                    data: paymentInfo,
+                    analysis: imageAnalysis,
+                    response: response
+                };
             }
 
-            console.log('📝 Análise da imagem:', {
-                tamanhoAnalise: imageAnalysis?.length,
-                primeirasLinhas: imageAnalysis.split('\n').slice(0, 2).join('\n')
-            });
-
-            // Prepara o contexto para o Assistant
+            // Para imagens normais, prepara um contexto geral
             const context = `
-            Contexto: Você está analisando uma imagem enviada por um cliente.
-            ${caption ? `O cliente disse: "${caption}"` : ''}
+            Contexto: Analisando uma imagem enviada pelo cliente.
+            ${imageData.caption ? `O cliente disse: "${imageData.caption}"` : ''}
             
             Análise da imagem:
             ${imageAnalysis}
             
-            Responda de forma natural e amigável, como se estivesse conversando com o cliente.
+            Por favor, responda de forma natural e amigável, como se estivesse conversando com o cliente.
+            Se a imagem mostrar algum problema médico ou ortopédico, forneça orientações gerais e sugira consultar um profissional.
             `;
 
-            // Gera resposta com o Assistant
+            // Gera resposta personalizada via Assistant
             const response = await this.openAIService.processCustomerMessage(context);
-            
-            return response;
+
+            return {
+                type: 'image',
+                analysis: imageAnalysis,
+                response: response
+            };
+
         } catch (error) {
-            console.error('❌ Erro ao processar imagem:', error);
+            console.error('❌ [AIServices] Erro ao processar imagem:', {
+                erro: error.message,
+                stack: error.stack
+            });
             
-            const from = message?.de || message?.key?.remoteJid?.replace('@s.whatsapp.net', '');
-            if (from) {
-                await this.sendResponse(
-                    from,
-                    'Desculpe, não consegui processar sua imagem. Por favor, tente enviar novamente ou envie uma mensagem de texto.'
-                );
+            // Em caso de erro, tenta enviar uma mensagem amigável
+            if (message.key?.remoteJid) {
+                const errorContext = `
+                Contexto: Ocorreu um erro ao processar a imagem do cliente.
+                Erro: ${error.message}
+                
+                Por favor, gere uma mensagem educada explicando o problema e sugerindo alternativas.`;
+                
+                try {
+                    return {
+                        type: 'error',
+                        error: error.message,
+                        response: await this.openAIService.processCustomerMessage(errorContext)
+                    };
+                } catch (assistantError) {
+                    console.error('❌ Erro ao gerar mensagem de erro:', assistantError);
+                    return {
+                        type: 'error',
+                        error: error.message,
+                        response: 'Desculpe, não foi possível processar sua imagem. Por favor, tente novamente ou envie uma mensagem de texto.'
+                    };
+                }
             }
+            
+            throw error;
         }
     }
 

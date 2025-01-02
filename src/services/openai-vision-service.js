@@ -1,6 +1,5 @@
 const axios = require('axios');
 const { OPENAI_CONFIG } = require('../config/settings');
-const { detectImageFormatFromBuffer } = require('../utils/image-format');
 
 class OpenAIVisionService {
     constructor() {
@@ -15,28 +14,20 @@ class OpenAIVisionService {
     }
 
     /**
-     * Processa uma imagem usando o GPT-4 Vision API
-     * @param {Object} message Mensagem contendo a imagem e informações adicionais
-     * @returns {Promise<Object>} Resultado da análise da imagem
+     * Processa uma imagem usando o GPT-4 Vision
+     * @param {Object} imageData Dados da imagem
+     * @returns {Promise<string>} Resultado da análise
      */
-    async processImage(message) {
+    async processImage(imageData) {
         try {
-            // Validação inicial dos dados da imagem
-            if (!message?.imageMessage?.base64 || !message?.imageMessage?.mimetype) {
-                throw new Error('Mensagem inválida: faltam dados da imagem');
-            }
-
-            console.log('🎯 [OpenAIVision] Iniciando processamento:', {
-                messageId: message.key?.id,
-                timestamp: new Date().toISOString()
+            console.log('🔍 [OpenAIVision] Iniciando análise:', {
+                tamanho: `${(imageData.buffer.length / 1024 / 1024).toFixed(2)}MB`,
+                mimetype: imageData.metadata.mimetype,
+                from: imageData.metadata.from
             });
 
-            // Garantir que o formato da imagem está correto
-            const base64Image = message.imageMessage.base64;
-            const mimeType = message.imageMessage.mimetype;
-
-            // Construir a URL da imagem em base64
-            const imageUrl = `data:${mimeType};base64,${base64Image}`;
+            // Converte buffer para base64
+            const base64Image = imageData.buffer.toString('base64');
 
             const payload = {
                 model: "gpt-4o-mini",
@@ -46,145 +37,46 @@ class OpenAIVisionService {
                         content: [
                             {
                                 type: "text",
-                                text: message.imageMessage.caption || "Analise esta imagem em detalhes e descreva o que você vê."
+                                text: imageData.caption || "Analise esta imagem em detalhes e descreva o que você vê."
                             },
                             {
                                 type: "image_url",
                                 image_url: {
-                                    url: imageUrl
+                                    url: `data:${imageData.metadata.mimetype};base64,${base64Image}`
                                 }
                             }
                         ]
                     }
                 ],
-                max_tokens: 1000
+                max_tokens: 1000,
+                temperature: 0.7
             };
-
-            console.log('📤 [OpenAIVision] Enviando para API:', {
-                messageId: message.key?.id,
-                modelo: payload.model,
-                mimeType: mimeType,
-                timestamp: new Date().toISOString()
-            });
 
             const response = await this.axios.post('/chat/completions', payload);
 
-            // Validação da resposta usando optional chaining
-            const content = response?.data?.choices?.[0]?.message?.content;
-            if (!content) {
-                console.error('❌ [OpenAIVision] Resposta inválida:', {
-                    messageId: message.key?.id,
-                    status: response?.status,
-                    data: response?.data
-                });
+            // Valida a resposta
+            if (!response?.data?.choices?.[0]?.message?.content) {
                 throw new Error('Resposta inválida da API OpenAI Vision');
             }
+
+            const analysis = response.data.choices[0].message.content;
 
             console.log('✅ [OpenAIVision] Análise concluída:', {
-                messageId: message.key?.id,
-                tamanhoResposta: content.length,
-                preview: content.substring(0, 100) + '...',
-                timestamp: new Date().toISOString()
+                tamanhoResposta: analysis.length,
+                preview: analysis.substring(0, 100) + '...',
+                from: imageData.metadata.from
             });
 
-            return {
-                success: true,
-                analysis: content,
-                metadata: {
-                    model: payload.model,
-                    tokens: response.data.usage,
-                    messageId: message.key?.id,
-                    mimeType: mimeType
-                }
-            };
+            return analysis;
 
         } catch (error) {
-            console.error('❌ [OpenAIVision] Erro ao processar imagem:', {
-                messageId: message.key?.id,
-                erro: error.message,
-                stack: error.stack
-            });
-            throw error;
-        }
-    }
-
-    /**
-     * Analisa uma imagem usando base64
-     * @param {string} base64Image Imagem em base64
-     * @param {Object} options Opções adicionais
-     * @returns {Promise<Object>} Resultado da análise
-     */
-    async analyzeImage(base64Image, options = {}) {
-        try {
-            console.log('🔍 Iniciando análise com OpenAI Vision...', {
-                temCaption: !!options.caption,
-                mimetype: options.mimetype
-            });
-
-            // Prepara o prompt para a análise
-            const prompt = this.buildAnalysisPrompt(options.caption);
-
-            const payload = {
-                model: OPENAI_CONFIG.models.vision,
-                messages: [
-                    {
-                        role: 'user',
-                        content: [
-                            {
-                                type: 'text',
-                                text: prompt
-                            },
-                            {
-                                type: 'image_url',
-                                image_url: {
-                                    url: `data:${options.mimetype || 'image/jpeg'};base64,${base64Image}`,
-                                    detail: OPENAI_CONFIG.visionConfig.detail
-                                }
-                            }
-                        ]
-                    }
-                ],
-                ...OPENAI_CONFIG.visionConfig
-            };
-
-            console.log('📤 Enviando requisição para OpenAI Vision...');
-            const response = await this.axios.post('/chat/completions', payload);
-
-            if (!response.data?.choices?.[0]?.message?.content) {
-                throw new Error('Resposta inválida da API OpenAI Vision');
-            }
-
-            console.log('✅ Análise concluída com sucesso:', {
-                statusCode: response.status,
-                tamanhoResposta: JSON.stringify(response.data).length
-            });
-
-            return JSON.parse(response.data.choices[0].message.content);
-
-        } catch (error) {
-            console.error('❌ Erro na análise com OpenAI Vision:', {
+            console.error('❌ [OpenAIVision] Erro ao analisar imagem:', {
                 erro: error.message,
                 stack: error.stack,
-                status: error.response?.status,
-                resposta: error.response?.data
+                from: imageData.metadata?.from
             });
             throw error;
         }
-    }
-
-    buildAnalysisPrompt(caption) {
-        return `
-            Analise esta imagem em detalhes. Se for um comprovante de pagamento, extraia as seguintes informações:
-            - Valor da transação
-            - Data da transação
-            - Tipo de transação (PIX, transferência, boleto, etc)
-            - Status do pagamento
-            - Informações adicionais relevantes
-
-            Contexto adicional da imagem: ${caption || 'Nenhum'}
-
-            Por favor, forneça uma análise detalhada e estruturada.
-        `.trim();
     }
 }
 
