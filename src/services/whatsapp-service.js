@@ -580,76 +580,38 @@ class WhatsAppService {
 
     async handleImageMessage(message) {
         try {
-            console.log('📸 [WhatsApp] Recebido mensagem com imagem:', {
-                messageId: message.key?.id,
-                from: message.key?.remoteJid,
-                timestamp: new Date().toISOString()
-            });
+            console.log('🖼️ [WhatsApp] Processando mensagem de imagem');
 
-            // Valida se é uma imagem
-            if (!message.imageMessage) {
-                console.error('❌ [WhatsApp] Mensagem não contém imagem:', {
-                    messageId: message.key?.id,
-                    tipo: message.type
-                });
-                throw new Error('Mensagem não contém imagem');
+            const imageMessage = message.message?.imageMessage;
+            const from = message.key?.remoteJid;
+
+            if (!imageMessage || !from) {
+                throw new Error('Dados da imagem ou remetente não encontrados');
             }
 
-            console.log('🔄 [WhatsApp] Enviando para MediaManager:', {
-                messageId: message.key?.id,
-                timestamp: new Date().toISOString()
+            const response = await this._aiServices.handleMessage({
+                from,
+                type: 'image',
+                mediaMessage: { images: [imageMessage] },
+                message,
+                key: message.key
             });
 
-            // Processa a imagem
-            const result = await this._mediaManager.processImage(message);
-
-            if (!result.success) {
-                console.error('❌ [WhatsApp] Falha no processamento:', {
-                    messageId: message.key?.id,
-                    erro: result.error,
-                    timestamp: new Date().toISOString()
-                });
-                throw new Error(result.error || 'Erro ao processar imagem');
-            }
-
-            console.log('✅ [WhatsApp] Processamento concluído:', {
-                messageId: message.key?.id,
-                temAnalise: !!result.analysis,
-                tamanhoAnalise: result.analysis?.length,
-                timestamp: new Date().toISOString()
-            });
-
-            // Identifica se é um comprovante de pagamento
-            const isPaymentProof = result.analysis.toLowerCase().includes('comprovante de pagamento');
-            
-            console.log('🔍 [WhatsApp] Análise de tipo:', {
-                messageId: message.key?.id,
-                isPaymentProof,
-                timestamp: new Date().toISOString()
-            });
-
-            if (isPaymentProof) {
-                await this.handlePaymentProof(message, result.analysis);
+            if (response) {
+                await this.sendText(from, response);
             } else {
-                await this.sendText(message.key.remoteJid, 'Desculpe, mas não identifiquei um comprovante de pagamento válido nesta imagem.');
+                throw new Error('Resposta vazia do processamento');
             }
-
-            return result;
 
         } catch (error) {
-            console.error('❌ [WhatsApp] Erro ao processar imagem:', {
-                erro: error.message,
-                stack: error.stack,
-                messageId: message.key?.id,
-                timestamp: new Date().toISOString()
-            });
-
-            await this.sendText(
-                message.key.remoteJid,
-                `Desculpe, ocorreu um erro ao processar sua imagem: ${error.message}`
-            );
-
-            throw error;
+            console.error('❌ [WhatsApp] Erro ao processar imagem:', error);
+            const from = message.key?.remoteJid;
+            if (from) {
+                await this.sendText(
+                    from,
+                    'Desculpe, ocorreu um erro ao processar sua imagem. Por favor, tente novamente.'
+                );
+            }
         }
     }
 
@@ -696,28 +658,42 @@ class WhatsAppService {
 
     async handleTextMessage(message) {
         try {
-            const text = message.conversation || message.extendedTextMessage?.text;
-            
-            console.log('💬 [WhatsApp] Mensagem de texto recebida:', {
-                messageId: message.key?.id,
-                from: message.key?.remoteJid,
-                texto: text,
-                timestamp: new Date().toISOString()
-            });
+            console.log('[WhatsApp] Processando mensagem de texto:', message);
 
-            // Envia para o OpenAI Assistant processar
-            const response = await this._openaiService.processMessage(text, message.key.remoteJid);
-            
-            // Envia a resposta do assistant
-            await this.sendText(message.key.remoteJid, response);
+            // Extrair o texto da mensagem de forma mais robusta
+            const text = message.message?.extendedTextMessage?.text || 
+                        message.message?.conversation ||
+                        message.message?.text || '';
+
+            if (!text) {
+                throw new Error('Texto não encontrado na mensagem');
+            }
+
+            // Extrai o remetente de forma segura
+            const from = message.key?.remoteJid;
+            if (!from) {
+                throw new Error('Remetente não encontrado na mensagem');
+            }
+
+            // Processa com o AIServices
+            const response = await this._openaiService.processMessage(text, from);
+
+            // Envia resposta
+            if (response) {
+                await this.sendText(from, response);
+            } else {
+                throw new Error('Resposta vazia do AIServices');
+            }
 
         } catch (error) {
-            console.error('❌ [WhatsApp] Erro ao processar mensagem de texto:', {
-                erro: error.message,
-                stack: error.stack,
-                messageId: message.key?.id
-            });
-            throw error;
+            console.error('[WhatsApp] Erro ao processar mensagem de texto:', error);
+            const from = message.key?.remoteJid;
+            if (from) {
+                await this.sendText(
+                    from,
+                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+                );
+            }
         }
     }
 
