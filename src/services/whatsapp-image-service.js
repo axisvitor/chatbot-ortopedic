@@ -123,7 +123,7 @@ class WhatsAppImageService {
             // 1. Download das imagens
             const imagesData = await this.downloadImages(imageMessages);
 
-            // Extrai o remetente do primeiro item (assumindo que todas as imagens são do mesmo remetente)
+            // Extrai o remetente do primeiro item
             const from = imagesData[0]?.from;
             if (!from) {
                 throw new Error('Remetente não encontrado após download das imagens');
@@ -147,7 +147,8 @@ class WhatsAppImageService {
                     ...imagesData.map(imageData => ({
                         type: 'image_url',
                         image_url: {
-                            url: `data:${imageData.mimetype};base64,${imageData.base64}`
+                            url: `data:${imageData.mimetype};base64,${imageData.base64}`,
+                            detail: 'high'
                         }
                     }))
                 ]
@@ -156,9 +157,9 @@ class WhatsAppImageService {
             // 3. Envia para análise na OpenAI Vision
             console.log('🤖 Enviando para análise na OpenAI Vision...');
             const response = await this.openaiAxios.post('/chat/completions', {
-                model: "gpt-4o",
+                model: "gpt-4-vision-preview",
                 messages: messages,
-                max_tokens: 1024,
+                max_tokens: 1000,
                 temperature: 0.7
             });
 
@@ -172,17 +173,32 @@ class WhatsAppImageService {
                 }
             }));
 
-            console.log('✅ Análise concluída:', response.data);
+            console.log('✅ Análise concluída com sucesso');
 
-            return response.data.choices[0].message.content;
+            return {
+                success: true,
+                analysis: response.data.choices[0].message.content,
+                metadata: {
+                    model: "gpt-4-vision-preview",
+                    tokens: response.data.usage,
+                    from: from
+                }
+            };
 
         } catch (error) {
             console.error('❌ Erro ao analisar imagens:', {
                 erro: error.message,
-                stack: error.stack,
-                detalhes: error.response?.data
+                stack: error.stack
             });
-            throw error;
+            
+            return {
+                success: false,
+                error: error.message,
+                metadata: {
+                    model: "gpt-4-vision-preview",
+                    from: from
+                }
+            };
         }
     }
 
@@ -194,7 +210,7 @@ class WhatsAppImageService {
             const analysisResult = await this.analyzeImages(imageMessages);
 
             // 2. Extrai informações do texto da análise
-            const paymentInfos = this.extractPaymentInfos(analysisResult);
+            const paymentInfos = this.extractPaymentInfos(analysisResult.analysis);
 
             console.log('💰 Informações extraídas:', paymentInfos);
 
