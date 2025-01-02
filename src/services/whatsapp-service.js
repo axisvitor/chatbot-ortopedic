@@ -18,6 +18,10 @@ class WhatsAppService {
         
         // Limpa comprovantes antigos a cada hora
         setInterval(() => this._cleanupPendingProofs(), 60 * 60 * 1000);
+        
+        this._imageService = new WhatsAppImageService();
+        this._audioService = new WhatsAppAudioService();
+        this._mediaManager = new MediaManagerService(this._audioService, this._imageService);
     }
 
     /**
@@ -681,11 +685,17 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            // Processa a imagem com o serviço especializado
-            const imageResult = await this._imageService.processWhatsAppImage(message);
+            // Usa o MediaManager para processar a imagem
+            const result = await this._mediaManager.processMedia(message);
 
-            if (!imageResult.success) {
-                console.error('❌ Erro ao processar imagem:', imageResult.error);
+            // Se não houver resultado (caso de comprovante já tratado pelo MediaManager)
+            if (!result) {
+                return;
+            }
+
+            // Se houve erro no processamento
+            if (!result.success) {
+                console.error('❌ Erro ao processar imagem:', result.error);
                 await this.sendText(
                     message.key.remoteJid,
                     'Desculpe, não consegui processar sua imagem. Por favor, tente novamente.'
@@ -693,42 +703,8 @@ class WhatsAppService {
                 return;
             }
 
-            // Analisa o resultado para identificar se é um comprovante
-            const isPaymentProof = imageResult.analysis.toLowerCase().includes('comprovante') && 
-                                 imageResult.analysis.toLowerCase().includes('pagamento');
-
-            if (isPaymentProof) {
-                console.log('💰 Comprovante de pagamento detectado');
-                
-                // Armazena o comprovante temporariamente
-                this.paymentProofMessages = this.paymentProofMessages || new Map();
-                this.paymentProofMessages.set(message.key.remoteJid, {
-                    message,
-                    analysis: imageResult.analysis
-                });
-
-                // Encaminha para o financeiro se configurado
-                const financialNumber = process.env.FINANCIAL_DEPT_NUMBER;
-                if (financialNumber) {
-                    await this.forwardMessage(message, financialNumber);
-                    await this.sendText(
-                        financialNumber,
-                        `*Novo Comprovante Recebido*\nCliente: ${message.key.remoteJid}\nData: ${new Date().toLocaleString('pt-BR')}\n\nAnálise:\n${imageResult.analysis}`
-                    );
-                }
-
-                // Solicita o número do pedido
-                await this.sendText(
-                    message.key.remoteJid,
-                    'Recebi seu comprovante e já encaminhei para nossa equipe financeira! ' +
-                    'Para agilizar o processo, por favor me informe o número do seu pedido.'
-                );
-                return;
-            }
-
-            // Se não for comprovante, envia a análise
-            console.log('✅ Enviando análise da imagem');
-            await this.sendText(message.key.remoteJid, imageResult.analysis);
+            // Envia a análise para o usuário
+            await this.sendText(message.key.remoteJid, result.analysis);
 
         } catch (error) {
             console.error('❌ Erro ao processar mensagem de imagem:', {
