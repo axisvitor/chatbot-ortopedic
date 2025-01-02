@@ -57,15 +57,49 @@ const WHATSAPP_CONFIG = {
     apiUrl: validateEnvVar('WAPI_URL'),
     token: validateEnvVar('WAPI_TOKEN'),
     connectionKey: validateEnvVar('WAPI_CONNECTION_KEY'),
-    messageDelay: 1000, // delay entre mensagens em ms
+    messageDelay: 3000, // delay padrão entre mensagens em ms
     retryAttempts: 3,
     endpoints: {
-        text: 'message/send-text',
-        image: 'message/send-image',
-        document: 'message/send-document',
-        audio: 'message/send-audio',
-        status: 'message/send-text',
-        media: 'media/upload'
+        text: {
+            path: 'message/send-text',
+            method: 'POST',
+            params: {
+                to: 'phoneNumber',
+                content: 'text',
+                delay: 'delayMessage'
+            }
+        },
+        image: {
+            path: 'message/send-image',
+            method: 'POST',
+            params: {
+                to: 'phoneNumber',
+                content: 'image',
+                caption: 'caption',
+                delay: 'delayMessage'
+            }
+        },
+        document: {
+            path: 'message/send-document',
+            method: 'POST',
+            params: {
+                to: 'phoneNumber',
+                content: 'url',
+                filename: 'filename'
+            }
+        },
+        audio: {
+            path: 'message/send-audio',
+            method: 'POST',
+            params: {
+                to: 'phoneNumber',
+                content: 'audioUrl'
+            }
+        },
+        media: {
+            path: 'media/upload',
+            method: 'POST'
+        }
     },
     departments: {
         financial: {

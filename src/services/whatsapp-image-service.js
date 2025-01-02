@@ -273,16 +273,38 @@ class WhatsAppImageService {
                 throw new Error(`Falha ao baixar imagem: ${downloadResult.error}`);
             }
 
-            // Prepara o prompt para a OpenAI Vision
-            const prompt = `Analise esta imagem e descreva detalhadamente o que você vê.
-                           ${imageMessage.caption ? `Contexto adicional do usuário: ${imageMessage.caption}` : ''}`;
+            // Prepara o payload para a OpenAI Vision
+            const payload = {
+                model: "gpt-4-vision-preview",
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: `Analise esta imagem e descreva detalhadamente o que você vê. ${imageMessage.caption ? `\nContexto adicional do usuário: ${imageMessage.caption}` : ''}`
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${downloadResult.mimetype};base64,${downloadResult.base64}`
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 500
+            };
 
-            // Envia para análise
-            const analysis = await this.openAIVisionService.analyzeImage({
-                base64: downloadResult.base64,
-                mimetype: downloadResult.mimetype,
-                prompt: prompt
-            });
+            // Envia para OpenAI Vision
+            console.log('🤖 [WhatsAppImageService] Enviando para OpenAI Vision');
+            const response = await this.openaiAxios.post('/chat/completions', payload);
+
+            // Extrai a análise
+            const analysis = response.data.choices[0]?.message?.content;
+            if (!analysis) {
+                throw new Error('Resposta vazia da OpenAI');
+            }
 
             // Limpa o arquivo temporário
             try {
@@ -292,21 +314,24 @@ class WhatsAppImageService {
                 console.warn('⚠️ [WhatsAppImageService] Erro ao limpar arquivos temporários:', cleanupError);
             }
 
+            console.log('✅ [WhatsAppImageService] Análise concluída com sucesso');
+
             return {
                 success: true,
                 analysis: analysis,
                 metadata: {
                     from,
-                    mimetype: imageMessage.mimetype,
+                    mimetype: downloadResult.mimetype,
                     caption: imageMessage.caption || ''
                 }
             };
 
         } catch (error) {
-            console.error('❌ [WhatsAppImageService] Erro ao analisar imagens:', {
+            console.error('❌ [WhatsAppImageService] Erro ao analisar imagem:', {
                 erro: error.message,
                 stack: error.stack
             });
+            
             return {
                 success: false,
                 error: error.message

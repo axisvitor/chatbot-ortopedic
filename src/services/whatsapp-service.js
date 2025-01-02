@@ -156,6 +156,59 @@ class WhatsAppService {
     }
 
     /**
+     * Valida e formata um número de telefone
+     * @private
+     * @param {string} number - Número de telefone
+     * @returns {string} Número formatado
+     * @throws {Error} Se o número for inválido
+     */
+    _validatePhoneNumber(number) {
+        const cleaned = number.replace(/\D/g, '');
+        if (!/^\d{12,13}$/.test(cleaned)) {
+            throw new Error('Número de telefone inválido. Use o formato: DDI DDO NÚMERO');
+        }
+        return cleaned;
+    }
+
+    /**
+     * Trata erros específicos da API
+     * @private
+     * @param {Error} error - Erro original
+     * @throws {Error} Erro tratado
+     */
+    _handleApiError(error) {
+        if (error.response?.data?.error) {
+            switch(error.response.status) {
+                case 401:
+                    throw new Error('Token inválido ou expirado');
+                case 429:
+                    throw new Error('Limite de requisições excedido');
+                default:
+                    throw new Error(error.response.data.message || 'Erro desconhecido');
+            }
+        }
+        throw error;
+    }
+
+    /**
+     * Executa uma função com retry e backoff exponencial
+     * @private
+     * @param {Function} fn - Função a ser executada
+     * @param {number} maxRetries - Número máximo de tentativas
+     * @returns {Promise<any>} Resultado da função
+     */
+    async _retryWithExponentialBackoff(fn, maxRetries = 3) {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                return await fn();
+            } catch (error) {
+                if (i === maxRetries - 1) throw error;
+                await this.delay(Math.pow(2, i) * 1000);
+            }
+        }
+    }
+
+    /**
      * Envia uma mensagem de texto
      * @param {string} to - Número do destinatário
      * @param {string} text - Texto da mensagem
@@ -168,38 +221,35 @@ class WhatsAppService {
                 throw new Error('Cliente HTTP não inicializado');
             }
 
+            const phoneNumber = this._validatePhoneNumber(to);
             const messageText = String(text);
 
             console.log(' Enviando mensagem:', {
-                para: to,
+                para: phoneNumber,
                 texto: messageText,
                 messageId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 timestamp: new Date().toISOString()
             });
 
-            const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
-            console.log('[WhatsApp] Iniciando envio de mensagem:', {
-                para: to,
-                previewMensagem: messageText.slice(0, 100) + (messageText.length > 100 ? '...' : ''),
-                chaveConexao: this.connectionKey,
-                timestamp: new Date().toISOString()
+            const config = WHATSAPP_CONFIG.endpoints.text;
+            const endpoint = `${config.path}?connectionKey=${this.connectionKey}`;
+
+            const payload = {
+                [config.params.to]: phoneNumber,
+                [config.params.content]: messageText,
+                [config.params.delay]: WHATSAPP_CONFIG.messageDelay / 1000 // Convertendo ms para segundos
+            };
+
+            const response = await this._retryWithExponentialBackoff(async () => {
+                const result = await client.post(endpoint, payload);
+                
+                if (result.data?.error && result.data?.message?.includes('conta')) {
+                    await this.init();
+                    throw new Error('Erro de conta, tentando novamente...');
+                }
+                
+                return result;
             });
-
-            console.log('[WhatsApp] Endpoint:', endpoint);
-
-            const phoneNumber = to.includes('@') ? to.split('@')[0] : to;
-
-            const response = await client.post(endpoint, {
-                phoneNumber,
-                text: messageText
-            });
-
-            // Verifica erro de conta
-            if (response.data?.error && response.data?.message?.includes('conta')) {
-                console.log(' Erro de conta, reinicializando conexão...');
-                await this.init();
-                return this.sendText(to, text);
-            }
 
             console.log('[WhatsApp] Resposta do servidor:', {
                 status: response.status,
@@ -219,44 +269,69 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            // Verifica erro de conta no catch
-            if (error.response?.data?.error && error.response?.data?.message?.includes('conta')) {
-                console.log(' Erro de conta no catch, reinicializando conexão...');
-                await this.init();
-                return this.sendText(to, text);
-            }
-
-            throw error;
+            this._handleApiError(error);
         }
     }
 
+    /**
+     * Envia uma imagem
+     * @param {string} to - Número do destinatário
+     * @param {string|object} image - URL da imagem ou string Base64
+     * @param {string} caption - Legenda opcional
+     * @returns {Promise<Object>} Resposta do servidor
+     */
     async sendImage(to, image, caption = '') {
         try {
-            const isBase64 = this._isBase64(image);
-            const endpoint = isBase64 ? 'message/sendImageBase64' : 'message/sendImageUrl';
+            const phoneNumber = this._validatePhoneNumber(to);
+            const config = WHATSAPP_CONFIG.endpoints.image;
+            const endpoint = `${config.path}?connectionKey=${this.connectionKey}`;
             
+            // Prepara o payload
             const payload = {
-                phoneNumber: to,
-                caption: caption || (typeof image === 'object' ? image.caption : ''),
+                [config.params.to]: phoneNumber,
+                [config.params.content]: typeof image === 'object' ? image.url || image.base64 : image,
+                [config.params.delay]: WHATSAPP_CONFIG.messageDelay / 1000
             };
 
-            if (isBase64) {
-                payload.base64Image = typeof image === 'object' ? image.base64 : image;
-            } else {
-                payload.url = typeof image === 'object' ? image.url : image;
+            // Adiciona caption se fornecido
+            if (caption || (typeof image === 'object' && image.caption)) {
+                payload[config.params.caption] = caption || image.caption;
             }
 
-            const response = await this.client.post(`${endpoint}?connectionKey=${this.connectionKey}`, payload);
-            await this.delay();
+            console.log(' Enviando imagem:', {
+                para: phoneNumber,
+                tipo: this._isBase64(payload[config.params.content]) ? 'base64' : 'url',
+                temLegenda: !!payload[config.params.caption],
+                timestamp: new Date().toISOString()
+            });
+
+            const response = await this._retryWithExponentialBackoff(async () => {
+                const result = await this.client.post(endpoint, payload);
+                await this.delay();
+                return result;
+            });
+
+            console.log(' Imagem enviada com sucesso:', {
+                messageId: response.data?.messageId,
+                timestamp: new Date().toISOString()
+            });
+
             return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar imagem:', error.message);
-            throw error;
+            console.error('[WhatsApp] Erro ao enviar imagem:', {
+                erro: error.message,
+                para: to,
+                timestamp: new Date().toISOString()
+            });
+            this._handleApiError(error);
         }
     }
 
     /**
      * Envia um áudio
+     * @param {string} to - Número do destinatário
+     * @param {string} audioUrl - URL do áudio
+     * @returns {Promise<Object>} Resposta do servidor
      */
     async sendAudio(to, audioUrl) {
         try {
@@ -588,15 +663,21 @@ class WhatsAppService {
                 throw new Error('Remetente não encontrado na mensagem');
             }
 
-            // Processa a imagem usando o WhatsAppImageService
-            const result = await this._whatsappImageService.analyzeImages(message);
-
+            // Primeiro analisa a imagem com a OpenAI Vision
+            const result = await this._imageService.analyzeImages(message);
             if (!result.success) {
                 throw new Error(result.error || 'Falha ao processar imagem');
             }
 
-            // Envia a resposta da análise
-            await this.sendText(from, result.analysis);
+            // Envia a análise para o Assistant processar
+            console.log('🤖 [WhatsApp] Enviando análise para o Assistant');
+            const assistantResponse = await this._openaiService.processMessage(
+                `[ANÁLISE DE IMAGEM]\n${result.analysis}\n\n[CONTEXTO]\n${result.metadata.caption || 'Nenhum contexto adicional fornecido.'}`,
+                from
+            );
+
+            // Envia a resposta do Assistant
+            await this.sendText(from, assistantResponse);
             console.log('✅ [WhatsApp] Imagem processada e resposta enviada');
 
         } catch (error) {
