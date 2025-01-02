@@ -11,7 +11,17 @@ function validateEnvVar(name) {
 const OPENAI_CONFIG = {
     apiKey: validateEnvVar('OPENAI_API_KEY'),
     assistantId: validateEnvVar('ASSISTANT_ID'),
-    baseUrl: 'https://api.openai.com/v1'
+    baseUrl: 'https://api.openai.com/v1',
+    models: {
+        vision: 'gpt-4o',
+        chat: 'gpt-4o-mini'
+    },
+    visionConfig: {
+        detail: "high",
+        max_tokens: 1024,
+        temperature: 0.2,
+        response_format: { type: "json_object" }
+    }
 };
 
 // Groq Configuration

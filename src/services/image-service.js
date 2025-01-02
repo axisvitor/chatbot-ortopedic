@@ -3,12 +3,12 @@ const sharp = require('sharp');
 const crypto = require('crypto');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const settings = require('../config/settings');
+const { validateImage } = require('../utils/image-validator');
+const { OpenAIVisionService } = require('./openai-vision-service');
 
 class ImageService {
-    constructor(groqServices, whatsappClient, openAIService) {
-        this.groqServices = groqServices;
-        this.whatsappClient = whatsappClient;
-        this.openAIService = openAIService;
+    constructor() {
+        this.visionService = new OpenAIVisionService();
         this.MAX_RETRIES = 3;
         this.RETRY_DELAY = 1000; // 1 second
 
@@ -274,43 +274,12 @@ class ImageService {
             // Comprime a imagem
             const compressedBuffer = await this.compressImage(buffer);
 
-            // Converte para base64
-            const base64Image = compressedBuffer.toString('base64');
-            
-            // Configura a requisição para a Groq
-            const messages = [
-                {
-                    role: "user",
-                    content: [
-                        {
-                            type: "text",
-                            text: "Analise esta imagem em detalhes e me diga se parece ser um comprovante de pagamento. Se for um comprovante, extraia informações como valor, data, tipo de transação (PIX, TED, etc). Se não for um comprovante, descreva o que você vê na imagem."
-                        },
-                        {
-                            type: "image_url",
-                            image_url: {
-                                url: `data:image/jpeg;base64,${base64Image}`
-                            }
-                        }
-                    ]
-                }
-            ];
-
-            // Analisa com Groq Vision
-            const response = await this.groqServices.chat.completions.create({
-                model: "llama-3.2-11b-vision-preview",
-                messages: messages,
-                temperature: 0.5,
-                max_tokens: 1024,
-                stream: false
+            // Analisa com OpenAI Vision
+            const analysis = await this.visionService.processImage(compressedBuffer, {
+                caption,
+                extractedText: null // Removido OCR por enquanto
             });
 
-            if (!response?.choices?.[0]?.message?.content) {
-                throw new Error('Resposta inválida da Groq');
-            }
-
-            const analysis = response.choices[0].message.content;
-            
             console.log('[ImageService] Análise da imagem concluída:', {
                 analysis: analysis?.substring(0, 100) + '...'
             });
@@ -335,17 +304,8 @@ class ImageService {
             };
 
         } catch (error) {
-            console.error('[ImageService] Erro ao processar imagem:', error);
-            
-            if (error.message.includes('14 dias')) {
-                throw new Error('Esta imagem não está mais disponível pois foi enviada há mais de 14 dias.');
-            } else if (error.message.includes('autenticação')) {
-                throw new Error('Houve um erro de autenticação. Por favor, tente novamente mais tarde.');
-            } else if (error.message.includes('segurança')) {
-                throw new Error('Esta imagem não passou nas validações de segurança.');
-            } else {
-                throw new Error('Não foi possível processar a imagem. Por favor, tente novamente.');
-            }
+            console.error('❌ Erro ao processar imagem do WhatsApp:', error);
+            throw error;
         }
     }
 }
