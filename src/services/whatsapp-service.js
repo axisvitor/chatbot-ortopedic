@@ -680,44 +680,36 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            // Baixa a imagem
-            const buffer = await this.downloadMediaMessage(message);
-
-            // Processa a imagem com o Groq
-            const groqService = new (require('./groq-services').GroqServices)();
-            const result = await groqService.processImage(buffer, message);
-
-            // Se for um comprovante, pede o número do pedido
-            if (result.isPaymentProof) {
-                // Armazena temporariamente a mensagem do comprovante
-                this.paymentProofMessages = this.paymentProofMessages || {};
-                this.paymentProofMessages[message.from] = message;
-                
-                // Envia a mensagem para o departamento financeiro imediatamente
-                const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
-                if (numeroFinanceiro) {
-                    await this.forwardMessage(message, numeroFinanceiro);
-                    await this.sendText(
-                        numeroFinanceiro,
-                        ` *Novo Comprovante Recebido*\nCliente: ${message.from}\nData: ${new Date().toLocaleString('pt-BR')}`
-                    );
-                }
-
-                // Solicita o número do pedido ao cliente
-                await this.sendText(
-                    message.from, 
-                    ' Recebi seu comprovante e já encaminhei para nossa equipe financeira! ' + 
-                    'Para agilizar o processo, por favor me informe o número do seu pedido.'
-                );
-                
+            if (!message.message?.imageMessage) {
+                console.warn('[WhatsApp] Mensagem de imagem sem dados:', message);
                 return;
             }
 
-            // Se não for um comprovante, continua com o fluxo normal
-            console.log(' Análise da imagem:', {
-                messageId: message.messageId,
-                tipo: result.type,
-                isPaymentProof: result.isPaymentProof,
+            const imageMessage = message.message.imageMessage;
+            const caption = message.message?.caption || '';
+            const from = message.from;
+            const messageId = message.messageId;
+            const businessHours = this._businessHoursService;
+
+            // Processa a imagem
+            const imageResult = await this._imageService.processWhatsAppImage({ imageMessage, caption, from, messageId, businessHours });
+
+            if (imageResult.type === 'payment_proof') {
+                console.log('[WhatsApp] Comprovante de pagamento detectado, aguardando número do pedido.');
+                this.pendingProofs.set(from, {
+                    messageId,
+                    imageResult
+                });
+                await this.sendMessage(from, 'Recebi seu comprovante! Para confirmar o pagamento, por favor, me envie o número do seu pedido.');
+                return;
+            }
+
+            // Se não for comprovante, envia a análise para o usuário
+            await this.sendMessage(from, imageResult.analysis);
+
+            console.log('[WhatsApp] Análise da imagem enviada com sucesso:', {
+                messageId,
+                from,
                 timestamp: new Date().toISOString()
             });
 

@@ -3,10 +3,18 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const { v4: uuidv4 } = require('uuid');
+const { OPENAI_CONFIG } = require('../config/settings');
 
 class WhatsAppImageService {
     constructor(groqServices) {
         this.groqServices = groqServices;
+        this.openaiAxios = axios.create({
+            baseURL: 'https://api.openai.com/v1',
+            headers: {
+                'Authorization': `Bearer ${OPENAI_CONFIG.apiKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
     }
 
     async downloadImage(imageMessage) {
@@ -17,9 +25,18 @@ class WhatsAppImageService {
                 throw new Error('URL da imagem não encontrada na mensagem');
             }
 
-            // Gera um nome único para o arquivo temporário
+            // Garante que o mimetype é suportado
+            const supportedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+            const mimetype = imageMessage.mimetype || 'image/jpeg';
+            
+            if (!supportedTypes.includes(mimetype)) {
+                throw new Error(`Tipo de imagem não suportado: ${mimetype}. Use: ${supportedTypes.join(', ')}`);
+            }
+
+            // Gera um nome único para o arquivo temporário com a extensão correta
+            const extension = mimetype.split('/')[1];
             const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'whatsapp-'));
-            const tempFile = path.join(tempDir, `${uuidv4()}.jpg`);
+            const tempFile = path.join(tempDir, `${uuidv4()}.${extension}`);
 
             // Faz o download da imagem
             const response = await axios({
@@ -34,17 +51,20 @@ class WhatsAppImageService {
             // Salva a imagem no arquivo temporário
             await fs.writeFile(tempFile, response.data);
 
+            // Converte para base64
+            const base64Image = Buffer.from(response.data).toString('base64');
+
             console.log('✅ Download da imagem concluído:', {
                 tamanho: response.data.length,
                 arquivo: tempFile,
-                mimetype: imageMessage.mimetype
+                mimetype: mimetype
             });
 
             return {
                 filePath: tempFile,
-                mimetype: imageMessage.mimetype,
+                mimetype: mimetype,
                 caption: imageMessage.caption,
-                base64: response.data.toString('base64')
+                base64: base64Image
             };
 
         } catch (error) {
@@ -63,7 +83,7 @@ class WhatsAppImageService {
             // 1. Download da imagem
             const imageData = await this.downloadImage(imageMessage);
 
-            // 2. Prepara o prompt para análise
+            // 2. Prepara o prompt para análise com OpenAI Vision
             const messages = [{
                 role: 'user',
                 content: [
@@ -81,20 +101,20 @@ class WhatsAppImageService {
                     {
                         type: 'image_url',
                         image_url: {
-                            url: `data:${imageData.mimetype};base64,${imageData.base64}`
+                            url: `data:${imageData.mimetype};base64,${imageData.base64}`,
+                            detail: 'high'
                         }
                     }
                 ]
             }];
 
-            // 3. Envia para análise no Groq Vision
-            console.log('🤖 Enviando para análise no Groq Vision...');
-            const response = await this.groqServices.chat.completions.create({
-                model: 'llama-3.2-90b-vision-preview',
+            // 3. Envia para análise na OpenAI Vision
+            console.log('🤖 Enviando para análise na OpenAI Vision...');
+            const response = await this.openaiAxios.post('/chat/completions', {
+                model: 'gpt-4o-mini',
                 messages: messages,
                 temperature: 0.7,
-                max_tokens: 1024,
-                stream: false
+                max_tokens: 1024
             });
 
             // 4. Limpa arquivos temporários
@@ -103,7 +123,7 @@ class WhatsAppImageService {
 
             console.log('✅ Análise concluída');
 
-            return response.choices[0].message.content;
+            return response.data.choices[0].message.content;
 
         } catch (error) {
             console.error('❌ Erro ao analisar imagem:', {

@@ -109,26 +109,24 @@ class OpenAIService {
                     properties: {
                         order_number: {
                             type: "string",
-                            description: "Número do pedido relacionado (opcional)"
+                            description: "Número do pedido, se disponível"
                         },
                         tracking_code: {
                             type: "string",
-                            description: "Código de rastreio relacionado (opcional)"
+                            description: "Código de rastreio, se disponível"
                         },
                         reason: {
                             type: "string",
-                            description: "Motivo do encaminhamento",
-                            enum: ["payment_issue", "refund_request", "taxation", "customs", "payment_proof", "other"]
+                            description: "Motivo do encaminhamento para o financeiro"
                         },
                         customer_message: {
                             type: "string",
-                            description: "Mensagem original do cliente que gerou o encaminhamento"
+                            description: "Mensagem original do cliente"
                         },
                         priority: {
                             type: "string",
-                            description: "Prioridade do caso",
                             enum: ["low", "medium", "high", "urgent"],
-                            default: "medium"
+                            description: "Prioridade do caso"
                         },
                         additional_info: {
                             type: "string",
@@ -792,20 +790,18 @@ class OpenAIService {
                             break;
                         }
 
-                        const success = await this.financialService.forwardCase({
+                        const financialData = {
                             order_number: parsedArgs.order_number,
                             tracking_code: parsedArgs.tracking_code,
                             reason: parsedArgs.reason,
                             customer_message: parsedArgs.customer_message,
-                            priority: parsedArgs.priority || 'medium',
+                            priority: parsedArgs.priority,
                             additional_info: parsedArgs.additional_info
-                        });
-
+                        };
+                        const success = await this.financialService.forwardCase(financialData);
                         output = JSON.stringify({
-                            error: !success,
-                            message: success 
-                                ? 'Caso encaminhado com sucesso para o setor financeiro. Em breve entrarão em contato.'
-                                : 'Não foi possível encaminhar o caso no momento. Por favor, tente novamente mais tarde.'
+                            success,
+                            message: success ? 'Caso encaminhado para o financeiro com sucesso.' : 'Não foi possível encaminhar o caso para o financeiro.'
                         });
                         break;
 

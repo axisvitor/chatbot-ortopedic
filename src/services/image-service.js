@@ -5,9 +5,10 @@ const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const settings = require('../config/settings');
 
 class ImageService {
-    constructor(groqServices, whatsappClient) {
+    constructor(groqServices, whatsappClient, openAIService) {
         this.groqServices = groqServices;
         this.whatsappClient = whatsappClient;
+        this.openAIService = openAIService;
         this.MAX_RETRIES = 3;
         this.RETRY_DELAY = 1000; // 1 second
 

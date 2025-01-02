@@ -10,7 +10,8 @@ function validateEnvVar(name) {
 // OpenAI Configuration
 const OPENAI_CONFIG = {
     apiKey: validateEnvVar('OPENAI_API_KEY'),
-    assistantId: validateEnvVar('ASSISTANT_ID')
+    assistantId: validateEnvVar('ASSISTANT_ID'),
+    baseUrl: 'https://api.openai.com/v1'
 };
 
 // Groq Configuration
