@@ -34,6 +34,12 @@ class WhatsAppImageService {
             const downloadedImages = await Promise.all(imageMessages.map(async (imageMessage) => {
                 console.log('Processando mensagem:', JSON.stringify(imageMessage, null, 2));
 
+                // Extrai o remetente da mensagem
+                const from = imageMessage?.key?.remoteJid || imageMessage?.from;
+                if (!from) {
+                    throw new Error('Remetente não encontrado na mensagem');
+                }
+
                 // Extrai URL da mensagem
                 const url = imageMessage?.url || imageMessage?.imageMessage?.url;
                 if (!url) {
@@ -79,7 +85,8 @@ class WhatsAppImageService {
                     filePath: tempFile,
                     mimetype: mimetype,
                     caption: imageMessage?.caption || imageMessage?.imageMessage?.caption,
-                    base64: base64Image
+                    base64: base64Image,
+                    from: from
                 };
             }));
 
@@ -101,6 +108,12 @@ class WhatsAppImageService {
             // 1. Download das imagens
             const imagesData = await this.downloadImages(imageMessages);
 
+            // Extrai o remetente do primeiro item (assumindo que todas as imagens são do mesmo remetente)
+            const from = imagesData[0]?.from;
+            if (!from) {
+                throw new Error('Remetente não encontrado após download das imagens');
+            }
+
             // 2. Prepara o prompt para análise com OpenAI Vision
             const messages = [{
                 role: 'user',
@@ -114,7 +127,7 @@ class WhatsAppImageService {
                             - Status do pagamento
                             - Informações adicionais relevantes
                             
-                            Contexto adicional: ${imagesData[0]?.caption || 'Nenhum'}`
+                            Contexto adicional: ${imagesData[0]?.caption || 'Nenhum'} do remetente ${from}`
                     },
                     ...imagesData.map(imageData => ({
                         type: 'image_url',
