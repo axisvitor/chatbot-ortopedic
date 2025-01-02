@@ -23,62 +23,40 @@ class OpenAIVisionService {
         try {
             console.log('🎯 [OpenAIVision] Iniciando processamento:', {
                 messageId: message.key?.id,
-                from: message.key?.remoteJid,
-                timestamp: new Date().toISOString()
-            });
-
-            // Download da imagem
-            console.log('📥 [OpenAIVision] Baixando mídia...', {
-                messageId: message.key?.id
-            });
-
-            const buffer = await downloadMediaMessage(message, 'buffer');
-
-            console.log('✅ [OpenAIVision] Download concluído:', {
-                messageId: message.key?.id,
-                tamanho: buffer.length,
-                tamanhoMB: (buffer.length / (1024 * 1024)).toFixed(2) + 'MB'
-            });
-
-            // Converte para base64
-            const base64Image = buffer.toString('base64');
-            
-            console.log('🔄 [OpenAIVision] Preparando payload:', {
-                messageId: message.key?.id,
-                tamanhoBase64: base64Image.length,
                 timestamp: new Date().toISOString()
             });
 
             // Monta o payload para a OpenAI Vision
             const payload = {
-                model: OPENAI_CONFIG.models.vision,
+                model: "gpt-4o",
                 messages: [
+                    {
+                        role: 'system',
+                        content: 'Você é um assistente especializado em análise de imagens. Analise a imagem em detalhes e forneça uma descrição completa e precisa do que você vê.'
+                    },
                     {
                         role: 'user',
                         content: [
                             {
                                 type: 'text',
-                                text: 'Analise esta imagem em detalhes. Determine:\n' +
-                                    '1. O tipo da imagem (comprovante de pagamento, foto de calçado, foto de pés para medidas, tabela de medidas/numeração)\n' +
-                                    '2. Uma descrição detalhada do que você vê\n' +
-                                    '3. Se for um comprovante de pagamento, extraia: valor, data e ID da transação'
+                                text: message.imageMessage.caption || 'O que você vê nesta imagem?'
                             },
                             {
                                 type: 'image_url',
                                 image_url: {
-                                    url: `data:${message.imageMessage.mimetype};base64,${base64Image}`,
-                                    detail: OPENAI_CONFIG.visionConfig.detail
+                                    url: `data:${message.imageMessage.mimetype};base64,${message.imageMessage.base64}`
                                 }
                             }
                         ]
                     }
                 ],
-                ...OPENAI_CONFIG.visionConfig
+                max_tokens: 1000,
+                temperature: 0.7
             };
 
             console.log('📤 [OpenAIVision] Enviando para API:', {
                 messageId: message.key?.id,
-                modelo: OPENAI_CONFIG.models.vision,
+                modelo: 'gpt-4o',
                 timestamp: new Date().toISOString()
             });
 
@@ -104,23 +82,21 @@ class OpenAIVisionService {
 
             return {
                 success: true,
-                analysis
+                analysis,
+                metadata: {
+                    model: 'gpt-4o',
+                    tokens: response.data.usage,
+                    messageId: message.key?.id
+                }
             };
 
         } catch (error) {
-            console.error('❌ [OpenAIVision] Erro no processamento:', {
-                erro: error.message,
-                stack: error.stack,
-                status: error.response?.status,
-                data: error.response?.data,
+            console.error('❌ [OpenAIVision] Erro ao processar imagem:', {
                 messageId: message.key?.id,
-                timestamp: new Date().toISOString()
+                erro: error.message,
+                stack: error.stack
             });
-
-            return {
-                success: false,
-                error: error.message
-            };
+            throw error;
         }
     }
 

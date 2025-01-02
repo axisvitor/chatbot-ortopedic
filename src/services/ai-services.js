@@ -405,7 +405,7 @@ class AIServices {
             const base64Image = imageBuffer.toString('base64');
             const caption = imageMessage?.imageMessage?.caption || '';
 
-            // Prepara dados da imagem para GPT-4V
+            // Prepara dados da imagem para GPT-4o
             const imageData = {
                 text: caption || 'O que você vê nesta imagem?',
                 image: {
@@ -414,7 +414,7 @@ class AIServices {
                 }
             };
 
-            // Primeiro analisa com GPT-4V
+            // Primeiro analisa com GPT-4o
             const imageAnalysis = await this.imageService.analyzeWithGPT4V(imageData);
             console.log('📝 Análise da imagem:', {
                 tamanhoAnalise: imageAnalysis?.length,
