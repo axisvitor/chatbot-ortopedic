@@ -172,30 +172,39 @@ class AIServices {
                     imageMessages.push(...messageData.mediaMessage.images);
                 }
 
-                if (imageMessages.length === 0) {
-                    throw new Error('Nenhuma imagem encontrada na mensagem');
+                try {
+                    // Primeiro, analisa a imagem com GPT-4 Vision
+                    const imageAnalysis = await this.whatsAppImageService.analyzeImages(imageMessages);
+                    
+                    if (!imageAnalysis.success) {
+                        throw new Error(`Falha ao analisar imagem: ${imageAnalysis.error}`);
+                    }
+
+                    // Verifica se a análise indica que é um comprovante de pagamento
+                    const isPaymentProof = this.isPaymentProof(imageAnalysis.analysis);
+                    
+                    if (isPaymentProof) {
+                        console.log('💰 Comprovante de pagamento detectado, processando...');
+                        // Processa como comprovante de pagamento
+                        await this.processPaymentProof(from, imageMessages, imageAnalysis);
+                    } else {
+                        console.log('📸 Imagem genérica detectada, processando com IA...');
+                        // Processa como imagem genérica
+                        const response = await this.processGenericImage(from, imageMessages, imageAnalysis);
+                        await this.sendResponse(from, response);
+                    }
+                    
+                    return;
+                } catch (error) {
+                    console.error('❌ Erro ao processar imagem:', {
+                        erro: error.message,
+                        stack: error.stack
+                    });
+                    
+                    // Envia mensagem de erro para o usuário
+                    await this.sendResponse(from, 'Desculpe, não consegui processar sua imagem. Por favor, tente novamente.');
+                    return;
                 }
-
-                console.log(`📸 Encontradas ${imageMessages.length} imagem(s) para processar:`, 
-                    JSON.stringify(imageMessages, null, 2)
-                );
-
-                // Processa todas as imagens
-                const paymentInfos = await this.whatsappImageService.processPaymentProof(imageMessages);
-
-                // Prepara o contexto com as informações de todas as imagens
-                const context = {
-                    messageType: 'image',
-                    imageAnalysis: Array.isArray(paymentInfos) ? paymentInfos : [paymentInfos]
-                };
-
-                // Gera resposta baseada na análise
-                const response = await this.generateResponse(from, '', context);
-                
-                // Envia a resposta
-                await this.sendResponse(from, response);
-                
-                return;
             }
 
             // Para mensagens de texto
@@ -720,6 +729,69 @@ class AIServices {
     extractStatus(text) {
         const statusMatch = text.match(/(?:Status|STATUS):\s*([^\n.,]+)/);
         return statusMatch ? statusMatch[1].trim() : 'Não identificado';
+    }
+
+    /**
+     * Verifica se a análise indica que é um comprovante de pagamento
+     * @param {string} analysis Texto da análise da imagem
+     * @returns {boolean} True se for um comprovante de pagamento
+     */
+    isPaymentProof(analysis) {
+        const paymentKeywords = [
+            'comprovante', 'pagamento', 'transferência', 'pix', 
+            'ted', 'doc', 'boleto', 'valor', 'transação'
+        ];
+        
+        const analysisLower = analysis.toLowerCase();
+        return paymentKeywords.some(keyword => analysisLower.includes(keyword));
+    }
+
+    /**
+     * Processa uma imagem genérica usando GPT-4 Vision
+     * @param {string} from Remetente
+     * @param {Array} imageMessages Array de mensagens com imagens
+     * @param {Object} imageAnalysis Análise prévia da imagem
+     * @returns {Promise<string>} Resposta para o usuário
+     */
+    async processGenericImage(from, imageMessages, imageAnalysis) {
+        try {
+            // A imagem já foi analisada pelo GPT-4 Vision, podemos usar a análise
+            const response = await this.generateResponse(from, '', {
+                messageType: 'generic_image',
+                imageAnalysis: imageAnalysis.analysis
+            });
+
+            return response;
+        } catch (error) {
+            console.error('❌ Erro ao processar imagem genérica:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Processa um comprovante de pagamento
+     * @param {string} from Remetente
+     * @param {Array} imageMessages Array de mensagens com imagens
+     * @param {Object} imageAnalysis Análise prévia da imagem
+     */
+    async processPaymentProof(from, imageMessages, imageAnalysis) {
+        try {
+            // Extrai informações do pagamento da análise
+            const paymentInfo = await this.whatsappImageService.extractPaymentInfos(imageAnalysis.analysis);
+
+            // Prepara o contexto com as informações
+            const context = {
+                messageType: 'payment_proof',
+                paymentInfo: paymentInfo
+            };
+
+            // Gera e envia resposta
+            const response = await this.generateResponse(from, '', context);
+            await this.sendResponse(from, response);
+        } catch (error) {
+            console.error('❌ Erro ao processar comprovante:', error);
+            throw error;
+        }
     }
 }
 
