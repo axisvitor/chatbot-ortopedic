@@ -9,70 +9,28 @@ class GroqServices {
             timeout: 30000,
         });
 
-        // Adiciona estrutura chat.completions mantendo compatibilidade
         this.chat = {
             completions: {
                 create: async (params) => {
                     try {
-                        // Garante que todos os parâmetros necessários estejam presentes
-                        const payload = {
-                            ...params,
-                            top_p: params.top_p || 0.8,
-                            temperature: params.temperature || 0.2,
-                            stop: params.stop || null,
-                            stream: params.stream || false
-                        };
-
-                        // Valida a presença de mensagens
-                        if (!payload.messages || !Array.isArray(payload.messages) || payload.messages.length === 0) {
-                            throw new Error('Messages array é obrigatório e não pode estar vazio');
-                        }
-
-                        // Adiciona instruções específicas para análise de imagem
-                        if (payload.messages[0].role === 'system') {
-                            payload.messages[0].content = [
-                                {
-                                    type: "text",
-                                    text: "Você é um assistente especializado em analisar imagens. Para comprovantes de pagamento: extraia valor, data, tipo de transação e outras informações relevantes. Para outras imagens: descreva o conteúdo detalhadamente e extraia qualquer texto visível. Sempre forneça uma resposta estruturada e clara."
+                        const response = await axios.post(
+                            'https://api.groq.com/openai/v1/chat/completions',
+                            params,
+                            {
+                                headers: {
+                                    'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`,
+                                    'Content-Type': 'application/json'
                                 }
-                            ];
-                        }
-
-                        console.log('📤 Enviando requisição para Groq:', {
-                            url: GROQ_CONFIG.chatUrl,
-                            model: payload.model,
-                            messagesCount: payload.messages.length,
-                            timestamp: new Date().toISOString()
-                        });
-
-                        const response = await this.axios.post(GROQ_CONFIG.chatUrl, payload, {
-                            headers: {
-                                'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`,
-                                'Content-Type': 'application/json'
                             }
-                        });
-
-                        if (!response.data || !response.data.choices || response.data.choices.length === 0) {
-                            throw new Error('Resposta da API Groq não contém choices');
-                        }
-
-                        console.log('✅ Resposta recebida da Groq:', {
-                            status: response.status,
-                            choicesCount: response.data.choices.length,
-                            firstChoiceLength: response.data.choices[0]?.message?.content?.length,
-                            timestamp: new Date().toISOString()
-                        });
-
+                        );
                         return response.data;
-
                     } catch (error) {
-                        console.error('❌ Erro ao chamar API Groq:', {
-                            message: error.message,
+                        console.error('❌ Erro na chamada à API da Groq:', {
+                            erro: error.message,
                             status: error.response?.status,
-                            data: error.response?.data,
-                            timestamp: new Date().toISOString()
+                            data: error.response?.data
                         });
-                        throw new Error(`Erro na API Groq: ${error.response?.data?.error?.message || error.message}`);
+                        throw error;
                     }
                 }
             }
@@ -84,27 +42,23 @@ class GroqServices {
         });
     }
 
-    async generateText(messages, attempt = 1) {
+    async generateText(messages, options = {}) {
         try {
-            const response = await this.axios.post(GROQ_CONFIG.chatUrl, { messages }, {
-                headers: {
-                    'Authorization': `Bearer ${GROQ_CONFIG.apiKey}`
-                }
+            const response = await this.chat.completions.create({
+                model: options.model || 'mixtral-8x7b-32768',
+                messages: messages,
+                temperature: options.temperature || 0.7,
+                max_tokens: options.max_tokens || 1024,
+                stream: false
             });
 
-            if (response.status !== 200) {
-                console.error(`❌ Erro na API Groq (Tentativa ${attempt}):`, response.status, response.data);
-                throw new Error(`Erro na API Groq: ${response.status} - ${JSON.stringify(response.data)}`);
-            }
-
-            return response.data.choices[0].message.content;
+            return response.choices[0].message.content;
         } catch (error) {
-            console.error(`❌ Erro ao gerar texto (Tentativa ${attempt}):`, error.message);
-            if (attempt < 3) {
-                await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-                return this.generateText(messages, attempt + 1);
-            }
-            throw new Error(`Falha ao gerar texto após ${attempt} tentativas: ${error.message}`);
+            console.error('❌ Erro ao gerar texto:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            throw error;
         }
     }
 
