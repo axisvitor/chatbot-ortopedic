@@ -61,16 +61,18 @@ class WhatsAppImageService {
      */
     async downloadMedia(mediaId) {
         try {
-            console.log('📥 Iniciando download de mídia:', { mediaId });
+            console.log('📥 [WhatsAppImageService] Iniciando download:', { mediaId });
             
             // 1. Solicita o download da mídia
             const downloadResponse = await this.whatsappAxios.get(`/v1/media/${mediaId}/download`);
             
-            if (downloadResponse.data?.errors) {
-                throw new Error(`Erro ao solicitar download: ${JSON.stringify(downloadResponse.data.errors)}`);
+            // Valida a resposta inicial
+            if (!downloadResponse.data?.media_items?.[0]?.id) {
+                console.error('❌ Resposta inválida ao solicitar download:', downloadResponse.data);
+                throw new Error('Resposta inválida ao solicitar download da mídia');
             }
 
-            // 2. Aguarda até 30 segundos pelo download (com retry)
+            // 2. Aguarda o download com retry (14 dias de disponibilidade)
             let retryCount = 0;
             const maxRetries = 6; // 6 tentativas = 30 segundos total
             
@@ -78,14 +80,35 @@ class WhatsAppImageService {
                 try {
                     // Verifica o status do download
                     const statusResponse = await this.whatsappAxios.get(`/v1/media/${mediaId}`);
+                    const mediaItem = statusResponse.data?.media_items?.[0];
                     
-                    if (statusResponse.data?.media_items?.[0]?.status === 'downloaded') {
-                        // Mídia baixada com sucesso, retorna o buffer
+                    if (mediaItem?.status === 'downloaded') {
+                        // Valida o tipo e tamanho da mídia
+                        const mimeType = mediaItem.mime_type;
+                        const { mimetype: validatedType } = this._validateMimeType(mimeType);
+                        
+                        // Faz o download do conteúdo
                         const mediaResponse = await this.whatsappAxios.get(`/v1/media/${mediaId}/content`, {
                             responseType: 'arraybuffer'
                         });
                         
-                        return mediaResponse.data;
+                        const mediaBuffer = mediaResponse.data;
+                        
+                        // Valida o tamanho baseado no tipo
+                        const sizeInMB = mediaBuffer.length / (1024 * 1024);
+                        const maxSize = this._getMaxSizeForType(validatedType);
+                        
+                        if (sizeInMB > maxSize) {
+                            throw new Error(`Mídia muito grande (${sizeInMB.toFixed(2)}MB). Máximo permitido: ${maxSize}MB`);
+                        }
+                        
+                        console.log('✅ Download concluído:', {
+                            mediaId,
+                            tipo: validatedType,
+                            tamanho: `${sizeInMB.toFixed(2)}MB`
+                        });
+                        
+                        return mediaBuffer;
                     }
                     
                     // Se ainda não baixou, aguarda 5 segundos
@@ -93,6 +116,13 @@ class WhatsAppImageService {
                     retryCount++;
                     
                 } catch (error) {
+                    // Verifica se é erro de mídia indisponível (após 14 dias)
+                    if (error.response?.data?.errors?.[0]?.code === 400 && 
+                        error.response.data.errors[0].title === "Parameter not valid" &&
+                        error.response.data.errors[0].details?.includes("Media not found")) {
+                        throw new Error('Mídia não está mais disponível (expirou após 14 dias)');
+                    }
+                    
                     console.warn(`⚠️ Tentativa ${retryCount + 1} falhou:`, error.message);
                     if (retryCount === maxRetries - 1) throw error;
                     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -167,6 +197,36 @@ class WhatsAppImageService {
             mimetype: type,
             extension: supportedTypes[type]
         };
+    }
+
+    /**
+     * Retorna o tamanho máximo permitido para cada tipo de mídia
+     * @private
+     * @param {string} mimeType - Tipo MIME da mídia
+     * @returns {number} Tamanho máximo em MB
+     */
+    _getMaxSizeForType(mimeType) {
+        const limits = {
+            'image/jpeg': 5,
+            'image/png': 5,
+            'image/webp': 0.1, // 100KB para stickers
+            'video/mp4': 16,
+            'video/3gpp': 16,
+            'audio/aac': 16,
+            'audio/mp4': 16,
+            'audio/amr': 16,
+            'audio/mpeg': 16,
+            'audio/ogg': 16,
+            'application/pdf': 100,
+            'application/msword': 100,
+            'application/vnd.ms-excel': 100,
+            'application/vnd.ms-powerpoint': 100,
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 100,
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 100,
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': 100
+        };
+
+        return limits[mimeType] || 100; // Default para documentos
     }
 
     async downloadImages(imageMessages) {
