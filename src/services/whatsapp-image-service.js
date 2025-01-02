@@ -4,6 +4,7 @@ const os = require('os');
 const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
 const { OPENAI_CONFIG, WHATSAPP_CONFIG } = require('../config/settings');
+const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 
 class WhatsAppImageService {
     constructor() {
@@ -313,52 +314,54 @@ class WhatsAppImageService {
         }
     }
 
-    async downloadImage(imageMessage) {
+    async downloadImage(message) {
         try {
             console.log('📥 [WhatsAppImageService] Iniciando download da imagem');
 
-            // Verifica se temos uma URL válida
-            const imageUrl = imageMessage.url || 
-                            `https://mmg.whatsapp.net${imageMessage.directPath}`;
-
-            if (!imageUrl) {
-                throw new Error('URL da imagem não encontrada');
+            // Verifica se a mensagem tem o formato correto
+            if (!message.message?.imageMessage) {
+                throw new Error('Mensagem não contém uma imagem válida');
             }
 
-            // Cria diretório temporário para a imagem
-            const tempDir = path.join(os.tmpdir(), 'whatsapp-images', uuidv4());
-            await fs.mkdir(tempDir, { recursive: true });
+            // Download da imagem usando Baileys
+            const buffer = await downloadMediaMessage(
+                message,
+                'buffer',
+                {},
+                {
+                    logger: console,
+                    reuploadRequest: async (media) => {
+                        // Limpa a URL se necessário
+                        const cleanUrl = media.url?.replace(/";,$/g, '') || '';
+                        const fetch = (await import('node-fetch')).default;
+                        
+                        console.log('[WhatsAppImageService] Tentando baixar mídia:', {
+                            url: cleanUrl,
+                            mediaId: media.mediaKey
+                        });
 
-            // Define o caminho do arquivo
-            const filePath = path.join(tempDir, `image.${imageMessage.mimetype.split('/')[1]}`);
-
-            // Faz o download da imagem
-            const response = await axios({
-                method: 'GET',
-                url: imageUrl,
-                responseType: 'arraybuffer',
-                headers: {
-                    'User-Agent': 'WhatsApp/2.2123.8 Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        const response = await fetch(cleanUrl);
+                        if (!response.ok) {
+                            throw new Error(`Erro ao baixar mídia: ${response.status}`);
+                        }
+                        return await response.buffer();
+                    }
                 }
-            });
+            );
 
-            // Salva a imagem
-            await fs.writeFile(filePath, response.data);
-
-            // Converte para base64
-            const base64 = response.data.toString('base64');
+            if (!buffer) {
+                throw new Error('Download da imagem falhou');
+            }
 
             console.log('✅ [WhatsAppImageService] Download concluído:', {
-                tamanho: response.data.length,
-                tipo: imageMessage.mimetype,
-                caminho: filePath
+                tamanho: buffer.length,
+                tipo: message.message.imageMessage.mimetype
             });
 
             return {
-                success: true,
-                filePath,
-                base64,
-                mimetype: imageMessage.mimetype
+                buffer,
+                mimetype: message.message.imageMessage.mimetype,
+                caption: message.message.imageMessage.caption || ''
             };
 
         } catch (error) {
@@ -366,10 +369,7 @@ class WhatsAppImageService {
                 erro: error.message,
                 stack: error.stack
             });
-            return {
-                success: false,
-                error: error.message
-            };
+            throw error;
         }
     }
 

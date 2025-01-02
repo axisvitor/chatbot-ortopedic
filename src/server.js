@@ -23,6 +23,13 @@ const {
     MediaManagerService
 } = require('./services');
 
+// Importação dos serviços de imagem
+const { WhatsAppImageService } = require('./services/whatsapp-image-service');
+const { OpenAIVisionService } = require('./services/openai-vision-service');
+const { AIServices } = require('./services/ai-services');
+const { WhatsAppService } = require('./services/whatsapp-service');
+const { OpenAIService } = require('./services/openai-service');
+
 // Configurações
 const { 
     RATE_LIMIT_CONFIG,
@@ -126,21 +133,21 @@ async function initializeServices() {
             console.log('✅ CacheService inicializado');
             
             // Inicializa os serviços principais
-            const whatsappService = new WhatsAppService();
+            const whatsAppService = new WhatsAppService();
             console.log('✅ WhatsAppService criado');
 
-            const trackingService = new TrackingService(whatsappService);
+            const trackingService = new TrackingService(whatsAppService);
             console.log('✅ TrackingService criado');
 
-            const orderValidationService = new OrderValidationService(null, whatsappService);
+            const orderValidationService = new OrderValidationService(null, whatsAppService);
             console.log('✅ OrderValidationService criado');
 
             // Inicializa o WhatsApp e aguarda conexão
-            await whatsappService.init();
+            await whatsAppService.init();
             console.log('✅ WhatsAppService inicializado');
 
             // Verifica se o cliente está conectado
-            const client = await whatsappService.getClient();
+            const client = await whatsAppService.getClient();
             if (!client) {
                 throw new Error('WhatsAppService não inicializou corretamente');
             }
@@ -149,14 +156,13 @@ async function initializeServices() {
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
-            audioService = new AudioService(groqServices, whatsappService);
+            audioService = new AudioService(groqServices, whatsAppService);
             console.log('✅ AudioService inicializado');
 
-            const { WhatsAppImageService } = require('./services/whatsapp-image-service');
-            whatsappImageService = new WhatsAppImageService(groqServices);
+            const whatsappImageService = new WhatsAppImageService(groqServices);
             console.log('✅ WhatsAppImageService inicializado');
 
-            imageService = new ImageService(whatsappService);
+            imageService = new ImageService(whatsAppService);
             console.log('✅ ImageService inicializado');
 
             mediaManagerService = new MediaManagerService(audioService, imageService);
@@ -168,11 +174,14 @@ async function initializeServices() {
             nuvemshopService = new NuvemshopService(cacheService);
             console.log('✅ NuvemshopService inicializado');
 
+            const openAIService = new OpenAIService();
+            const openAIVisionService = new OpenAIVisionService();
+
             aiServices = new AIServices(
-                whatsappService,
+                whatsAppService,
                 whatsappImageService,
-                redisStore,
-                null, // openAIService não é mais usado
+                openAIVisionService,
+                openAIService,
                 trackingService,
                 orderValidationService,
                 nuvemshopService,
@@ -182,7 +191,7 @@ async function initializeServices() {
             );
             console.log('✅ AIServices inicializado');
 
-            webhookService = new WebhookService(whatsappService, aiServices, audioService);
+            webhookService = new WebhookService(whatsAppService, aiServices, audioService);
             console.log('✅ WebhookService inicializado');
 
             clearTimeout(timeout);
@@ -293,6 +302,39 @@ app.post('/message/send-text', async (req, res) => {
             status: 'error',
             message: 'Erro ao enviar mensagem',
             error: error.message
+        });
+    }
+});
+
+// Handler para mensagens recebidas
+app.post('/webhook/msg_recebidas', async (req, res) => {
+    try {
+        const message = req.body;
+        
+        console.log('📨 Mensagem recebida:', {
+            tipo: message.message?.imageMessage ? 'imagem' : 'texto',
+            de: message.key?.remoteJid
+        });
+
+        // Processa imagens
+        if (message.message?.imageMessage) {
+            const result = await aiServices.handleImageMessage(message);
+            
+            // Envia a resposta para o usuário
+            if (result.response) {
+                await whatsappService.sendText(
+                    message.key.remoteJid,
+                    result.response
+                );
+            }
+        }
+        
+        res.status(200).send('OK');
+    } catch (error) {
+        console.error('❌ Erro no webhook:', error);
+        res.status(500).json({
+            error: 'Erro interno',
+            message: error.message
         });
     }
 });
