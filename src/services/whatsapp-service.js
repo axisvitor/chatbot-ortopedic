@@ -701,21 +701,32 @@ class WhatsAppService {
             console.log('📩 [WhatsApp] Nova mensagem:', {
                 messageId: message.key?.id,
                 from: message.key?.remoteJid,
+                pushName: message.pushName,
                 tipo: this.getMessageType(message),
                 timestamp: new Date().toISOString()
             });
 
+            // Extrai a mensagem real considerando todos os casos possíveis
+            const realMessage = message?.message?.ephemeralMessage?.message || // Mensagem ephemeral
+                              message?.message?.viewOnceMessage?.message ||    // Mensagem "ver uma vez"
+                              message?.message?.forwardedMessage ||           // Mensagem encaminhada
+                              message?.message;                              // Mensagem normal
+
+            if (!realMessage) {
+                throw new Error('Estrutura da mensagem inválida');
+            }
+
             // Identifica o tipo de mensagem
-            if (message.imageMessage) {
-                return await this.handleImageMessage(message);
-            } else if (message.audioMessage) {
-                return await this.handleAudioMessage(message);
-            } else if (message.conversation || message.extendedTextMessage) {
-                return await this.handleTextMessage(message);
+            if (realMessage.imageMessage) {
+                return await this.handleImageMessage({ ...message, message: realMessage });
+            } else if (realMessage.audioMessage) {
+                return await this.handleAudioMessage({ ...message, message: realMessage });
+            } else if (realMessage.conversation || realMessage.extendedTextMessage) {
+                return await this.handleTextMessage({ ...message, message: realMessage });
             } else {
                 console.warn('⚠️ [WhatsApp] Tipo de mensagem não suportado:', {
                     messageId: message.key?.id,
-                    tipos: Object.keys(message).filter(key => key.endsWith('Message'))
+                    tipos: Object.keys(realMessage).filter(key => key.endsWith('Message'))
                 });
                 
                 await this.sendText(
@@ -741,10 +752,11 @@ class WhatsAppService {
         try {
             console.log('💬 [WhatsApp] Processando mensagem de texto:', {
                 messageId: message.key?.id,
-                from: message.key?.remoteJid
+                from: message.key?.remoteJid,
+                pushName: message.pushName
             });
 
-            // Extrair o texto da mensagem considerando todos os possíveis caminhos
+            // Extrai o texto da mensagem considerando todos os possíveis caminhos
             const text = message.message?.extendedTextMessage?.text || 
                         message.message?.conversation ||
                         message.message?.text ||
@@ -760,11 +772,17 @@ class WhatsAppService {
 
             console.log('📝 [WhatsApp] Texto extraído:', {
                 from,
+                pushName: message.pushName,
                 text: text.substring(0, 100) // Log apenas os primeiros 100 caracteres
             });
 
-            // Processa a mensagem
-            const response = await this._openaiService.processMessage(text, from);
+            // Adiciona o nome do usuário ao contexto se disponível
+            const contextText = message.pushName ? 
+                `[USUÁRIO: ${message.pushName}] ${text}` : 
+                text;
+
+            // Processa a mensagem com o Assistant
+            const response = await this._openaiService.processMessage(contextText, from);
 
             if (response) {
                 await this.sendText(from, response);

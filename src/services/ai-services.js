@@ -89,161 +89,113 @@ class AIServices {
 
     async handleMessage(messageData) {
         try {
-            if (!messageData || !messageData.from) {
+            // Extrai dados do body do webhook
+            const webhookBody = messageData.body || messageData;
+            const messageKey = webhookBody.key;
+            const messageContent = webhookBody.message;
+            
+            if (!messageKey?.remoteJid) {
                 console.error('❌ Dados da mensagem inválidos:', messageData);
                 return;
             }
 
+            const from = messageKey.remoteJid.replace('@s.whatsapp.net', '');
+            const pushName = webhookBody.pushName;
+
             // Verifica se é o comando #resetid
-            if (messageData.type === 'text' && messageData.text === '#resetid') {
-                console.log('🔄 Processando comando #resetid para:', messageData.from);
-                try {
-                    // Recupera o histórico do chat
-                    const chatHistory = await this.getChatHistory(messageData.from);
-                    if (!chatHistory?.threadId) {
-                        throw new Error('Thread ID não encontrado');
-                    }
-
-                    // Remove o run ativo se houver
-                    await this.openAIService.removeActiveRun(chatHistory.threadId);
-                    
-                    // Deleta a thread antiga
-                    await this.openAIService.deleteThread(chatHistory.threadId);
-                    
-                    // Limpa todos os dados do Redis relacionados ao usuário e thread
-                    await Promise.all([
-                        this.redisStore.deleteUserData(messageData.from),
-                        this.redisStore.deleteThreadData(chatHistory.threadId)
-                    ]);
-                    
-                    // Cria uma nova thread
-                    const newThread = await this.openAIService.createThread();
-                    
-                    // Atualiza o histórico com a nova thread
-                    await this.redisStore.set(`chat:${messageData.from}`, JSON.stringify({
-                        threadId: newThread.id,
-                        lastUpdate: new Date().toISOString()
-                    }));
-
-                    // Envia confirmação para o usuário
-                    await this.whatsAppService.sendText(
-                        messageData.from,
-                        'Conversa reiniciada com sucesso! Como posso ajudar?'
-                    );
-                    return;
-                } catch (error) {
-                    console.error('❌ Erro ao processar comando #resetid:', error);
-                    await this.whatsAppService.sendText(
-                        messageData.from,
-                        'Desculpe, ocorreu um erro ao reiniciar a conversa. Por favor, tente novamente.'
-                    );
-                    return;
-                }
-            }
-
-            console.log('🤖 Processando mensagem:', {
-                tipo: messageData.type,
-                conteudo: JSON.stringify(messageData.message, null, 2)
-            });
-
-            // Extrai informações da mensagem de forma robusta
-            const message = messageData.message;
-            const from = messageData.from || messageData.key?.remoteJid;
-
-            if (!from) {
-                console.error('Dados da mensagem:', JSON.stringify(messageData, null, 2));
-                throw new Error('Remetente não encontrado na mensagem');
-            }
-
-            // Verifica se é uma mensagem de imagem
-            if (message?.imageMessage || (messageData.mediaMessage?.images?.length > 0)) {
-                console.log('🖼️ Mensagem de imagem detectada');
-                
-                // Coleta todas as imagens da mensagem
-                const imageMessages = [];
-                
-                if (message?.imageMessage) {
-                    imageMessages.push(message.imageMessage);
-                }
-
-                if (messageData.mediaMessage?.images) {
-                    imageMessages.push(...messageData.mediaMessage.images);
-                }
-
-                try {
-                    // Primeiro, analisa a imagem com GPT-4 Vision
-                    const imageAnalysis = await this.whatsAppImageService.analyzeImages(imageMessages);
-                    
-                    if (!imageAnalysis.success) {
-                        throw new Error(`Falha ao analisar imagem: ${imageAnalysis.error}`);
-                    }
-
-                    // Verifica se a análise indica que é um comprovante de pagamento
-                    const isPaymentProof = this.isPaymentProof(imageAnalysis.analysis);
-                    
-                    if (isPaymentProof) {
-                        console.log('💰 Comprovante de pagamento detectado, processando...');
-                        // Processa como comprovante de pagamento
-                        await this.processPaymentProof(from, imageMessages, imageAnalysis);
-                    } else {
-                        console.log('📸 Imagem genérica detectada, processando com IA...');
-                        // Processa como imagem genérica
-                        const response = await this.processGenericImage(from, imageMessages, imageAnalysis);
-                        await this.sendResponse(from, response);
-                    }
-                    
-                    return;
-                } catch (error) {
-                    console.error('❌ Erro ao processar imagem:', {
-                        erro: error.message,
-                        stack: error.stack
-                    });
-                    
-                    // Envia mensagem de erro para o usuário
-                    await this.sendResponse(from, 'Desculpe, não consegui processar sua imagem. Por favor, tente novamente.');
-                    return;
-                }
-            }
-
-            // Para mensagens de texto
-            if (messageData.type === 'text' && message.text) {
-                console.log(`[AIServices] Processando mensagem de texto: ${message.text.substring(0, 100)}...`);
-                
-                const response = await this.generateResponse(from, message.text);
-                
-                if (response) {
-                    console.log(`[AIServices] Enviando resposta para ${from}`);
-                    await this.whatsAppService.sendText(from, response);
-                } else {
-                    console.warn(`[AIServices] Resposta vazia para ${from}`);
-                    await this.whatsAppService.sendText(
-                        from,
-                        'Desculpe, não consegui processar sua mensagem no momento. Por favor, tente novamente.'
-                    );
-                }
+            if (messageContent?.extendedTextMessage?.text === '#resetid' || 
+                messageContent?.conversation === '#resetid') {
+                console.log('🔄 Processando comando #resetid para:', from);
+                await this.handleResetCommand({ from });
                 return;
             }
 
-            // Para outros tipos de mensagem
-            console.warn(`[AIServices] Tipo de mensagem não suportado: ${messageData.type}`);
-            await this.whatsAppService.sendText(
-                from,
-                'Desculpe, este tipo de mensagem não é suportado no momento.'
-            );
+            console.log('🤖 Processando mensagem:', {
+                de: from,
+                nome: pushName,
+                tipo: this.getMessageType(messageContent),
+                timestamp: new Date().toISOString()
+            });
+
+            // Identifica o tipo de mensagem
+            if (messageContent?.imageMessage) {
+                console.log('🖼️ Mensagem de imagem detectada');
+                await this.handleImageMessage({
+                    message: messageContent,
+                    key: messageKey,
+                    pushName
+                });
+            } 
+            else if (messageContent?.audioMessage) {
+                console.log('🎵 Mensagem de áudio detectada');
+                await this.handleAudioMessage({
+                    message: messageContent,
+                    key: messageKey,
+                    pushName
+                });
+            }
+            else if (messageContent?.extendedTextMessage || messageContent?.conversation) {
+                console.log('💬 Mensagem de texto detectada');
+                const text = messageContent.extendedTextMessage?.text || 
+                           messageContent.conversation;
+
+                // Adiciona o nome do usuário ao contexto
+                const contextText = pushName ? 
+                    `[USUÁRIO: ${pushName}] ${text}` : 
+                    text;
+
+                const response = await this.generateResponse(from, contextText);
+                if (response) {
+                    await this.whatsAppService.sendText(from, response);
+                } else {
+                    throw new Error('Resposta vazia do Assistant');
+                }
+            }
+            else {
+                console.warn('⚠️ Tipo de mensagem não suportado:', {
+                    tipos: Object.keys(messageContent || {}).filter(key => key.endsWith('Message'))
+                });
+                await this.whatsAppService.sendText(
+                    from,
+                    'Por favor, envie apenas mensagens de texto, áudio ou imagens.'
+                );
+            }
 
         } catch (error) {
-            console.error('❌ Erro ao processar mensagem:', error);
+            console.error('❌ Erro ao processar mensagem:', {
+                erro: error.message,
+                stack: error.stack
+            });
             
-            // Envia mensagem de erro para o usuário
             try {
-                await this.whatsAppService.sendText(
-                    messageData.from,
-                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.'
-                );
+                const from = messageData.body?.key?.remoteJid || 
+                           messageData.key?.remoteJid;
+                
+                if (from) {
+                    await this.whatsAppService.sendText(
+                        from,
+                        'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.'
+                    );
+                }
             } catch (sendError) {
                 console.error('❌ Erro ao enviar mensagem de erro:', sendError);
             }
         }
+    }
+
+    /**
+     * Identifica o tipo da mensagem
+     * @private
+     */
+    getMessageType(messageContent) {
+        if (!messageContent) return 'unknown';
+        
+        if (messageContent.imageMessage) return 'image';
+        if (messageContent.audioMessage) return 'audio';
+        if (messageContent.extendedTextMessage) return 'extended_text';
+        if (messageContent.conversation) return 'text';
+        
+        return 'unknown';
     }
 
     async generateResponse(from, message, context = null) {
