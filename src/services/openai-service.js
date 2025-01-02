@@ -109,24 +109,26 @@ class OpenAIService {
                     properties: {
                         order_number: {
                             type: "string",
-                            description: "Número do pedido, se disponível"
+                            description: "Número do pedido relacionado (opcional)"
                         },
                         tracking_code: {
                             type: "string",
-                            description: "Código de rastreio, se disponível"
+                            description: "Código de rastreio relacionado (opcional)"
                         },
                         reason: {
                             type: "string",
-                            description: "Motivo do encaminhamento para o financeiro"
+                            description: "Motivo do encaminhamento",
+                            enum: ["payment_issue", "refund_request", "taxation", "customs", "payment_proof", "other"]
                         },
                         customer_message: {
                             type: "string",
-                            description: "Mensagem original do cliente"
+                            description: "Mensagem original do cliente que gerou o encaminhamento"
                         },
                         priority: {
                             type: "string",
+                            description: "Prioridade do caso",
                             enum: ["low", "medium", "high", "urgent"],
-                            description: "Prioridade do caso"
+                            default: "medium"
                         },
                         additional_info: {
                             type: "string",
@@ -145,44 +147,8 @@ class OpenAIService {
      * @returns {Promise<boolean>} 
      */
     async hasActiveRun(threadId) {
-        try {
-            const runId = await this.redisStore.get(`run:${threadId}`);
-            if (!runId) return false;
-
-            // Verifica se o run ainda está ativo
-            try {
-                const run = await this.client.beta.threads.runs.retrieve(
-                    threadId,
-                    runId
-                );
-
-                // Se o run estiver completo ou falhou, remove-o
-                if (['completed', 'failed', 'expired', 'cancelled'].includes(run.status)) {
-                    console.log('[OpenAI] Removendo run inativo:', {
-                        threadId,
-                        runId,
-                        status: run.status,
-                        timestamp: new Date().toISOString()
-                    });
-                    await this.removeActiveRun(threadId);
-                    return false;
-                }
-
-                return true;
-            } catch (error) {
-                // Se der erro ao buscar o run, provavelmente ele não existe mais
-                console.warn('[OpenAI] Erro ao verificar run, removendo:', {
-                    threadId,
-                    runId,
-                    erro: error.message
-                });
-                await this.removeActiveRun(threadId);
-                return false;
-            }
-        } catch (error) {
-            console.error('[OpenAI] Erro ao verificar run ativo:', error);
-            return false;
-        }
+        const runId = await this.redisStore.getActiveRun(threadId);
+        return !!runId;
     }
 
     /**
@@ -191,7 +157,7 @@ class OpenAIService {
      * @param {string} runId - ID do run
      */
     async registerActiveRun(threadId, runId) {
-        await this.redisStore.set(`run:${threadId}`, runId);
+        await this.redisStore.setActiveRun(threadId, runId);
     }
 
     /**
@@ -199,21 +165,8 @@ class OpenAIService {
      * @param {string} threadId - ID da thread
      */
     async removeActiveRun(threadId) {
-        try {
-            // Remove o run do Redis
-            await this.redisStore.del(`run:${threadId}`);
-            
-            // Processa mensagens na fila se houver
-            if (this.messageQueue.has(threadId) && this.messageQueue.get(threadId).length > 0) {
-                console.log('[OpenAI] Processando mensagens na fila após remoção do run:', {
-                    threadId,
-                    queueSize: this.messageQueue.get(threadId).length
-                });
-                await this.processQueuedMessages(threadId);
-            }
-        } catch (error) {
-            console.error('[OpenAI] Erro ao remover run ativo:', error);
-        }
+        await this.redisStore.removeActiveRun(threadId);
+        await this.processQueuedMessages(threadId);
     }
 
     /**
@@ -451,50 +404,50 @@ class OpenAIService {
      */
     async waitForResponse(threadId, runId) {
         try {
-            let attempts = 0;
-            const maxAttempts = 180; // 180 segundos (3 minutos)
-
-            while (attempts < maxAttempts) {
-                const run = await this.client.beta.threads.runs.retrieve(
-                    threadId,
-                    runId
-                );
-
-                if (run.status === 'completed') {
-                    // Busca as mensagens mais recentes
-                    const messages = await this.client.beta.threads.messages.list(
-                        threadId
-                    );
-
-                    // Retorna a última mensagem do assistente
-                    const assistantMessage = messages.data.find(
-                        msg => msg.role === 'assistant'
-                    );
-
-                    return assistantMessage?.content[0]?.text?.value || null;
-                }
-
-                if (['failed', 'expired', 'cancelled'].includes(run.status)) {
-                    console.error('[OpenAI] Run falhou:', {
-                        threadId,
-                        runId,
-                        status: run.status
-                    });
-                    throw new Error(`Run falhou com status: ${run.status}`);
-                }
-
-                // Aguarda 1 segundo antes de tentar novamente
+            let run = await this.checkRunStatus(threadId, runId);
+            
+            while (run.status === 'queued' || run.status === 'in_progress') {
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                attempts++;
+                run = await this.checkRunStatus(threadId, runId);
             }
 
-            throw new Error('Timeout ao aguardar resposta do assistente');
+            if (run.status === 'requires_action') {
+                console.log('[OpenAI] Ação requerida, processando tool calls...');
+                
+                if (run.required_action?.type === 'submit_tool_outputs') {
+                    const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+                    console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => `'${t.function.name}'`));
+                    
+                    const toolOutputs = await this.handleToolCalls(run, threadId);
+                    
+                    await this.client.beta.threads.runs.submitToolOutputs(
+                        threadId,
+                        runId,
+                        { tool_outputs: toolOutputs }
+                    );
+                    
+                    return await this.waitForResponse(threadId, runId);
+                }
+            }
+
+            if (run.status === 'completed') {
+                const messages = await this.listMessages(threadId);
+                if (messages.data && messages.data.length > 0) {
+                    return messages.data[0].content[0].text.value;
+                }
+            }
+
+            if (run.status === 'failed') {
+                console.error('[OpenAI] Run falhou:', run.last_error);
+                throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
+            }
+
+            throw new Error(`Run terminou com status inesperado: ${run.status}`);
+            
         } catch (error) {
             console.error('[OpenAI] Erro ao aguardar resposta:', error);
+            await this.removeActiveRun(threadId); // Garante remoção do run em caso de erro
             throw error;
-        } finally {
-            // Sempre remove o run ao finalizar
-            await this.removeActiveRun(threadId);
         }
     }
 
@@ -564,6 +517,42 @@ class OpenAIService {
                                 order.total.toFixed(2) : 
                                 String(order.total).replace(/[^\d.,]/g, '');
 
+                            // Verifica status do rastreamento se disponível
+                            let deliveryStatus = '';
+                            if (order.shipping_tracking_number) {
+                                try {
+                                    const tracking = await this.trackingService.getTrackingInfo(order.shipping_tracking_number);
+                                    if (tracking && tracking.latest_event_info) {
+                                        const trackingDate = new Date(tracking.latest_event_time).toLocaleString('pt-BR', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            second: '2-digit'
+                                        });
+
+                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}` +
+                                                       `\n📍 Status: ${tracking.latest_event_info}` +
+                                                       `\n🕒 Última Atualização: ${trackingDate}`;
+
+                                        // Adiciona status de entrega se estiver entregue
+                                        if (tracking.package_status === 'Delivered') {
+                                            deliveryStatus += `\n\n✅ Pedido Entregue` +
+                                                            `\n📅 Data de Entrega: ${trackingDate}`;
+                                        }
+                                    } else {
+                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
+                                    }
+                                } catch (error) {
+                                    console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
+                                    deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                   `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
+                                }
+                            }
+
                             output = JSON.stringify({
                                 error: false,
                                 message: `🛍 Detalhes do Pedido #${order.number}\n\n` +
@@ -571,7 +560,7 @@ class OpenAIService {
                                         `📅 Data: ${orderDate}\n` +
                                         `📦 Status: ${order.status}\n` +
                                         `💰 Valor Total: R$ ${total}\n\n` +
-                                        `Produtos:\n${products}`
+                                        `Produtos:\n${products}${deliveryStatus}`
                             });
                         }
                         break;
@@ -803,18 +792,20 @@ class OpenAIService {
                             break;
                         }
 
-                        const financialData = {
+                        const success = await this.financialService.forwardCase({
                             order_number: parsedArgs.order_number,
                             tracking_code: parsedArgs.tracking_code,
                             reason: parsedArgs.reason,
                             customer_message: parsedArgs.customer_message,
-                            priority: parsedArgs.priority,
+                            priority: parsedArgs.priority || 'medium',
                             additional_info: parsedArgs.additional_info
-                        };
-                        const success = await this.financialService.forwardCase(financialData);
+                        });
+
                         output = JSON.stringify({
-                            success,
-                            message: success ? 'Caso encaminhado para o financeiro com sucesso.' : 'Não foi possível encaminhar o caso para o financeiro.'
+                            error: !success,
+                            message: success 
+                                ? 'Caso encaminhado com sucesso para o setor financeiro. Em breve entrarão em contato.'
+                                : 'Não foi possível encaminhar o caso no momento. Por favor, tente novamente mais tarde.'
                         });
                         break;
 
@@ -968,72 +959,24 @@ class OpenAIService {
     async handleCommand(threadId, command) {
         try {
             if (command === '#resetid') {
-                console.log('🔄 Executando comando #resetid no OpenAIService:', {
-                    threadId,
-                    timestamp: new Date().toISOString()
-                });
-
-                try {
-                    // Remove o run ativo se houver
-                    await this.removeActiveRun(threadId);
-                    
-                    // Limpa a fila de mensagens
-                    if (this.messageQueue.has(threadId)) {
-                        this.messageQueue.delete(threadId);
-                    }
-                    
-                    // Remove timer de processamento
-                    if (this.processingTimers.has(threadId)) {
-                        clearTimeout(this.processingTimers.get(threadId));
-                        this.processingTimers.delete(threadId);
-                    }
-
-                    // Limpa dados do Redis relacionados à thread
-                    const redisKeys = [
-                        `run:${threadId}`,
-                        `thread:${threadId}`,
-                        `messages:${threadId}`,
-                        `state:${threadId}`,
-                        `queue:${threadId}`
-                    ];
-
-                    console.log('🗑️ Limpando dados do Redis no OpenAIService:', redisKeys);
-                    await Promise.all(redisKeys.map(key => this.redisStore.del(key)));
-                    
-                    // Deleta a thread antiga
-                    await this.client.beta.threads.del(threadId);
-                    
-                    // Cria uma nova thread
-                    const newThread = await this.client.beta.threads.create();
-                    
-                    console.log('✅ Thread reiniciada com sucesso:', {
-                        oldThreadId: threadId,
-                        newThreadId: newThread.id,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    return {
-                        threadId: newThread.id,
-                        message: 'Conversa reiniciada com sucesso! Como posso ajudar?'
-                    };
-                } catch (error) {
-                    console.error('❌ Erro ao reiniciar thread:', {
-                        threadId,
-                        erro: error.message,
-                        stack: error.stack
-                    });
-                    throw new Error('Não foi possível reiniciar a conversa. Por favor, tente novamente.');
-                }
+                // Remove o run ativo se houver
+                await this.removeActiveRun(threadId);
+                
+                // Deleta a thread antiga
+                await this.client.beta.threads.del(threadId);
+                
+                // Cria uma nova thread
+                const newThread = await this.client.beta.threads.create();
+                
+                return {
+                    threadId: newThread.id,
+                    message: 'Conversa reiniciada com sucesso! Como posso ajudar?'
+                };
             }
             
             return null;
         } catch (error) {
-            console.error('[OpenAI] Erro ao processar comando:', {
-                comando: command,
-                threadId,
-                erro: error.message,
-                stack: error.stack
-            });
+            console.error('[OpenAI] Erro ao processar comando:', error);
             throw error;
         }
     }

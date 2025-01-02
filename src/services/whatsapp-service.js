@@ -144,80 +144,62 @@ class WhatsAppService {
         );
     }
 
+    /**
+     * Envia uma mensagem de texto
+     * @param {string} to - Número do destinatário
+     * @param {string} text - Texto da mensagem
+     * @returns {Promise<Object>} Resposta do servidor
+     */
     async sendText(to, text) {
         try {
-            // Validações iniciais
-            if (!to || !text) {
-                throw new Error('Número do destinatário e texto são obrigatórios');
-            }
-
             const client = await this.getClient();
             if (!client) {
                 throw new Error('Cliente HTTP não inicializado');
             }
 
-            // Formata o número do telefone
-            const phoneNumber = to.includes('@') ? to.split('@')[0] : to;
-            if (!phoneNumber.match(/^\d+$/)) {
-                throw new Error(`Número de telefone inválido: ${phoneNumber}`);
-            }
+            const messageText = String(text);
 
-            // Formata o texto da mensagem
-            const messageText = String(text).trim();
-            if (messageText.length === 0) {
-                throw new Error('Texto da mensagem não pode estar vazio');
-            }
+            console.log(' Enviando mensagem:', {
+                para: to,
+                texto: messageText,
+                messageId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                timestamp: new Date().toISOString()
+            });
 
-            console.log('[WhatsApp] Enviando mensagem:', {
-                para: phoneNumber,
+            const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
+            console.log('[WhatsApp] Iniciando envio de mensagem:', {
+                para: to,
                 previewMensagem: messageText.slice(0, 100) + (messageText.length > 100 ? '...' : ''),
                 chaveConexao: this.connectionKey,
                 timestamp: new Date().toISOString()
             });
 
-            const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
             console.log('[WhatsApp] Endpoint:', endpoint);
 
-            // Tenta enviar a mensagem com retry
-            let retryCount = 0;
-            const maxRetries = 3;
+            const phoneNumber = to.includes('@') ? to.split('@')[0] : to;
 
-            while (retryCount < maxRetries) {
-                try {
-                    const response = await client.post(endpoint, {
-                        phoneNumber,
-                        text: messageText
-                    });
+            const response = await client.post(endpoint, {
+                phoneNumber,
+                text: messageText
+            });
 
-                    // Verifica a resposta
-                    if (response.data?.error) {
-                        if (response.data?.message?.includes('conta') && retryCount < maxRetries - 1) {
-                            console.log('[WhatsApp] Erro de conta, reinicializando conexão...');
-                            await this.init();
-                            retryCount++;
-                            continue;
-                        }
-                        throw new Error(response.data.message || 'Erro ao enviar mensagem');
-                    }
-
-                    console.log('[WhatsApp] Mensagem enviada com sucesso:', {
-                        para: phoneNumber,
-                        messageId: response.data?.messageId,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    return response.data;
-                } catch (retryError) {
-                    if (retryCount === maxRetries - 1) {
-                        throw retryError;
-                    }
-                    console.warn(`[WhatsApp] Tentativa ${retryCount + 1} falhou:`, retryError.message);
-                    retryCount++;
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Backoff exponencial
-                }
+            // Verifica erro de conta
+            if (response.data?.error && response.data?.message?.includes('conta')) {
+                console.log(' Erro de conta, reinicializando conexão...');
+                await this.init();
+                return this.sendText(to, text);
             }
+
+            console.log('[WhatsApp] Resposta do servidor:', {
+                status: response.status,
+                messageId: response.data?.messageId,
+                error: response.data?.error,
+                timestamp: new Date().toISOString()
+            });
+
+            return response.data;
         } catch (error) {
-            console.error('[WhatsApp] Erro ao enviar mensagem:', {
+            console.error(' Erro ao enviar mensagem:', {
                 para: to,
                 erro: error.message,
                 status: error.response?.status,
@@ -226,8 +208,14 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            // Se todas as tentativas falharam, propaga o erro
-            throw new Error(`Falha ao enviar mensagem: ${error.message}`);
+            // Verifica erro de conta no catch
+            if (error.response?.data?.error && error.response?.data?.message?.includes('conta')) {
+                console.log(' Erro de conta no catch, reinicializando conexão...');
+                await this.init();
+                return this.sendText(to, text);
+            }
+
+            throw error;
         }
     }
 
@@ -681,53 +669,81 @@ class WhatsAppService {
         }
     }
 
+    /**
+     * Processa uma mensagem de imagem
+     * @param {Object} message Mensagem do WhatsApp
+     */
     async handleImageMessage(message) {
         try {
-            console.log(' Mensagem de imagem recebida:', {
-                messageId: message.messageId,
-                from: message.from,
-                type: message.type,
-                hasMessage: !!message.message,
-                hasImageMessage: !!message.message?.imageMessage,
+            console.log('📸 Recebida mensagem com imagem:', {
+                messageId: message.key?.id,
+                from: message.key?.remoteJid,
                 timestamp: new Date().toISOString()
             });
 
-            if (!message.message?.imageMessage) {
-                console.warn('[WhatsApp] Mensagem de imagem sem dados:', message);
+            // Processa a imagem com o serviço especializado
+            const imageResult = await this._imageService.processWhatsAppImage(message);
+
+            if (!imageResult.success) {
+                console.error('❌ Erro ao processar imagem:', imageResult.error);
+                await this.sendText(
+                    message.key.remoteJid,
+                    'Desculpe, não consegui processar sua imagem. Por favor, tente novamente.'
+                );
                 return;
             }
 
-            const imageMessage = message.message.imageMessage;
-            const caption = message.message?.caption || '';
-            const from = message.from;
-            const messageId = message.messageId;
-            const businessHours = this._businessHoursService;
+            // Analisa o resultado para identificar se é um comprovante
+            const isPaymentProof = imageResult.analysis.toLowerCase().includes('comprovante') && 
+                                 imageResult.analysis.toLowerCase().includes('pagamento');
 
-            // Processa a imagem
-            const imageResult = await this._imageService.processWhatsAppImage({ imageMessage, caption, from, messageId, businessHours });
-
-            if (imageResult.type === 'payment_proof') {
-                console.log('[WhatsApp] Comprovante de pagamento detectado, aguardando número do pedido.');
-                this.pendingProofs.set(from, {
-                    messageId,
-                    imageResult
+            if (isPaymentProof) {
+                console.log('💰 Comprovante de pagamento detectado');
+                
+                // Armazena o comprovante temporariamente
+                this.paymentProofMessages = this.paymentProofMessages || new Map();
+                this.paymentProofMessages.set(message.key.remoteJid, {
+                    message,
+                    analysis: imageResult.analysis
                 });
-                await this.sendMessage(from, 'Recebi seu comprovante! Para confirmar o pagamento, por favor, me envie o número do seu pedido.');
+
+                // Encaminha para o financeiro se configurado
+                const financialNumber = process.env.FINANCIAL_DEPT_NUMBER;
+                if (financialNumber) {
+                    await this.forwardMessage(message, financialNumber);
+                    await this.sendText(
+                        financialNumber,
+                        `*Novo Comprovante Recebido*\nCliente: ${message.key.remoteJid}\nData: ${new Date().toLocaleString('pt-BR')}\n\nAnálise:\n${imageResult.analysis}`
+                    );
+                }
+
+                // Solicita o número do pedido
+                await this.sendText(
+                    message.key.remoteJid,
+                    'Recebi seu comprovante e já encaminhei para nossa equipe financeira! ' +
+                    'Para agilizar o processo, por favor me informe o número do seu pedido.'
+                );
                 return;
             }
 
-            // Se não for comprovante, envia a análise para o usuário
-            await this.sendMessage(from, imageResult.analysis);
-
-            console.log('[WhatsApp] Análise da imagem enviada com sucesso:', {
-                messageId,
-                from,
-                timestamp: new Date().toISOString()
-            });
+            // Se não for comprovante, envia a análise
+            console.log('✅ Enviando análise da imagem');
+            await this.sendText(message.key.remoteJid, imageResult.analysis);
 
         } catch (error) {
-            console.error(' Erro ao processar mensagem de imagem:', error);
-            throw error;
+            console.error('❌ Erro ao processar mensagem de imagem:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            
+            try {
+                await this.sendText(
+                    message.key.remoteJid,
+                    'Desculpe, ocorreu um erro ao processar sua imagem. Por favor, tente novamente em alguns instantes.'
+                );
+            } catch (sendError) {
+                console.error('❌ Erro ao enviar mensagem de erro:', sendError);
+            }
         }
     }
 

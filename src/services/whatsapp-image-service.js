@@ -360,6 +360,105 @@ class WhatsAppImageService {
         }
         return 'unknown';
     }
+
+    /**
+     * Processa uma mensagem de imagem do WhatsApp
+     * @param {Object} messageData Dados da mensagem
+     * @returns {Promise<Object>} Resultado do processamento
+     */
+    async processWhatsAppImage(messageData) {
+        try {
+            console.log('📥 Iniciando processamento de imagem:', {
+                temKey: !!messageData?.key,
+                temMessage: !!messageData?.message,
+                temImageMessage: !!messageData?.message?.imageMessage,
+                estrutura: JSON.stringify(messageData, null, 2)
+            });
+
+            // Extrai o remetente
+            const from = this.extractSenderNumber(messageData);
+
+            // Extrai dados da imagem
+            const imageMessage = messageData.message?.imageMessage;
+            if (!imageMessage) {
+                throw new Error('Mensagem não contém imagem');
+            }
+
+            // Extrai o mediaKey (necessário para download)
+            const mediaKey = imageMessage.mediaKey;
+            if (!mediaKey) {
+                throw new Error('MediaKey não encontrado na mensagem');
+            }
+
+            // Faz o download da imagem
+            const imageData = await this.downloadMedia(mediaKey);
+            
+            // Converte para base64 para análise
+            const base64Image = imageData.toString('base64');
+
+            // Prepara o prompt para análise
+            const systemPrompt = `Você é um assistente especializado em análise de imagens. 
+                                Descreva detalhadamente o conteúdo desta imagem, 
+                                identificando elementos relevantes como:
+                                - Se é um comprovante de pagamento
+                                - Se contém texto legível
+                                - Elementos visuais importantes
+                                - Qualquer informação médica ou relacionada à ortopedia`;
+
+            // Envia para análise
+            const response = await this.openaiAxios.post('/v1/chat/completions', {
+                model: "gpt-4-vision-preview",
+                messages: [
+                    {
+                        role: "system",
+                        content: systemPrompt
+                    },
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: "Analise esta imagem em detalhes:"
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${imageMessage.mimetype};base64,${base64Image}`
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 1000
+            });
+
+            // Processa a resposta
+            return {
+                success: true,
+                analysis: response.data.choices[0].message.content,
+                metadata: {
+                    model: "gpt-4-vision-preview",
+                    tokens: response.data.usage,
+                    from: from,
+                    messageId: messageData.key?.id
+                }
+            };
+
+        } catch (error) {
+            console.error('❌ Erro ao processar imagem:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            
+            return {
+                success: false,
+                error: error.message,
+                metadata: {
+                    from: messageData?.key?.remoteJid?.split('@')[0]
+                }
+            };
+        }
+    }
 }
 
 module.exports = { WhatsAppImageService };
