@@ -1,7 +1,7 @@
 const axios = require('axios');
-const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
+const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
 const { OPENAI_CONFIG, WHATSAPP_CONFIG } = require('../config/settings');
 
@@ -31,25 +31,21 @@ class WhatsAppImageService {
      */
     extractSenderNumber(message) {
         try {
-            console.log('📱 Extraindo remetente da mensagem:', {
-                temKey: !!message?.key,
-                temRemoteJid: !!message?.key?.remoteJid,
-                temParticipant: !!message?.key?.participant,
-                estrutura: JSON.stringify(message, null, 2)
-            });
+            // Verifica todas as possíveis localizações do remetente
+            const from = message.key?.remoteJid || 
+                        message.from || 
+                        message.participant || 
+                        (message.message?.key?.remoteJid);
 
-            // Em grupos, usa participant. Em 1:1, usa remoteJid
-            const senderId = message?.key?.participant || message?.key?.remoteJid;
-            
-            if (!senderId) {
-                console.error('❌ Dados da mensagem:', JSON.stringify(message, null, 2));
-                throw new Error('Remetente não encontrado na mensagem (key.remoteJid ou key.participant ausentes)');
+            if (!from) {
+                console.error('❌ [WhatsAppImageService] Dados da mensagem:', JSON.stringify(message, null, 2));
+                throw new Error('Remetente não encontrado na mensagem');
             }
 
-            // Remove tudo que não for dígito (ex: @s.whatsapp.net, @g.us)
-            return senderId.split('@')[0];
+            // Remove o sufixo @s.whatsapp.net se presente
+            return from.replace('@s.whatsapp.net', '');
         } catch (error) {
-            console.error('❌ Erro ao extrair remetente:', {
+            console.error('❌ [WhatsAppImageService] Erro ao extrair remetente:', {
                 erro: error.message,
                 stack: error.stack,
                 mensagem: JSON.stringify(message, null, 2)
@@ -198,88 +194,125 @@ class WhatsAppImageService {
         }
     }
 
-    async analyzeImages(imageMessages) {
+    async downloadImage(imageMessage) {
         try {
-            console.log('🔍 Iniciando análise das imagens...');
+            console.log('📥 [WhatsAppImageService] Iniciando download da imagem');
 
-            // 1. Download das imagens
-            const imagesData = await this.downloadImages(imageMessages);
+            // Verifica se temos uma URL válida
+            const imageUrl = imageMessage.url || 
+                            `https://mmg.whatsapp.net${imageMessage.directPath}`;
 
-            // Extrai o remetente do primeiro item
-            const from = imagesData[0]?.from;
-            if (!from) {
-                throw new Error('Remetente não encontrado após download das imagens');
+            if (!imageUrl) {
+                throw new Error('URL da imagem não encontrada');
             }
 
-            // 2. Prepara o prompt para análise com OpenAI Vision
-            const messages = [{
-                role: 'user',
-                content: [
-                    {
-                        type: 'text',
-                        text: `Analise estes comprovantes de pagamento e extraia as seguintes informações de cada um:
-                            - Valor da transação
-                            - Data da transação
-                            - Tipo de transação (PIX, transferência, boleto, etc)
-                            - Status do pagamento
-                            - Informações adicionais relevantes
-                            
-                            Contexto adicional: ${imagesData[0]?.caption || 'Nenhum'} do remetente ${from}`
-                    },
-                    ...imagesData.map(imageData => ({
-                        type: 'image_url',
-                        image_url: {
-                            url: `data:${imageData.mimetype};base64,${imageData.base64}`,
-                            detail: 'high'
-                        }
-                    }))
-                ]
-            }];
+            // Cria diretório temporário para a imagem
+            const tempDir = path.join(os.tmpdir(), 'whatsapp-images', uuidv4());
+            await fs.mkdir(tempDir, { recursive: true });
 
-            // 3. Envia para análise na OpenAI Vision
-            console.log('🤖 Enviando para análise na OpenAI Vision...');
-            const response = await this.openaiAxios.post('/chat/completions', {
-                model: "gpt-4-vision-preview",
-                messages: messages,
-                max_tokens: 1000,
-                temperature: 0.7
+            // Define o caminho do arquivo
+            const filePath = path.join(tempDir, `image.${imageMessage.mimetype.split('/')[1]}`);
+
+            // Faz o download da imagem
+            const response = await axios({
+                method: 'GET',
+                url: imageUrl,
+                responseType: 'arraybuffer',
+                headers: {
+                    'User-Agent': 'WhatsApp/2.2123.8 Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
             });
 
-            // 4. Limpa arquivos temporários
-            await Promise.all(imagesData.map(async (imageData) => {
-                try {
-                    await fs.unlink(imageData.filePath);
-                    await fs.rmdir(path.dirname(imageData.filePath));
-                } catch (error) {
-                    console.warn('⚠️ Erro ao limpar arquivos temporários:', error.message);
-                }
-            }));
+            // Salva a imagem
+            await fs.writeFile(filePath, response.data);
 
-            console.log('✅ Análise concluída com sucesso');
+            // Converte para base64
+            const base64 = response.data.toString('base64');
+
+            console.log('✅ [WhatsAppImageService] Download concluído:', {
+                tamanho: response.data.length,
+                tipo: imageMessage.mimetype,
+                caminho: filePath
+            });
 
             return {
                 success: true,
-                analysis: response.data.choices[0].message.content,
+                filePath,
+                base64,
+                mimetype: imageMessage.mimetype
+            };
+
+        } catch (error) {
+            console.error('❌ [WhatsAppImageService] Erro ao baixar imagem:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    }
+
+    async analyzeImages(message) {
+        try {
+            console.log('🖼️ [WhatsAppImageService] Iniciando análise de imagens');
+
+            // Extrai o remetente de forma mais robusta
+            const from = message.key?.remoteJid || message.from;
+            if (!from) {
+                throw new Error('Remetente não encontrado na mensagem');
+            }
+
+            // Extrai a imagem de forma mais robusta
+            const imageMessage = message.message?.imageMessage;
+            if (!imageMessage) {
+                throw new Error('Dados da imagem não encontrados');
+            }
+
+            // Faz o download da imagem
+            const downloadResult = await this.downloadImage(imageMessage);
+            if (!downloadResult.success) {
+                throw new Error(`Falha ao baixar imagem: ${downloadResult.error}`);
+            }
+
+            // Prepara o prompt para a OpenAI Vision
+            const prompt = `Analise esta imagem e descreva detalhadamente o que você vê.
+                           ${imageMessage.caption ? `Contexto adicional do usuário: ${imageMessage.caption}` : ''}`;
+
+            // Envia para análise
+            const analysis = await this.openAIVisionService.analyzeImage({
+                base64: downloadResult.base64,
+                mimetype: downloadResult.mimetype,
+                prompt: prompt
+            });
+
+            // Limpa o arquivo temporário
+            try {
+                await fs.unlink(downloadResult.filePath);
+                await fs.rmdir(path.dirname(downloadResult.filePath));
+            } catch (cleanupError) {
+                console.warn('⚠️ [WhatsAppImageService] Erro ao limpar arquivos temporários:', cleanupError);
+            }
+
+            return {
+                success: true,
+                analysis: analysis,
                 metadata: {
-                    model: "gpt-4o",
-                    tokens: response.data.usage,
-                    from: from
+                    from,
+                    mimetype: imageMessage.mimetype,
+                    caption: imageMessage.caption || ''
                 }
             };
 
         } catch (error) {
-            console.error('❌ Erro ao analisar imagens:', {
+            console.error('❌ [WhatsAppImageService] Erro ao analisar imagens:', {
                 erro: error.message,
                 stack: error.stack
             });
-            
             return {
                 success: false,
-                error: error.message,
-                metadata: {
-                    model: "gpt-4-vision-preview",
-                    from: from
-                }
+                error: error.message
             };
         }
     }

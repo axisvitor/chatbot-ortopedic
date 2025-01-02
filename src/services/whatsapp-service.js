@@ -582,29 +582,29 @@ class WhatsAppService {
         try {
             console.log('🖼️ [WhatsApp] Processando mensagem de imagem');
 
-            const imageMessage = message.message?.imageMessage;
+            // Extrai o remetente de forma segura
             const from = message.key?.remoteJid;
-
-            if (!imageMessage || !from) {
-                throw new Error('Dados da imagem ou remetente não encontrados');
+            if (!from) {
+                throw new Error('Remetente não encontrado na mensagem');
             }
 
-            const response = await this._aiServices.handleMessage({
-                from,
-                type: 'image',
-                mediaMessage: { images: [imageMessage] },
-                message,
-                key: message.key
-            });
+            // Processa a imagem usando o WhatsAppImageService
+            const result = await this._whatsappImageService.analyzeImages(message);
 
-            if (response) {
-                await this.sendText(from, response);
-            } else {
-                throw new Error('Resposta vazia do processamento');
+            if (!result.success) {
+                throw new Error(result.error || 'Falha ao processar imagem');
             }
+
+            // Envia a resposta da análise
+            await this.sendText(from, result.analysis);
+            console.log('✅ [WhatsApp] Imagem processada e resposta enviada');
 
         } catch (error) {
-            console.error('❌ [WhatsApp] Erro ao processar imagem:', error);
+            console.error('❌ [WhatsApp] Erro ao processar imagem:', {
+                erro: error.message,
+                stack: error.stack
+            });
+
             const from = message.key?.remoteJid;
             if (from) {
                 await this.sendText(
@@ -658,35 +658,46 @@ class WhatsAppService {
 
     async handleTextMessage(message) {
         try {
-            console.log('[WhatsApp] Processando mensagem de texto:', message);
+            console.log('💬 [WhatsApp] Processando mensagem de texto:', {
+                messageId: message.key?.id,
+                from: message.key?.remoteJid
+            });
 
-            // Extrair o texto da mensagem de forma mais robusta
+            // Extrair o texto da mensagem considerando todos os possíveis caminhos
             const text = message.message?.extendedTextMessage?.text || 
                         message.message?.conversation ||
-                        message.message?.text || '';
-
-            if (!text) {
-                throw new Error('Texto não encontrado na mensagem');
-            }
+                        message.message?.text ||
+                        message.text || '';
 
             // Extrai o remetente de forma segura
             const from = message.key?.remoteJid;
-            if (!from) {
-                throw new Error('Remetente não encontrado na mensagem');
+
+            if (!text || !from) {
+                console.error('❌ [WhatsApp] Dados inválidos:', { text, from });
+                throw new Error('Texto ou remetente não encontrado na mensagem');
             }
 
-            // Processa com o AIServices
+            console.log('📝 [WhatsApp] Texto extraído:', {
+                from,
+                text: text.substring(0, 100) // Log apenas os primeiros 100 caracteres
+            });
+
+            // Processa a mensagem
             const response = await this._openaiService.processMessage(text, from);
 
-            // Envia resposta
             if (response) {
                 await this.sendText(from, response);
+                console.log('✅ [WhatsApp] Resposta enviada com sucesso');
             } else {
-                throw new Error('Resposta vazia do AIServices');
+                throw new Error('Resposta vazia do OpenAI Service');
             }
 
         } catch (error) {
-            console.error('[WhatsApp] Erro ao processar mensagem de texto:', error);
+            console.error('❌ [WhatsApp] Erro ao processar mensagem de texto:', {
+                erro: error.message,
+                stack: error.stack
+            });
+
             const from = message.key?.remoteJid;
             if (from) {
                 await this.sendText(
