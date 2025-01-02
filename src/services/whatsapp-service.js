@@ -631,7 +631,7 @@ class WhatsAppService {
             if (isPaymentProof) {
                 await this.handlePaymentProof(message, result.analysis);
             } else {
-                await this.sendTextMessage(message.key.remoteJid, 'Desculpe, mas não identifiquei um comprovante de pagamento válido nesta imagem.');
+                await this.sendText(message.key.remoteJid, 'Desculpe, mas não identifiquei um comprovante de pagamento válido nesta imagem.');
             }
 
             return result;
@@ -644,7 +644,7 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            await this.sendTextMessage(
+            await this.sendText(
                 message.key.remoteJid,
                 `Desculpe, ocorreu um erro ao processar sua imagem: ${error.message}`
             );
@@ -675,7 +675,7 @@ class WhatsAppService {
                     tipos: Object.keys(message).filter(key => key.endsWith('Message'))
                 });
                 
-                await this.sendTextMessage(
+                await this.sendText(
                     message.key.remoteJid,
                     'Por favor, envie apenas mensagens de texto, áudio ou imagens.'
                 );
@@ -687,7 +687,7 @@ class WhatsAppService {
                 messageId: message.key?.id
             });
             
-            await this.sendTextMessage(
+            await this.sendText(
                 message.key.remoteJid,
                 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
             );
@@ -709,7 +709,7 @@ class WhatsAppService {
             const response = await this._openaiService.processMessage(text, message.key.remoteJid);
             
             // Envia a resposta do assistant
-            await this.sendTextMessage(message.key.remoteJid, response);
+            await this.sendText(message.key.remoteJid, response);
 
         } catch (error) {
             console.error('❌ [WhatsApp] Erro ao processar mensagem de texto:', {
@@ -763,7 +763,7 @@ class WhatsAppService {
             if (isPaymentProof) {
                 await this.handlePaymentProof(message, result.analysis);
             } else {
-                await this.sendTextMessage(message.key.remoteJid, 'Desculpe, mas não identifiquei um comprovante de pagamento válido neste áudio.');
+                await this.sendText(message.key.remoteJid, 'Desculpe, mas não identifiquei um comprovante de pagamento válido neste áudio.');
             }
 
             return result;
@@ -776,7 +776,7 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            await this.sendTextMessage(
+            await this.sendText(
                 message.key.remoteJid,
                 `Desculpe, ocorreu um erro ao processar seu áudio: ${error.message}`
             );
