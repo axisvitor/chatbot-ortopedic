@@ -77,6 +77,11 @@ class GroqServices {
                 }
             }
         };
+
+        this.vision = new GroqVisionService({
+            apiKey: GROQ_CONFIG.apiKey,
+            baseUrl: 'https://api.groq.com/v1'
+        });
     }
 
     async generateText(messages, attempt = 1) {
@@ -228,6 +233,15 @@ class GroqServices {
         }
     }
 
+    async analyzeImageWithVision(base64Image, options = {}) {
+        try {
+            return await this.vision.analyzeImage(base64Image, options);
+        } catch (error) {
+            console.error(`❌ Erro ao analisar imagem com Groq Vision:`, error.message);
+            throw error;
+        }
+    }
+
     async transcribeAudio(audioBuffer, attempt = 1) {
         try {
             const formData = new FormData();
@@ -322,6 +336,83 @@ class GroqServices {
             }
             throw new Error(`Falha ao transcrever áudio após ${attempt} tentativas: ${error.message}`);
         }
+    }
+}
+
+class GroqVisionService {
+    constructor(config) {
+        this.apiKey = config.apiKey;
+        this.baseUrl = config.baseUrl || 'https://api.groq.com/v1';
+    }
+
+    async analyzeImage(base64Image, options = {}) {
+        try {
+            console.log('🔍 Iniciando análise com Groq Vision...', {
+                temCaption: !!options.caption,
+                mimetype: options.mimetype
+            });
+
+            // Prepara o prompt para a análise
+            const prompt = this.buildAnalysisPrompt(options.caption);
+
+            // Prepara os dados para envio
+            const formData = new FormData();
+            formData.append('image', Buffer.from(base64Image, 'base64'), {
+                filename: 'image.jpg',
+                contentType: options.mimetype || 'image/jpeg'
+            });
+            formData.append('prompt', prompt);
+
+            // Configura a requisição
+            const config = {
+                method: 'post',
+                url: `${this.baseUrl}/vision/analyze`,
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                    ...formData.getHeaders()
+                },
+                data: formData
+            };
+
+            console.log('📤 Enviando requisição para Groq Vision...');
+            const response = await axios(config);
+
+            // Valida a resposta
+            if (!response.data || !response.data.analysis) {
+                throw new Error('Resposta inválida da API Groq Vision');
+            }
+
+            console.log('✅ Análise concluída com sucesso:', {
+                statusCode: response.status,
+                tamanhoResposta: JSON.stringify(response.data).length
+            });
+
+            return response.data.analysis;
+
+        } catch (error) {
+            console.error('❌ Erro na análise com Groq Vision:', {
+                erro: error.message,
+                stack: error.stack,
+                status: error.response?.status,
+                resposta: error.response?.data
+            });
+            throw error;
+        }
+    }
+
+    buildAnalysisPrompt(caption) {
+        return `
+            Analise esta imagem em detalhes. Se for um comprovante de pagamento, extraia as seguintes informações:
+            - Valor da transação
+            - Data da transação
+            - Tipo de transação (PIX, transferência, boleto, etc)
+            - Status do pagamento
+            - Informações adicionais relevantes
+
+            Contexto adicional da imagem: ${caption || 'Nenhum'}
+
+            Por favor, forneça uma análise detalhada e estruturada.
+        `.trim();
     }
 }
 

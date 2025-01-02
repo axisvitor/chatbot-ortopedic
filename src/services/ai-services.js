@@ -89,259 +89,63 @@ class AIServices {
 
     async handleMessage(messageData) {
         try {
-            console.log('📨 Processando mensagem:', {
+            console.log('🤖 Processando mensagem:', {
                 tipo: messageData.type,
-                de: messageData.from,
-                temImagem: !!messageData.imageUrl || !!messageData.body?.message?.imageMessage
+                de: messageData.from
             });
 
-            // Extrai dados da mensagem
-            let from, text, imageMessage;
-
-            // Se vier no formato antigo
-            if (messageData.from) {
-                from = messageData.from;
-                text = messageData.text;
-                imageMessage = messageData.imageUrl ? { url: messageData.imageUrl } : null;
-            } 
-            // Se vier no formato novo
-            else if (messageData.body?.key?.remoteJid) {
-                from = messageData.body.key.remoteJid.replace('@s.whatsapp.net', '');
-                text = messageData.body.message?.extendedTextMessage?.text || 
-                       messageData.body.message?.conversation ||
-                       messageData.body.message?.text;
-                imageMessage = messageData.body.message?.imageMessage;
-            }
-
-            // Verifica se é uma mensagem de imagem
-            const isImage = !!imageMessage;
-
-            // Se for mensagem de imagem
-            if (isImage) {
-                console.log('🖼️ Processando mensagem de imagem...');
+            // Se for imagem, processa com Groq Vision primeiro
+            if (messageData.type === 'image') {
                 try {
-                    // 1. Download da imagem
-                    console.log('📥 Baixando imagem...');
-                    const imageBuffer = await this.whatsAppImageService.downloadMediaMessage(messageData);
-                    
-                    if (!imageBuffer) {
-                        throw new Error('Falha ao baixar a imagem');
-                    }
+                    console.log('🖼️ Processando imagem recebida...');
 
-                    // 2. Análise com Groq Vision
-                    console.log('🔍 Iniciando análise com Groq Vision...');
-                    const analysis = await this.whatsAppImageService.analyzeImage(imageBuffer);
-                    
-                    if (!analysis) {
-                        throw new Error('Análise da imagem falhou');
-                    }
+                    // 1. Baixa e processa a imagem
+                    const imageInfo = await this.whatsappImageService.processPaymentProof(
+                        messageData.imageMessage
+                    );
 
-                    console.log('✅ Análise Groq Vision concluída:', {
-                        preview: analysis.substring(0, 100) + '...'
-                    });
-
-                    // 3. Extração de informações
-                    console.log('🔍 Extraindo informações do comprovante...');
-                    const extractedInfo = await this.extractPaymentInfo(analysis);
-                    console.log('📋 Informações extraídas:', extractedInfo);
-
-                    // 4. Validação do comprovante
-                    console.log('⚖️ Validando comprovante...');
-                    const validationResult = await this.orderValidationService.validatePayment(extractedInfo);
-                    console.log('🔍 Resultado da validação:', validationResult);
-
-                    // 5. Preparar resposta
-                    let responseMessage = '📝 *Análise do Comprovante*\n\n';
-                    
-                    responseMessage += '*Informações Extraídas:*\n';
-                    responseMessage += `💰 Valor: ${extractedInfo.valor || 'Não identificado'}\n`;
-                    responseMessage += `📅 Data: ${extractedInfo.data || 'Não identificada'}\n`;
-                    responseMessage += `💳 Tipo: ${extractedInfo.tipoTransacao || 'Não identificado'}\n`;
-                    responseMessage += `🏦 Banco: ${extractedInfo.bancoOrigem || 'Não identificado'}\n`;
-                    responseMessage += `✨ Status: ${extractedInfo.status}\n\n`;
-
-                    if (validationResult.success) {
-                        responseMessage += '✅ *Comprovante validado com sucesso!*\n';
-                        if (validationResult.message) {
-                            responseMessage += validationResult.message;
+                    // 2. Prepara o contexto para o OpenAI com as informações da imagem
+                    const context = {
+                        messageType: 'image',
+                        imageAnalysis: {
+                            isPaymentProof: imageInfo.isPaymentProof,
+                            amount: imageInfo.amount,
+                            date: imageInfo.date,
+                            transactionType: imageInfo.transactionType,
+                            status: imageInfo.status
                         }
-                    } else {
-                        responseMessage += '❌ *Comprovante não validado*\n';
-                        if (validationResult.message) {
-                            responseMessage += `Motivo: ${validationResult.message}\n`;
-                        }
-                        responseMessage += '\nPor favor, verifique as informações e tente novamente.';
-                    }
+                    };
 
-                    // 6. Enviar resposta
-                    await this.whatsAppService.sendText(from, responseMessage);
-
-                    // 7. Se necessário, adiciona ao histórico do OpenAI apenas após a validação
-                    if (validationResult.success) {
-                        const chatHistory = await this.getChatHistory(from);
-                        
-                        // Prepara a mensagem para o OpenAI com todas as informações relevantes
-                        const openAIMessage = {
-                            role: "user",
-                            content: [
-                                {
-                                    type: "text",
-                                    text: `Análise de comprovante de pagamento:
-                                    
-Informações extraídas:
-- Valor: ${extractedInfo.valor || 'Não identificado'}
-- Data: ${extractedInfo.data || 'Não identificada'}
-- Tipo de Transação: ${extractedInfo.tipoTransacao || 'Não identificado'}
-- Banco de Origem: ${extractedInfo.bancoOrigem || 'Não identificado'}
-- Status: ${extractedInfo.status || 'Não identificado'}
-
-Resultado da Validação:
-- Status: ${validationResult.success ? 'Validado' : 'Não validado'}
-- Mensagem: ${validationResult.message || 'N/A'}
-
-Análise Original Groq Vision:
-${analysis}
-
-Por favor, analise estas informações e me ajude a:
-1. Confirmar se todas as informações essenciais estão presentes
-2. Identificar qualquer inconsistência nos dados
-3. Sugerir próximos passos baseados na validação`
-                                }
-                            ]
-                        };
-
-                        // Adiciona a mensagem ao histórico do OpenAI
-                        await this.openAIService.addMessageAndRun(
-                            chatHistory.threadId,
-                            'user',
-                            openAIMessage.content[0].text
-                        );
-
-                        console.log('✅ Mensagem adicionada ao histórico do OpenAI:', {
-                            threadId: chatHistory.threadId,
-                            timestamp: new Date().toISOString()
-                        });
-                    }
+                    // 3. Gera resposta baseada na análise
+                    const response = await this.generateResponse(messageData.from, '', context);
+                    
+                    // 4. Envia resposta
+                    await this.whatsAppService.sendTextMessage(
+                        messageData.from,
+                        response
+                    );
 
                     return;
                 } catch (error) {
                     console.error('❌ Erro ao processar imagem:', error);
-                    await this.whatsAppService.sendText(
-                        from,
-                        '❌ Desculpe, não consegui analisar sua imagem. Por favor, verifique se a imagem está nítida e tente novamente.'
-                    );
-                    return;
+                    throw error;
                 }
             }
 
-            // Continua com o processamento normal para mensagens de texto
-            // Valida dados essenciais
-            if (!from || !text) {
-                console.log('⚠️ Dados inválidos na mensagem:', {
-                    from,
-                    text,
-                    messageData: JSON.stringify(messageData, null, 2)
-                });
-                return null;
-            }
-
-            console.log('📨 Mensagem recebida:', {
-                de: from,
-                tipo: 'texto',
-                texto: text || '(sem texto)',
-                timestamp: new Date().toISOString()
-            });
-
-            const processKey = `processing:${from}:${messageData.body?.key?.id || messageData.messageId}`;
-            
-            // Verifica se já está processando
-            const isProcessing = await this.redisStore.get(processKey);
-            if (isProcessing) {
-                console.log('⚠️ Mensagem já está sendo processada:', {
-                    de: from,
-                    messageId: messageData.body?.key?.id || messageData.messageId,
-                    timestamp: new Date().toISOString()
-                });
-                return null;
-            }
-
-            // Marca como processando
-            await this.redisStore.set(processKey, 'true', 300); // 5 minutos
-
-            try {
-                // Recupera histórico do chat
-                const chatHistory = await this.getChatHistory(from);
-                if (!chatHistory) {
-                    console.error('❌ Erro ao recuperar histórico:', {
-                        de: from,
-                        timestamp: new Date().toISOString()
-                    });
-                    await this.sendResponse(from, 'Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente mais tarde.');
-                    return null;
-                }
-
-                // Verifica se tem um run ativo
-                const hasActiveRun = await this.openAIService.hasActiveRun(chatHistory.threadId);
-                if (hasActiveRun) {
-                    console.log('⚠️ Run ativo detectado:', {
-                        threadId: chatHistory.threadId,
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    await this.sendResponse(from, 'Aguarde um momento, ainda estou processando sua última mensagem...');
-                    return null;
-                }
-
-                // Adiciona a mensagem ao thread
-                // await this.openAIService.addMessage(chatHistory.threadId, {
-                //     role: 'user',
-                //     content: text
-                // });
-
-                // Processa a mensagem e deixa o Assistant decidir o que fazer
-                const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
-                    role: 'user',
-                    content: text
-                });
-                
-                if (response) {
-                    // Se for resposta de comando com novo threadId
-                    if (typeof response === 'object' && response.threadId) {
-                        // Atualiza o histórico com o novo threadId
-                        chatHistory.threadId = response.threadId;
-                        await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
-                        await this.sendResponse(from, response.message);
-                    } else {
-                        await this.sendResponse(from, response);
-                    }
-                }
-
-            } catch (error) {
-                console.error('❌ Erro ao processar mensagem:', {
-                    erro: error.message,
-                    stack: error.stack,
-                    timestamp: new Date().toISOString()
-                });
-
-                // Se for erro de run ativo, avisa para aguardar
-                if (error.message.includes('while a run') && error.message.includes('is active')) {
-                    await this.sendResponse(from, 'Aguarde um momento, ainda estou processando sua última mensagem...');
-                } else {
-                    await this.sendResponse(from, 'Desculpe, estou com dificuldades técnicas no momento. Por favor, tente novamente mais tarde.');
-                }
-            }
-
-            await this.redisStore.set(processKey, 'true');
-            return null;
+            // Para outros tipos de mensagem, continua o processamento normal
+            const response = await this.generateResponse(messageData.from, messageData.text);
+            await this.whatsAppService.sendTextMessage(messageData.from, response);
 
         } catch (error) {
-            console.error('[AI] Erro fatal ao processar mensagem:', error);
-            try {
-                await this.sendResponse(from, 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente ou envie uma mensagem de texto.');
-            } catch (sendError) {
-                console.error('❌ Erro ao enviar mensagem de fallback:', sendError);
-            }
-            return null;
+            console.error('❌ Erro ao processar mensagem:', error);
+            
+            // Envia mensagem de erro para o usuário
+            await this.whatsAppService.sendTextMessage(
+                messageData.from,
+                'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+            );
+            
+            throw error;
         }
     }
 

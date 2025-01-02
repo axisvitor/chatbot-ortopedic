@@ -1,5 +1,9 @@
 const axios = require('axios');
 const crypto = require('crypto');
+const fs = require('fs').promises;
+const path = require('path');
+const os = require('os');
+const { v4: uuidv4 } = require('uuid');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 
 class WhatsAppImageService {
@@ -486,6 +490,150 @@ class WhatsAppImageService {
     async downloadMediaMessage(message) {
         return this.whatsAppService.downloadMediaMessage(message);
     }
+
+    async downloadImage(imageMessage) {
+        try {
+            console.log('📥 Iniciando download da imagem do WhatsApp...');
+            
+            if (!imageMessage?.url) {
+                throw new Error('URL da imagem não encontrada na mensagem');
+            }
+
+            // Gera um nome único para o arquivo temporário
+            const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'whatsapp-'));
+            const tempFile = path.join(tempDir, `${uuidv4()}.jpg`);
+
+            // Faz o download da imagem
+            const response = await axios({
+                method: 'get',
+                url: imageMessage.url,
+                responseType: 'arraybuffer',
+                headers: {
+                    'User-Agent': 'WhatsApp/2.23.24.82'
+                }
+            });
+
+            // Salva a imagem no arquivo temporário
+            await fs.writeFile(tempFile, response.data);
+
+            console.log('✅ Download da imagem concluído:', {
+                tamanho: response.data.length,
+                arquivo: tempFile,
+                mimetype: imageMessage.mimetype
+            });
+
+            return {
+                filePath: tempFile,
+                mimetype: imageMessage.mimetype,
+                caption: imageMessage.caption
+            };
+
+        } catch (error) {
+            console.error('❌ Erro ao baixar imagem do WhatsApp:', {
+                erro: error.message,
+                stack: error.stack,
+                imageMessage: JSON.stringify(imageMessage)
+            });
+            throw error;
+        }
+    }
+
+    async analyzeImage(imageMessage) {
+        try {
+            console.log('🔍 Iniciando análise da imagem...');
+
+            // 1. Download da imagem
+            const imageData = await this.downloadImage(imageMessage);
+            
+            // 2. Lê o arquivo como base64
+            const imageBuffer = await fs.readFile(imageData.filePath);
+            const base64Image = imageBuffer.toString('base64');
+
+            // 3. Envia para análise na Groq Vision
+            console.log('🤖 Enviando imagem para Groq Vision...');
+            const analysisResult = await this.groqService.analyzeImage(base64Image, {
+                caption: imageData.caption,
+                mimetype: imageData.mimetype
+            });
+
+            // 4. Limpa o arquivo temporário
+            await fs.unlink(imageData.filePath);
+            await fs.rmdir(path.dirname(imageData.filePath));
+
+            console.log('✅ Análise da imagem concluída:', {
+                temResultado: !!analysisResult,
+                tamanhoResultado: JSON.stringify(analysisResult).length
+            });
+
+            return analysisResult;
+
+        } catch (error) {
+            console.error('❌ Erro ao analisar imagem:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            throw error;
+        }
+    }
+
+    async processPaymentProof(imageMessage) {
+        try {
+            console.log('💳 Processando comprovante de pagamento...');
+
+            // 1. Analisa a imagem com Groq Vision
+            const analysisResult = await this.analyzeImage(imageMessage);
+
+            // 2. Extrai informações relevantes do resultado
+            const paymentInfo = {
+                isPaymentProof: this.isPaymentProof(analysisResult),
+                amount: this.extractAmount(analysisResult),
+                date: this.extractDate(analysisResult),
+                transactionType: this.extractTransactionType(analysisResult),
+                status: 'pending_validation'
+            };
+
+            console.log('💰 Informações do pagamento extraídas:', paymentInfo);
+
+            return paymentInfo;
+
+        } catch (error) {
+            console.error('❌ Erro ao processar comprovante:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            throw error;
+        }
+    }
+
+    isPaymentProof(analysisResult) {
+        const text = analysisResult.toLowerCase();
+        const keywords = ['comprovante', 'pagamento', 'transferência', 'pix', 'recibo'];
+        return keywords.some(keyword => text.includes(keyword));
+    }
+
+    extractAmount(analysisResult) {
+        const amountRegex = /R\$\s*(\d+(?:\.\d{3})*(?:,\d{2})?)/;
+        const match = analysisResult.match(amountRegex);
+        if (match) {
+            return match[1].replace('.', '').replace(',', '.');
+        }
+        return null;
+    }
+
+    extractDate(analysisResult) {
+        const dateRegex = /(\d{2}\/\d{2}\/\d{4})|(\d{2}\/\d{2}\/\d{2})/;
+        const match = analysisResult.match(dateRegex);
+        return match ? match[0] : null;
+    }
+
+    extractTransactionType(analysisResult) {
+        const text = analysisResult.toLowerCase();
+        if (text.includes('pix')) return 'pix';
+        if (text.includes('transferência') || text.includes('transferencia')) return 'transfer';
+        if (text.includes('boleto')) return 'boleto';
+        if (text.includes('cartão') || text.includes('cartao')) return 'card';
+        return 'unknown';
+    }
 }
 
-module.exports = { WhatsAppImageService };
+module.exports = WhatsAppImageService;
