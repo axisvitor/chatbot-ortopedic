@@ -300,5 +300,6 @@ module.exports = {
     LOGGING_CONFIG,
     validateEnvVar,
     REQUIRED_ENV_VARS,
-    CACHE_CONFIG
+    CACHE_CONFIG,
+    GROQ_CONFIG
 };
