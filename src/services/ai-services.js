@@ -160,11 +160,11 @@ class AIServices {
             // Recupera ou cria histórico do chat
             const chatHistory = await this.getChatHistory(from);
 
-            // Adiciona mensagem do usuário ao thread
-            await this.openAIService.addMessage(chatHistory.threadId, message);
-
-            // Gera resposta usando o modelo
-            const response = await this.openAIService.generateResponse(chatHistory.threadId);
+            // Adiciona mensagem do usuário ao thread e gera resposta
+            const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
+                role: 'user',
+                content: message
+            });
 
             // Atualiza histórico com a nova resposta
             await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
