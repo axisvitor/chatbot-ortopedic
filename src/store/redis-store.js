@@ -87,11 +87,95 @@ class RedisStore {
     async del(key) {
         try {
             await this.client.del(key);
+            console.log('[Redis] Chave deletada com sucesso:', {
+                key,
+                timestamp: new Date().toISOString()
+            });
             return true;
         } catch (error) {
             console.error('[Redis] Erro ao deletar do cache:', {
                 key,
-                error: error.message
+                error: error.message,
+                stack: error.stack
+            });
+            return false;
+        }
+    }
+
+    async delPattern(pattern) {
+        try {
+            const keys = await this.client.keys(pattern);
+            if (keys.length > 0) {
+                console.log('[Redis] Deletando chaves por padrão:', {
+                    pattern,
+                    keys,
+                    count: keys.length,
+                    timestamp: new Date().toISOString()
+                });
+                await Promise.all(keys.map(key => this.client.del(key)));
+            }
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao deletar chaves por padrão:', {
+                pattern,
+                error: error.message,
+                stack: error.stack
+            });
+            return false;
+        }
+    }
+
+    async deleteUserData(userId) {
+        try {
+            const patterns = [
+                `chat:${userId}*`,
+                `history:${userId}*`,
+                `context:${userId}*`,
+                `state:${userId}*`,
+                `queue:${userId}*`
+            ];
+
+            console.log('[Redis] Deletando dados do usuário:', {
+                userId,
+                patterns,
+                timestamp: new Date().toISOString()
+            });
+
+            await Promise.all(patterns.map(pattern => this.delPattern(pattern)));
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao deletar dados do usuário:', {
+                userId,
+                error: error.message,
+                stack: error.stack
+            });
+            return false;
+        }
+    }
+
+    async deleteThreadData(threadId) {
+        try {
+            const patterns = [
+                `run:${threadId}*`,
+                `thread:${threadId}*`,
+                `messages:${threadId}*`,
+                `state:${threadId}*`,
+                `queue:${threadId}*`
+            ];
+
+            console.log('[Redis] Deletando dados da thread:', {
+                threadId,
+                patterns,
+                timestamp: new Date().toISOString()
+            });
+
+            await Promise.all(patterns.map(pattern => this.delPattern(pattern)));
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao deletar dados da thread:', {
+                threadId,
+                error: error.message,
+                stack: error.stack
             });
             return false;
         }
