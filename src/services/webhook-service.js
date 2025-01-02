@@ -70,17 +70,23 @@ class WebhookService {
             });
 
             // Se for imagem, processa primeiro
-            if (messageData.type === 'image' && this.mediaManagerService) {
+            if (messageData.type === 'image') {
                 try {
                     console.log('🖼️ Processando imagem...');
-                    const imageUrl = await this.mediaManagerService.downloadAndUploadMedia(
-                        messageData.message?.imageMessage,
-                        messageData.key,
-                        'image'
-                    );
-                    messageData.imageUrl = imageUrl;
+                    
+                    // Envia direto para o AIServices processar com Groq Vision
+                    await this.aiServices.handleMessage({
+                        type: 'image',
+                        from: messageData.from,
+                        message: messageData.message,
+                        imageMessage: messageData.message?.imageMessage,
+                        pushName: messageData.pushName
+                    });
+                    
+                    return true;
                 } catch (error) {
                     console.error('[WhatsApp] Erro ao processar imagem:', error);
+                    throw error;
                 }
             }
 
