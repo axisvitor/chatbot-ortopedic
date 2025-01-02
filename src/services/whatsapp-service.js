@@ -6,6 +6,7 @@ const FormData = require('form-data');
 const { WhatsAppImageService } = require('./whatsapp-image-service');
 const { WhatsAppAudioService } = require('./whatsapp-audio-service');
 const { MediaManagerService } = require('./media-manager-service');
+const { OpenAIService } = require('./openai-service');
 
 class WhatsAppService {
     constructor() {
@@ -25,6 +26,9 @@ class WhatsAppService {
         this._imageService = new WhatsAppImageService();
         this._audioService = new WhatsAppAudioService();
         this._mediaManager = new MediaManagerService(this._audioService, this._imageService);
+        this._openaiService = new OpenAIService();
+        
+        // Restante do código...
     }
 
     /**
@@ -649,21 +653,147 @@ class WhatsAppService {
         }
     }
 
-    /**
-     * Processa comprovante de pagamento com número do pedido
-     * @param {string} from - Número do remetente
-     * @param {Object} order - Dados do pedido validado
-     * @returns {Promise<void>}
-     */
-    async handlePaymentProof(from, order) {
+    async handleMessage(message) {
+        try {
+            console.log('📩 [WhatsApp] Nova mensagem:', {
+                messageId: message.key?.id,
+                from: message.key?.remoteJid,
+                tipo: this.getMessageType(message),
+                timestamp: new Date().toISOString()
+            });
+
+            // Identifica o tipo de mensagem
+            if (message.imageMessage) {
+                return await this.handleImageMessage(message);
+            } else if (message.audioMessage) {
+                return await this.handleAudioMessage(message);
+            } else if (message.conversation || message.extendedTextMessage) {
+                return await this.handleTextMessage(message);
+            } else {
+                console.warn('⚠️ [WhatsApp] Tipo de mensagem não suportado:', {
+                    messageId: message.key?.id,
+                    tipos: Object.keys(message).filter(key => key.endsWith('Message'))
+                });
+                
+                await this.sendTextMessage(
+                    message.key.remoteJid,
+                    'Por favor, envie apenas mensagens de texto, áudio ou imagens.'
+                );
+            }
+        } catch (error) {
+            console.error('❌ [WhatsApp] Erro ao processar mensagem:', {
+                erro: error.message,
+                stack: error.stack,
+                messageId: message.key?.id
+            });
+            
+            await this.sendTextMessage(
+                message.key.remoteJid,
+                'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+            );
+        }
+    }
+
+    async handleTextMessage(message) {
+        try {
+            const text = message.conversation || message.extendedTextMessage?.text;
+            
+            console.log('💬 [WhatsApp] Mensagem de texto recebida:', {
+                messageId: message.key?.id,
+                from: message.key?.remoteJid,
+                texto: text,
+                timestamp: new Date().toISOString()
+            });
+
+            // Envia para o OpenAI Assistant processar
+            const response = await this._openaiService.processMessage(text, message.key.remoteJid);
+            
+            // Envia a resposta do assistant
+            await this.sendTextMessage(message.key.remoteJid, response);
+
+        } catch (error) {
+            console.error('❌ [WhatsApp] Erro ao processar mensagem de texto:', {
+                erro: error.message,
+                stack: error.stack,
+                messageId: message.key?.id
+            });
+            throw error;
+        }
+    }
+
+    async handleAudioMessage(message) {
+        try {
+            console.log('🎵 [WhatsApp] Mensagem de áudio recebida:', {
+                messageId: message.key?.id,
+                from: message.key?.remoteJid,
+                timestamp: new Date().toISOString()
+            });
+
+            // Baixa o áudio
+            const buffer = await this.downloadMediaMessage(message);
+
+            // Envia para o MediaManager processar
+            const result = await this._mediaManager.processAudio(buffer);
+
+            if (!result.success) {
+                console.error('❌ [WhatsApp] Falha no processamento:', {
+                    messageId: message.key?.id,
+                    erro: result.error,
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error(result.error || 'Erro ao processar áudio');
+            }
+
+            console.log('✅ [WhatsApp] Processamento concluído:', {
+                messageId: message.key?.id,
+                temAnalise: !!result.analysis,
+                tamanhoAnalise: result.analysis?.length,
+                timestamp: new Date().toISOString()
+            });
+
+            // Identifica se é um comprovante de pagamento
+            const isPaymentProof = result.analysis.toLowerCase().includes('comprovante de pagamento');
+            
+            console.log('🔍 [WhatsApp] Análise de tipo:', {
+                messageId: message.key?.id,
+                isPaymentProof,
+                timestamp: new Date().toISOString()
+            });
+
+            if (isPaymentProof) {
+                await this.handlePaymentProof(message, result.analysis);
+            } else {
+                await this.sendTextMessage(message.key.remoteJid, 'Desculpe, mas não identifiquei um comprovante de pagamento válido neste áudio.');
+            }
+
+            return result;
+
+        } catch (error) {
+            console.error('❌ [WhatsApp] Erro ao processar áudio:', {
+                erro: error.message,
+                stack: error.stack,
+                messageId: message.key?.id,
+                timestamp: new Date().toISOString()
+            });
+
+            await this.sendTextMessage(
+                message.key.remoteJid,
+                `Desculpe, ocorreu um erro ao processar seu áudio: ${error.message}`
+            );
+
+            throw error;
+        }
+    }
+
+    async handlePaymentProof(message, order) {
         try {
             // Recupera a mensagem do comprovante (novo ou legado)
-            const pendingProof = this.pendingProofs.get(from);
-            const proofMessage = pendingProof?.message || this.paymentProofMessages[from];
+            const pendingProof = this.pendingProofs.get(message.from);
+            const proofMessage = pendingProof?.message || this.paymentProofMessages[message.from];
 
             if (!proofMessage) {
                 console.error(' Mensagem do comprovante não encontrada:', {
-                    from,
+                    from: message.from,
                     orderNumber: order.number,
                     timestamp: new Date().toISOString()
                 });
@@ -676,22 +806,22 @@ class WhatsAppService {
                 await this.forwardMessage(proofMessage, numeroFinanceiro);
                 await this.sendText(
                     numeroFinanceiro,
-                    ` *Número do Pedido Recebido*\nPedido: #${order.number}\nCliente: ${from}`
+                    ` *Número do Pedido Recebido*\nPedido: #${order.number}\nCliente: ${message.from}`
                 );
             }
 
             // Confirma para o cliente
             await this.sendText(
-                from,
+                message.from,
                 ` Recebi o número do pedido #${order.number}. Nossa equipe financeira já está com seu comprovante e fará a validação o mais breve possível.`
             );
 
             // Limpa os comprovantes da memória
-            this.pendingProofs.delete(from);
-            delete this.paymentProofMessages[from];
+            this.pendingProofs.delete(message.from);
+            delete this.paymentProofMessages[message.from];
 
             console.log(' Comprovante processado com sucesso:', {
-                from,
+                from: message.from,
                 orderNumber: order.number,
                 timestamp: new Date().toISOString()
             });
