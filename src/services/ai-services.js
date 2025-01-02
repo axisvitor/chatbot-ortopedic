@@ -82,7 +82,12 @@ class AIServices {
                 // Processa a transcrição com o OpenAI
                 const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
-                    content: `Transcrição do áudio do cliente: "${result}"`
+                    content: [
+                        {
+                            type: 'text',
+                            text: `Transcrição do áudio do cliente: "${result}"`
+                        }
+                    ]
                 });
 
                 return {
@@ -97,7 +102,12 @@ class AIServices {
             if (message.type === 'text') {
                 const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
-                    content: message.text
+                    content: [
+                        {
+                            type: 'text',
+                            text: message.text
+                        }
+                    ]
                 });
                 return {
                     type: 'text',
