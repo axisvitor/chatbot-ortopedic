@@ -16,6 +16,24 @@ class WhatsAppImageService {
         });
     }
 
+    /**
+     * Extrai o número do remetente da mensagem de forma robusta
+     * @param {Object} message - Mensagem do WhatsApp
+     * @returns {string} Número do remetente (apenas dígitos)
+     */
+    extractSenderNumber(message) {
+        // Tenta obter o remetente do participant (grupos) ou remoteJid (1:1)
+        const senderId = message?.key?.participant || message?.key?.remoteJid;
+        
+        if (!senderId) {
+            console.error('Dados da mensagem:', JSON.stringify(message, null, 2));
+            throw new Error('Remetente não encontrado na mensagem');
+        }
+
+        // Remove tudo que não for dígito (ex: @s.whatsapp.net, @g.us)
+        return senderId.replace(/\D+/g, '');
+    }
+
     async downloadImages(imageMessages) {
         try {
             console.log('📥 Iniciando download das imagens do WhatsApp...', {
@@ -34,11 +52,8 @@ class WhatsAppImageService {
             const downloadedImages = await Promise.all(imageMessages.map(async (imageMessage) => {
                 console.log('Processando mensagem:', JSON.stringify(imageMessage, null, 2));
 
-                // Extrai o remetente da mensagem
-                const from = imageMessage?.key?.remoteJid || imageMessage?.from;
-                if (!from) {
-                    throw new Error('Remetente não encontrado na mensagem');
-                }
+                // Extrai o remetente usando a nova função robusta
+                const from = this.extractSenderNumber(imageMessage);
 
                 // Extrai URL da mensagem
                 const url = imageMessage?.url || imageMessage?.imageMessage?.url;
