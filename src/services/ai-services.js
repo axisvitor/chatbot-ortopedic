@@ -148,11 +148,12 @@ class AIServices {
                 conteudo: JSON.stringify(messageData.message, null, 2)
             });
 
-            // Extrai informações da mensagem
+            // Extrai informações da mensagem de forma robusta
             const message = messageData.message;
-            const from = messageData.key?.remoteJid;
+            const from = messageData.from || messageData.key?.remoteJid;
 
             if (!from) {
+                console.error('Dados da mensagem:', JSON.stringify(messageData, null, 2));
                 throw new Error('Remetente não encontrado na mensagem');
             }
 

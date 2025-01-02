@@ -72,12 +72,24 @@ class WebhookService {
             // Se for imagem, processa primeiro
             if (messageData.type === 'image') {
                 try {
-                    console.log('🖼️ Processando imagem...');
+                    console.log('🖼️ Processando imagem...', {
+                        from: messageData.from,
+                        pushName: messageData.pushName,
+                        hasImageMessage: !!messageData.message?.imageMessage
+                    });
                     
-                    // Envia direto para o AIServices processar com Groq Vision
+                    // Garante que temos o remetente antes de processar
+                    if (!messageData.from) {
+                        throw new Error('Remetente não encontrado para mensagem de imagem');
+                    }
+                    
+                    // Envia para o AIServices processar
                     await this.aiServices.handleMessage({
                         type: 'image',
                         from: messageData.from,
+                        key: {
+                            remoteJid: messageData.from
+                        },
                         message: messageData.message,
                         imageMessage: messageData.message?.imageMessage,
                         pushName: messageData.pushName
@@ -85,7 +97,11 @@ class WebhookService {
                     
                     return true;
                 } catch (error) {
-                    console.error('[WhatsApp] Erro ao processar imagem:', error);
+                    console.error('[WhatsApp] Erro ao processar imagem:', {
+                        erro: error.message,
+                        stack: error.stack,
+                        messageData: JSON.stringify(messageData, null, 2)
+                    });
                     throw error;
                 }
             }
