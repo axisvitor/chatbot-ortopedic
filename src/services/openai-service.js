@@ -671,17 +671,26 @@ class OpenAIService {
                         let deliveryStatus = '';
                         if (extractedOrder.shipping_tracking_number) {
                             try {
-                                const tracking = await this.trackingService.getTrackingStatus(extractedOrder.shipping_tracking_number);
-                                if (tracking && tracking.status) {
+                                const tracking = await this.trackingService.getTrackingInfo(extractedOrder.shipping_tracking_number);
+                                if (tracking && tracking.latest_event_info) {
+                                    const trackingDate = new Date(tracking.latest_event_time).toLocaleString('pt-BR', {
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        second: '2-digit'
+                                    });
+
                                     deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
                                                    `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}` +
-                                                   `\n📍 Status: ${tracking.status}` +
-                                                   `\n🕒 Última Atualização: ${tracking.last_update}`;
+                                                   `\n📍 Status: ${tracking.latest_event_info}` +
+                                                   `\n🕒 Última Atualização: ${trackingDate}`;
 
                                     // Adiciona status de entrega se estiver entregue
-                                    if (tracking.status.toLowerCase().includes('entregue')) {
+                                    if (tracking.package_status === 'Delivered') {
                                         deliveryStatus += `\n\n✅ Pedido Entregue` +
-                                                        `\n📅 Data de Entrega: ${tracking.last_update}`;
+                                                        `\n📅 Data de Entrega: ${trackingDate}`;
                                     }
                                 } else {
                                     deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +

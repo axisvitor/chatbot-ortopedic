@@ -117,14 +117,12 @@ class AIServices {
                     ]);
                     
                     // Cria uma nova thread
-                    const thread = await this.openAIService.createThread();
+                    const newThread = await this.openAIService.createThread();
                     
                     // Atualiza o histórico com a nova thread
                     await this.redisStore.set(`chat:${messageData.from}`, JSON.stringify({
-                        threadId: thread.id,
-                        lastUpdate: new Date().toISOString(),
-                        messageCount: 0,
-                        context: {}
+                        threadId: newThread.id,
+                        lastUpdate: new Date().toISOString()
                     }));
 
                     // Envia confirmação para o usuário
@@ -263,49 +261,32 @@ class AIServices {
                 throw new Error('Thread ID não encontrado no histórico do chat');
             }
 
-            // Prepara o conteúdo da mensagem
-            let messageContent = [];
-
-            // Adiciona o texto da mensagem se existir
-            if (message) {
-                messageContent.push({
-                    type: 'text',
-                    text: message
-                });
-            }
-
-            // Adiciona imagens se existirem no contexto
-            if (context?.messageType === 'image' && context.imageAnalysis) {
-                messageContent.push({
-                    type: 'text',
-                    text: `Análise das imagens:\n${JSON.stringify(context.imageAnalysis, null, 2)}`
-                });
-            }
-
-            // Se não houver conteúdo, usa uma string vazia
-            if (messageContent.length === 0) {
-                messageContent = [{ type: 'text', text: '' }];
-            }
-
-            // Adiciona mensagem do usuário ao thread e gera resposta
-            const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
+            // Adiciona a mensagem ao thread do Assistant
+            await this.openAIService.addMessage(chatHistory.threadId, {
                 role: 'user',
-                content: messageContent
+                content: message
             });
+
+            // Executa o Assistant e aguarda a resposta
+            const response = await this.openAIService.runAssistant(chatHistory.threadId);
 
             if (!response) {
                 console.warn(`[AIServices] Resposta vazia recebida para ${from}`);
                 return "Desculpe, não consegui processar sua mensagem no momento. Por favor, tente novamente.";
             }
 
-            // Atualiza histórico com a nova resposta
+            // Atualiza o histórico
+            chatHistory.lastUpdate = new Date().toISOString();
             await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
-            console.log(`[AIServices] Resposta gerada com sucesso para ${from}`);
 
             return response;
+
         } catch (error) {
-            console.error('[AIServices] Erro ao gerar resposta:', error);
-            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
+            console.error('❌ Erro ao gerar resposta:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            throw error;
         }
     }
 

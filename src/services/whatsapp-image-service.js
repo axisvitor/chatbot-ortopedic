@@ -258,11 +258,8 @@ class WhatsAppImageService {
         try {
             console.log('🖼️ [WhatsAppImageService] Iniciando análise de imagens');
 
-            // Extrai o remetente de forma mais robusta
-            const from = message.key?.remoteJid || message.from;
-            if (!from) {
-                throw new Error('Remetente não encontrado na mensagem');
-            }
+            // Extrai o remetente usando o método robusto
+            const from = this.extractSenderNumber(message);
 
             // Extrai a imagem de forma mais robusta
             const imageMessage = message.message?.imageMessage;
