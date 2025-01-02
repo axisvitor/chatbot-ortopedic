@@ -476,6 +476,59 @@ class WhatsAppImageService {
     }
 
     /**
+     * Analisa uma imagem usando o GPT-4V
+     * @param {Object} imageData Dados da imagem com base64 e texto
+     * @returns {Promise<string>} Análise da imagem
+     */
+    async analyzeWithGPT4V(imageData) {
+        try {
+            console.log('🔍 Analisando imagem com GPT-4V');
+
+            const response = await this.openaiAxios.post('/chat/completions', {
+                model: "gpt-4o-mini",
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: imageData.text
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:${imageData.image.mimetype};base64,${imageData.image.base64}`
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 500
+            });
+
+            if (!response.data?.choices?.[0]?.message?.content) {
+                throw new Error('Resposta inválida do GPT-4V');
+            }
+
+            const analysis = response.data.choices[0].message.content;
+            
+            console.log('✅ Análise concluída:', {
+                tamanhoAnalise: analysis.length,
+                primeirasLinhas: analysis.split('\n').slice(0, 2).join('\n')
+            });
+
+            return analysis;
+
+        } catch (error) {
+            console.error('❌ Erro ao analisar imagem com GPT-4V:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            throw new Error('Falha ao analisar imagem: ' + error.message);
+        }
+    }
+
+    /**
      * Processa uma mensagem de imagem do WhatsApp
      * @param {Object} messageData Dados da mensagem
      * @returns {Promise<Object>} Resultado do processamento
