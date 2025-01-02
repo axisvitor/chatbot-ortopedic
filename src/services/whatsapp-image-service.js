@@ -22,16 +22,32 @@ class WhatsAppImageService {
      * @returns {string} Número do remetente (apenas dígitos)
      */
     extractSenderNumber(message) {
-        // Tenta obter o remetente do participant (grupos) ou remoteJid (1:1)
-        const senderId = message?.key?.participant || message?.key?.remoteJid;
-        
-        if (!senderId) {
-            console.error('Dados da mensagem:', JSON.stringify(message, null, 2));
-            throw new Error('Remetente não encontrado na mensagem');
-        }
+        try {
+            console.log('📱 Extraindo remetente da mensagem:', {
+                temKey: !!message?.key,
+                temRemoteJid: !!message?.key?.remoteJid,
+                temParticipant: !!message?.key?.participant,
+                estrutura: JSON.stringify(message, null, 2)
+            });
 
-        // Remove tudo que não for dígito (ex: @s.whatsapp.net, @g.us)
-        return senderId.replace(/\D+/g, '');
+            // Em grupos, usa participant. Em 1:1, usa remoteJid
+            const senderId = message?.key?.participant || message?.key?.remoteJid;
+            
+            if (!senderId) {
+                console.error('❌ Dados da mensagem:', JSON.stringify(message, null, 2));
+                throw new Error('Remetente não encontrado na mensagem (key.remoteJid ou key.participant ausentes)');
+            }
+
+            // Remove tudo que não for dígito (ex: @s.whatsapp.net, @g.us)
+            return senderId.split('@')[0];
+        } catch (error) {
+            console.error('❌ Erro ao extrair remetente:', {
+                erro: error.message,
+                stack: error.stack,
+                mensagem: JSON.stringify(message, null, 2)
+            });
+            throw error;
+        }
     }
 
     async downloadImages(imageMessages) {
@@ -56,14 +72,19 @@ class WhatsAppImageService {
                 const from = this.extractSenderNumber(imageMessage);
 
                 // Extrai URL da mensagem
-                const url = imageMessage?.url || imageMessage?.imageMessage?.url;
+                const url = imageMessage?.url || 
+                          imageMessage?.imageMessage?.url || 
+                          imageMessage?.directPath;  // Adicionado directPath como fallback
+
                 if (!url) {
                     throw new Error('URL da imagem não encontrada na mensagem');
                 }
 
                 // Garante que o mimetype é suportado
                 const supportedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-                const mimetype = imageMessage?.mimetype || imageMessage?.imageMessage?.mimetype || 'image/jpeg';
+                const mimetype = imageMessage?.mimetype || 
+                               imageMessage?.imageMessage?.mimetype || 
+                               'image/jpeg';
                 
                 if (!supportedTypes.includes(mimetype)) {
                     throw new Error(`Tipo de imagem não suportado: ${mimetype}. Use: ${supportedTypes.join(', ')}`);
@@ -74,15 +95,29 @@ class WhatsAppImageService {
                 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'whatsapp-'));
                 const tempFile = path.join(tempDir, `${uuidv4()}.${extension}`);
 
-                // Faz o download da imagem
-                const response = await axios({
-                    method: 'get',
-                    url: url,
-                    responseType: 'arraybuffer',
-                    headers: {
-                        'User-Agent': 'WhatsApp/2.23.24.82'
+                // Faz o download da imagem com retry em caso de falha
+                let response;
+                let retryCount = 0;
+                const maxRetries = 3;
+
+                while (retryCount < maxRetries) {
+                    try {
+                        response = await axios({
+                            method: 'get',
+                            url: url,
+                            responseType: 'arraybuffer',
+                            headers: {
+                                'User-Agent': 'WhatsApp/2.23.24.82'
+                            },
+                            timeout: 10000 // 10 segundos
+                        });
+                        break;
+                    } catch (error) {
+                        retryCount++;
+                        if (retryCount === maxRetries) throw error;
+                        await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
                     }
-                });
+                }
 
                 // Salva a imagem no arquivo temporário
                 await fs.writeFile(tempFile, response.data);
@@ -93,7 +128,8 @@ class WhatsAppImageService {
                 console.log('✅ Download da imagem concluído:', {
                     tamanho: response.data.length,
                     arquivo: tempFile,
-                    mimetype: mimetype
+                    mimetype: mimetype,
+                    from: from
                 });
 
                 return {
