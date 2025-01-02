@@ -1,9 +1,10 @@
 class AIServices {
-    constructor(whatsAppService, whatsAppImageService, openAIVisionService, openAIService) {
+    constructor(whatsAppService, whatsAppImageService, openAIVisionService, openAIService, audioService) {
         this.whatsAppService = whatsAppService;
         this.whatsAppImageService = whatsAppImageService;
         this.openAIVisionService = openAIVisionService;
         this.openAIService = openAIService;
+        this.audioService = audioService;
     }
 
     async handleImageMessage(message) {
@@ -48,13 +49,60 @@ class AIServices {
             };
 
         } catch (error) {
-            console.error('❌ [AIServices] Erro ao processar imagem:', {
-                erro: error.message,
-                stack: error.stack
-            });
-            
-            // Envia mensagem de erro para o usuário
-            await this.sendErrorMessage(message.key?.remoteJid, error);
+            console.error('❌ [AIServices] Erro ao processar imagem:', error);
+            throw error;
+        }
+    }
+
+    async handleMessage(message) {
+        try {
+            console.log('💬 [AIServices] Processando mensagem:', message);
+
+            // Se for mensagem de imagem
+            if (message.type === 'image') {
+                return this.handleImageMessage(message);
+            }
+
+            // Se for mensagem de áudio
+            if (message.type === 'audio' || message.type === 'ptt') {
+                const result = await this.audioService.processWhatsAppAudio(message);
+                
+                // Se houve erro no processamento do áudio
+                if (result.error) {
+                    return {
+                        type: 'error',
+                        message: result.message,
+                        from: message.from
+                    };
+                }
+
+                // Processa a transcrição com o OpenAI
+                const response = await this.openAIService.processCustomerMessage(
+                    `Transcrição do áudio do cliente: "${result}"`
+                );
+
+                return {
+                    type: 'audio',
+                    transcription: result,
+                    response: response,
+                    from: message.from
+                };
+            }
+
+            // Se for mensagem de texto
+            if (message.type === 'text') {
+                const response = await this.openAIService.processCustomerMessage(message.text);
+                return {
+                    type: 'text',
+                    response: response,
+                    from: message.from
+                };
+            }
+
+            throw new Error(`Tipo de mensagem não suportado: ${message.type}`);
+
+        } catch (error) {
+            console.error('❌ [AIServices] Erro ao processar mensagem:', error);
             throw error;
         }
     }
