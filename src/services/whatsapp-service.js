@@ -144,62 +144,80 @@ class WhatsAppService {
         );
     }
 
-    /**
-     * Envia uma mensagem de texto
-     * @param {string} to - Número do destinatário
-     * @param {string} text - Texto da mensagem
-     * @returns {Promise<Object>} Resposta do servidor
-     */
     async sendText(to, text) {
         try {
+            // Validações iniciais
+            if (!to || !text) {
+                throw new Error('Número do destinatário e texto são obrigatórios');
+            }
+
             const client = await this.getClient();
             if (!client) {
                 throw new Error('Cliente HTTP não inicializado');
             }
 
-            const messageText = String(text);
+            // Formata o número do telefone
+            const phoneNumber = to.includes('@') ? to.split('@')[0] : to;
+            if (!phoneNumber.match(/^\d+$/)) {
+                throw new Error(`Número de telefone inválido: ${phoneNumber}`);
+            }
 
-            console.log(' Enviando mensagem:', {
-                para: to,
-                texto: messageText,
-                messageId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                timestamp: new Date().toISOString()
-            });
+            // Formata o texto da mensagem
+            const messageText = String(text).trim();
+            if (messageText.length === 0) {
+                throw new Error('Texto da mensagem não pode estar vazio');
+            }
 
-            const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
-            console.log('[WhatsApp] Iniciando envio de mensagem:', {
-                para: to,
+            console.log('[WhatsApp] Enviando mensagem:', {
+                para: phoneNumber,
                 previewMensagem: messageText.slice(0, 100) + (messageText.length > 100 ? '...' : ''),
                 chaveConexao: this.connectionKey,
                 timestamp: new Date().toISOString()
             });
 
+            const endpoint = `${WHATSAPP_CONFIG.endpoints.text}?connectionKey=${this.connectionKey}`;
             console.log('[WhatsApp] Endpoint:', endpoint);
 
-            const phoneNumber = to.includes('@') ? to.split('@')[0] : to;
+            // Tenta enviar a mensagem com retry
+            let retryCount = 0;
+            const maxRetries = 3;
 
-            const response = await client.post(endpoint, {
-                phoneNumber,
-                text: messageText
-            });
+            while (retryCount < maxRetries) {
+                try {
+                    const response = await client.post(endpoint, {
+                        phoneNumber,
+                        text: messageText
+                    });
 
-            // Verifica erro de conta
-            if (response.data?.error && response.data?.message?.includes('conta')) {
-                console.log(' Erro de conta, reinicializando conexão...');
-                await this.init();
-                return this.sendText(to, text);
+                    // Verifica a resposta
+                    if (response.data?.error) {
+                        if (response.data?.message?.includes('conta') && retryCount < maxRetries - 1) {
+                            console.log('[WhatsApp] Erro de conta, reinicializando conexão...');
+                            await this.init();
+                            retryCount++;
+                            continue;
+                        }
+                        throw new Error(response.data.message || 'Erro ao enviar mensagem');
+                    }
+
+                    console.log('[WhatsApp] Mensagem enviada com sucesso:', {
+                        para: phoneNumber,
+                        messageId: response.data?.messageId,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    return response.data;
+                } catch (retryError) {
+                    if (retryCount === maxRetries - 1) {
+                        throw retryError;
+                    }
+                    console.warn(`[WhatsApp] Tentativa ${retryCount + 1} falhou:`, retryError.message);
+                    retryCount++;
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Backoff exponencial
+                }
             }
-
-            console.log('[WhatsApp] Resposta do servidor:', {
-                status: response.status,
-                messageId: response.data?.messageId,
-                error: response.data?.error,
-                timestamp: new Date().toISOString()
-            });
-
-            return response.data;
         } catch (error) {
-            console.error(' Erro ao enviar mensagem:', {
+            console.error('[WhatsApp] Erro ao enviar mensagem:', {
                 para: to,
                 erro: error.message,
                 status: error.response?.status,
@@ -208,14 +226,8 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            // Verifica erro de conta no catch
-            if (error.response?.data?.error && error.response?.data?.message?.includes('conta')) {
-                console.log(' Erro de conta no catch, reinicializando conexão...');
-                await this.init();
-                return this.sendText(to, text);
-            }
-
-            throw error;
+            // Se todas as tentativas falharam, propaga o erro
+            throw new Error(`Falha ao enviar mensagem: ${error.message}`);
         }
     }
 

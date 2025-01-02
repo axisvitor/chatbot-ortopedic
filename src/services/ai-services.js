@@ -91,88 +91,165 @@ class AIServices {
         try {
             console.log('🤖 Processando mensagem:', {
                 tipo: messageData.type,
-                de: messageData.from
+                de: messageData.from,
+                conteudo: messageData.text ? (messageData.text.length > 100 ? messageData.text.substring(0, 100) + '...' : messageData.text) : 'N/A'
             });
+
+            // Validação básica
+            if (!messageData.from) {
+                throw new Error('Número do remetente não fornecido');
+            }
 
             // Se for imagem, processa com Groq Vision primeiro
             if (messageData.type === 'image') {
                 try {
-                    console.log('🖼️ Processando imagem recebida...');
+                    console.log('🖼️ Processando mensagem com imagem(s)...');
 
-                    // 1. Baixa e processa a imagem
-                    const imageInfo = await this.whatsappImageService.processPaymentProof(
-                        messageData.imageMessage
-                    );
+                    // Extrai todas as imagens da mensagem
+                    const imageMessages = [];
+                    
+                    // Adiciona a imagem principal
+                    if (messageData.imageMessage) {
+                        imageMessages.push(messageData.imageMessage);
+                    }
+                    
+                    // Adiciona imagens de mídia múltipla se existirem
+                    if (messageData.mediaMessage?.images) {
+                        imageMessages.push(...messageData.mediaMessage.images);
+                    }
 
-                    // 2. Prepara o contexto para o OpenAI com as informações da imagem
+                    if (imageMessages.length === 0) {
+                        throw new Error('Nenhuma imagem encontrada na mensagem');
+                    }
+
+                    console.log(`📸 Encontradas ${imageMessages.length} imagem(s) para processar`);
+
+                    // Processa todas as imagens
+                    const paymentInfos = await this.whatsappImageService.processPaymentProof(imageMessages);
+
+                    // Prepara o contexto com as informações de todas as imagens
                     const context = {
                         messageType: 'image',
-                        imageAnalysis: {
-                            isPaymentProof: imageInfo.isPaymentProof,
-                            amount: imageInfo.amount,
-                            date: imageInfo.date,
-                            transactionType: imageInfo.transactionType,
-                            status: imageInfo.status
-                        }
+                        imageAnalysis: Array.isArray(paymentInfos) ? paymentInfos : [paymentInfos]
                     };
 
-                    // 3. Gera resposta baseada na análise
+                    // Gera resposta baseada na análise
                     const response = await this.generateResponse(messageData.from, '', context);
-                    
-                    // 4. Envia resposta
-                    await this.whatsAppService.sendTextMessage(
-                        messageData.from,
-                        response
-                    );
 
-                    return;
+                    // Envia resposta
+                    if (response) {
+                        await this.whatsAppService.sendText(messageData.from, response);
+                    }
+
                 } catch (error) {
-                    console.error('❌ Erro ao processar imagem:', error);
-                    throw error;
+                    console.error('❌ Erro ao processar mensagem com imagem:', error);
+                    await this.whatsAppService.sendText(
+                        messageData.from,
+                        'Desculpe, ocorreu um erro ao processar sua(s) imagem(ns). Por favor, tente novamente.'
+                    );
                 }
+                return;
             }
 
-            // Para outros tipos de mensagem, continua o processamento normal
-            const response = await this.generateResponse(messageData.from, messageData.text);
-            await this.whatsAppService.sendText(messageData.from, response);
+            // Para mensagens de texto
+            if (messageData.type === 'text' && messageData.text) {
+                console.log(`[AIServices] Processando mensagem de texto: ${messageData.text.substring(0, 100)}...`);
+                
+                const response = await this.generateResponse(messageData.from, messageData.text);
+                
+                if (response) {
+                    console.log(`[AIServices] Enviando resposta para ${messageData.from}`);
+                    await this.whatsAppService.sendText(messageData.from, response);
+                } else {
+                    console.warn(`[AIServices] Resposta vazia para ${messageData.from}`);
+                    await this.whatsAppService.sendText(
+                        messageData.from,
+                        'Desculpe, não consegui processar sua mensagem no momento. Por favor, tente novamente.'
+                    );
+                }
+                return;
+            }
+
+            // Para outros tipos de mensagem
+            console.warn(`[AIServices] Tipo de mensagem não suportado: ${messageData.type}`);
+            await this.whatsAppService.sendText(
+                messageData.from,
+                'Desculpe, este tipo de mensagem não é suportado no momento.'
+            );
 
         } catch (error) {
             console.error('❌ Erro ao processar mensagem:', error);
             
             // Envia mensagem de erro para o usuário
-            await this.whatsAppService.sendText(
-                messageData.from,
-                'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
-            );
-            
-            throw error;
+            try {
+                await this.whatsAppService.sendText(
+                    messageData.from,
+                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.'
+                );
+            } catch (sendError) {
+                console.error('❌ Erro ao enviar mensagem de erro:', sendError);
+            }
         }
     }
 
-    /**
-     * Gera uma resposta para a mensagem do usuário
-     * @param {string} from Número do usuário
-     * @param {string} message Mensagem do usuário
-     * @returns {Promise<string>} Resposta gerada
-     */
-    async generateResponse(from, message) {
+    async generateResponse(from, message, context = null) {
         try {
+            console.log(`[AIServices] Gerando resposta para ${from}:`, {
+                mensagem: message,
+                contexto: context
+            });
+            
             // Recupera ou cria histórico do chat
             const chatHistory = await this.getChatHistory(from);
+            console.log(`[AIServices] Chat history recuperado para ${from}:`, chatHistory);
+
+            if (!chatHistory || !chatHistory.threadId) {
+                throw new Error('Thread ID não encontrado no histórico do chat');
+            }
+
+            // Prepara o conteúdo da mensagem
+            let messageContent = [];
+
+            // Adiciona o texto da mensagem se existir
+            if (message) {
+                messageContent.push({
+                    type: 'text',
+                    text: message
+                });
+            }
+
+            // Adiciona imagens se existirem no contexto
+            if (context?.messageType === 'image' && context.imageAnalysis) {
+                messageContent.push({
+                    type: 'text',
+                    text: `Análise das imagens:\n${JSON.stringify(context.imageAnalysis, null, 2)}`
+                });
+            }
+
+            // Se não houver conteúdo, usa uma string vazia
+            if (messageContent.length === 0) {
+                messageContent = [{ type: 'text', text: '' }];
+            }
 
             // Adiciona mensagem do usuário ao thread e gera resposta
             const response = await this.openAIService.addMessageAndRun(chatHistory.threadId, {
                 role: 'user',
-                content: message
+                content: messageContent
             });
+
+            if (!response) {
+                console.warn(`[AIServices] Resposta vazia recebida para ${from}`);
+                return "Desculpe, não consegui processar sua mensagem no momento. Por favor, tente novamente.";
+            }
 
             // Atualiza histórico com a nova resposta
             await this.redisStore.set(`chat:${from}`, JSON.stringify(chatHistory));
+            console.log(`[AIServices] Resposta gerada com sucesso para ${from}`);
 
             return response;
         } catch (error) {
-            console.error('❌ Erro ao gerar resposta:', error);
-            throw error;
+            console.error('[AIServices] Erro ao gerar resposta:', error);
+            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
         }
     }
 

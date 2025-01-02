@@ -17,58 +17,66 @@ class WhatsAppImageService {
         });
     }
 
-    async downloadImage(imageMessage) {
+    async downloadImages(imageMessages) {
         try {
-            console.log('📥 Iniciando download da imagem do WhatsApp...');
+            console.log('📥 Iniciando download das imagens do WhatsApp...');
             
-            if (!imageMessage?.url) {
-                throw new Error('URL da imagem não encontrada na mensagem');
+            if (!Array.isArray(imageMessages)) {
+                imageMessages = [imageMessages];
             }
 
-            // Garante que o mimetype é suportado
-            const supportedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-            const mimetype = imageMessage.mimetype || 'image/jpeg';
-            
-            if (!supportedTypes.includes(mimetype)) {
-                throw new Error(`Tipo de imagem não suportado: ${mimetype}. Use: ${supportedTypes.join(', ')}`);
-            }
-
-            // Gera um nome único para o arquivo temporário com a extensão correta
-            const extension = mimetype.split('/')[1];
-            const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'whatsapp-'));
-            const tempFile = path.join(tempDir, `${uuidv4()}.${extension}`);
-
-            // Faz o download da imagem
-            const response = await axios({
-                method: 'get',
-                url: imageMessage.url,
-                responseType: 'arraybuffer',
-                headers: {
-                    'User-Agent': 'WhatsApp/2.23.24.82'
+            const downloadedImages = await Promise.all(imageMessages.map(async (imageMessage) => {
+                if (!imageMessage?.url) {
+                    throw new Error('URL da imagem não encontrada na mensagem');
                 }
-            });
 
-            // Salva a imagem no arquivo temporário
-            await fs.writeFile(tempFile, response.data);
+                // Garante que o mimetype é suportado
+                const supportedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+                const mimetype = imageMessage.mimetype || 'image/jpeg';
+                
+                if (!supportedTypes.includes(mimetype)) {
+                    throw new Error(`Tipo de imagem não suportado: ${mimetype}. Use: ${supportedTypes.join(', ')}`);
+                }
 
-            // Converte para base64
-            const base64Image = Buffer.from(response.data).toString('base64');
+                // Gera um nome único para o arquivo temporário com a extensão correta
+                const extension = mimetype.split('/')[1];
+                const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'whatsapp-'));
+                const tempFile = path.join(tempDir, `${uuidv4()}.${extension}`);
 
-            console.log('✅ Download da imagem concluído:', {
-                tamanho: response.data.length,
-                arquivo: tempFile,
-                mimetype: mimetype
-            });
+                // Faz o download da imagem
+                const response = await axios({
+                    method: 'get',
+                    url: imageMessage.url,
+                    responseType: 'arraybuffer',
+                    headers: {
+                        'User-Agent': 'WhatsApp/2.23.24.82'
+                    }
+                });
 
-            return {
-                filePath: tempFile,
-                mimetype: mimetype,
-                caption: imageMessage.caption,
-                base64: base64Image
-            };
+                // Salva a imagem no arquivo temporário
+                await fs.writeFile(tempFile, response.data);
+
+                // Converte para base64
+                const base64Image = Buffer.from(response.data).toString('base64');
+
+                console.log('✅ Download da imagem concluído:', {
+                    tamanho: response.data.length,
+                    arquivo: tempFile,
+                    mimetype: mimetype
+                });
+
+                return {
+                    filePath: tempFile,
+                    mimetype: mimetype,
+                    caption: imageMessage.caption,
+                    base64: base64Image
+                };
+            }));
+
+            return downloadedImages;
 
         } catch (error) {
-            console.error('❌ Erro ao baixar imagem do WhatsApp:', {
+            console.error('❌ Erro ao baixar imagens do WhatsApp:', {
                 erro: error.message,
                 stack: error.stack
             });
@@ -76,12 +84,12 @@ class WhatsAppImageService {
         }
     }
 
-    async analyzeImage(imageMessage) {
+    async analyzeImages(imageMessages) {
         try {
-            console.log('🔍 Iniciando análise da imagem...');
+            console.log('🔍 Iniciando análise das imagens...');
 
-            // 1. Download da imagem
-            const imageData = await this.downloadImage(imageMessage);
+            // 1. Download das imagens
+            const imagesData = await this.downloadImages(imageMessages);
 
             // 2. Prepara o prompt para análise com OpenAI Vision
             const messages = [{
@@ -89,44 +97,46 @@ class WhatsAppImageService {
                 content: [
                     {
                         type: 'text',
-                        text: `Analise este comprovante de pagamento e extraia as seguintes informações:
+                        text: `Analise estes comprovantes de pagamento e extraia as seguintes informações de cada um:
                             - Valor da transação
                             - Data da transação
                             - Tipo de transação (PIX, transferência, boleto, etc)
                             - Status do pagamento
                             - Informações adicionais relevantes
                             
-                            Contexto adicional: ${imageData.caption || 'Nenhum'}`
+                            Contexto adicional: ${imagesData[0]?.caption || 'Nenhum'}`
                     },
-                    {
+                    ...imagesData.map(imageData => ({
                         type: 'image_url',
                         image_url: {
                             url: `data:${imageData.mimetype};base64,${imageData.base64}`,
                             detail: 'high'
                         }
-                    }
+                    }))
                 ]
             }];
 
             // 3. Envia para análise na OpenAI Vision
             console.log('🤖 Enviando para análise na OpenAI Vision...');
             const response = await this.openaiAxios.post('/chat/completions', {
-                model: 'gpt-4o-mini',
+                model: OPENAI_CONFIG.models.vision,
                 messages: messages,
                 temperature: 0.7,
                 max_tokens: 1024
             });
 
             // 4. Limpa arquivos temporários
-            await fs.unlink(imageData.filePath);
-            await fs.rmdir(path.dirname(imageData.filePath));
+            await Promise.all(imagesData.map(async (imageData) => {
+                await fs.unlink(imageData.filePath);
+                await fs.rmdir(path.dirname(imageData.filePath));
+            }));
 
             console.log('✅ Análise concluída');
 
             return response.data.choices[0].message.content;
 
         } catch (error) {
-            console.error('❌ Erro ao analisar imagem:', {
+            console.error('❌ Erro ao analisar imagens:', {
                 erro: error.message,
                 stack: error.stack
             });
@@ -134,22 +144,22 @@ class WhatsAppImageService {
         }
     }
 
-    async processPaymentProof(imageMessage) {
+    async processPaymentProof(imageMessages) {
         try {
-            console.log('💳 Processando comprovante de pagamento...');
+            console.log('💳 Processando comprovante(s) de pagamento...');
 
-            // 1. Analisa a imagem
-            const analysisResult = await this.analyzeImage(imageMessage);
+            // 1. Analisa as imagens
+            const analysisResult = await this.analyzeImages(imageMessages);
 
             // 2. Extrai informações do texto da análise
-            const paymentInfo = this.extractPaymentInfo(analysisResult);
+            const paymentInfos = this.extractPaymentInfos(analysisResult);
 
-            console.log('💰 Informações extraídas:', paymentInfo);
+            console.log('💰 Informações extraídas:', paymentInfos);
 
-            return paymentInfo;
+            return paymentInfos;
 
         } catch (error) {
-            console.error('❌ Erro ao processar comprovante:', {
+            console.error('❌ Erro ao processar comprovante(s):', {
                 erro: error.message,
                 stack: error.stack
             });
@@ -157,17 +167,17 @@ class WhatsAppImageService {
         }
     }
 
-    extractPaymentInfo(analysisText) {
-        // Converte o texto para minúsculo para facilitar a busca
-        const text = analysisText.toLowerCase();
+    extractPaymentInfos(analysisText) {
+        // Tenta identificar múltiplos comprovantes no texto
+        const sections = analysisText.split(/(?=comprovante|pagamento|transferência|pix|recibo)/i);
         
-        return {
-            isPaymentProof: this.isPaymentProof(text),
-            amount: this.extractAmount(text),
-            date: this.extractDate(text),
-            transactionType: this.extractTransactionType(text),
-            status: this.extractStatus(text)
-        };
+        return sections.map(section => ({
+            isPaymentProof: this.isPaymentProof(section),
+            amount: this.extractAmount(section),
+            date: this.extractDate(section),
+            transactionType: this.extractTransactionType(section),
+            status: this.extractStatus(section)
+        })).filter(info => info.isPaymentProof); // Filtra apenas os que são realmente comprovantes
     }
 
     isPaymentProof(text) {
