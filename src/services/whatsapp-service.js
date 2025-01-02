@@ -110,7 +110,8 @@ class WhatsAppService {
             baseURL: WHATSAPP_CONFIG.apiUrl,
             headers: {
                 'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
             timeout: 10000
         });
@@ -163,10 +164,17 @@ class WhatsAppService {
      * @throws {Error} Se o número for inválido
      */
     _validatePhoneNumber(number) {
+        // Remove todos os caracteres não numéricos
         const cleaned = number.replace(/\D/g, '');
-        if (!/^\d{12,13}$/.test(cleaned)) {
-            throw new Error('Número de telefone inválido. Use o formato: DDI DDO NÚMERO');
+        
+        // Valida o formato (DDI + DDD + Número)
+        // DDI: 1-3 dígitos
+        // DDD: 2 dígitos
+        // Número: 8-9 dígitos
+        if (!/^[1-9]\d{1,2}[1-9]\d{8,9}$/.test(cleaned)) {
+            throw new Error('Número de telefone inválido. Use o formato: DDI DDD NÚMERO');
         }
+        
         return cleaned;
     }
 
@@ -181,6 +189,8 @@ class WhatsAppService {
             switch(error.response.status) {
                 case 401:
                     throw new Error('Token inválido ou expirado');
+                case 415:
+                    throw new Error('Content-Type inválido. Certifique-se de enviar application/json');
                 case 429:
                     throw new Error('Limite de requisições excedido');
                 default:
@@ -190,30 +200,6 @@ class WhatsAppService {
         throw error;
     }
 
-    /**
-     * Executa uma função com retry e backoff exponencial
-     * @private
-     * @param {Function} fn - Função a ser executada
-     * @param {number} maxRetries - Número máximo de tentativas
-     * @returns {Promise<any>} Resultado da função
-     */
-    async _retryWithExponentialBackoff(fn, maxRetries = 3) {
-        for (let i = 0; i < maxRetries; i++) {
-            try {
-                return await fn();
-            } catch (error) {
-                if (i === maxRetries - 1) throw error;
-                await this.delay(Math.pow(2, i) * 1000);
-            }
-        }
-    }
-
-    /**
-     * Envia uma mensagem de texto
-     * @param {string} to - Número do destinatário
-     * @param {string} text - Texto da mensagem
-     * @returns {Promise<Object>} Resposta do servidor
-     */
     async sendText(to, text) {
         try {
             const client = await this.getClient();
@@ -273,13 +259,6 @@ class WhatsAppService {
         }
     }
 
-    /**
-     * Envia uma imagem
-     * @param {string} to - Número do destinatário
-     * @param {string|object} image - URL da imagem ou string Base64
-     * @param {string} caption - Legenda opcional
-     * @returns {Promise<Object>} Resposta do servidor
-     */
     async sendImage(to, image, caption = '') {
         try {
             const phoneNumber = this._validatePhoneNumber(to);
@@ -327,12 +306,6 @@ class WhatsAppService {
         }
     }
 
-    /**
-     * Envia um áudio
-     * @param {string} to - Número do destinatário
-     * @param {string} audioUrl - URL do áudio
-     * @returns {Promise<Object>} Resposta do servidor
-     */
     async sendAudio(to, audioUrl) {
         try {
             console.log(' Enviando áudio:', {
@@ -356,11 +329,6 @@ class WhatsAppService {
         }
     }
 
-    /**
-     * Faz download de uma mídia do WhatsApp usando Baileys
-     * @param {Object} message - Mensagem contendo a mídia
-     * @returns {Promise<Buffer>} Buffer com o conteúdo da mídia já descriptografado
-     */
     async downloadMediaMessage(message) {
         try {
             console.log(' Baixando mídia:', {
@@ -698,31 +666,42 @@ class WhatsAppService {
 
     async handleMessage(message) {
         try {
-            console.log('📩 [WhatsApp] Nova mensagem:', {
+            console.log('📩 [WhatsApp] Mensagem recebida:', {
                 messageId: message.key?.id,
                 from: message.key?.remoteJid,
                 pushName: message.pushName,
-                tipo: this.getMessageType(message),
+                type: message.type || 'unknown',
                 timestamp: new Date().toISOString()
             });
 
-            // Extrai a mensagem real considerando todos os casos possíveis
-            const realMessage = message?.message?.ephemeralMessage?.message || // Mensagem ephemeral
-                              message?.message?.viewOnceMessage?.message ||    // Mensagem "ver uma vez"
-                              message?.message?.forwardedMessage ||           // Mensagem encaminhada
-                              message?.message;                              // Mensagem normal
-
-            if (!realMessage) {
-                throw new Error('Estrutura da mensagem inválida');
+            // Extrai e valida o remetente
+            let from = message.key?.remoteJid || '';
+            const isGroup = from.endsWith('@g.us');
+            
+            // Remove sufixos conforme especificação da API
+            from = from.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
+            
+            if (!from) {
+                console.error('❌ [WhatsApp] Remetente inválido:', message.key);
+                return;
             }
 
-            // Identifica o tipo de mensagem
+            // Se for mensagem de grupo, ignora
+            if (isGroup) {
+                console.log('👥 [WhatsApp] Ignorando mensagem de grupo');
+                return;
+            }
+
+            // Extrai a mensagem real
+            const realMessage = this._extractRealMessage(message);
+
+            // Processa a mensagem de acordo com o tipo
             if (realMessage.imageMessage) {
-                return await this.handleImageMessage({ ...message, message: realMessage });
+                await this.handleImageMessage({ ...message, message: realMessage });
             } else if (realMessage.audioMessage) {
-                return await this.handleAudioMessage({ ...message, message: realMessage });
+                await this.handleAudioMessage({ ...message, message: realMessage });
             } else if (realMessage.conversation || realMessage.extendedTextMessage) {
-                return await this.handleTextMessage({ ...message, message: realMessage });
+                await this.handleTextMessage({ ...message, message: realMessage });
             } else {
                 console.warn('⚠️ [WhatsApp] Tipo de mensagem não suportado:', {
                     messageId: message.key?.id,
@@ -730,10 +709,11 @@ class WhatsAppService {
                 });
                 
                 await this.sendText(
-                    message.key.remoteJid,
+                    from,
                     'Por favor, envie apenas mensagens de texto, áudio ou imagens.'
                 );
             }
+
         } catch (error) {
             console.error('❌ [WhatsApp] Erro ao processar mensagem:', {
                 erro: error.message,
@@ -741,11 +721,53 @@ class WhatsAppService {
                 messageId: message.key?.id
             });
             
-            await this.sendText(
-                message.key.remoteJid,
-                'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
-            );
+            try {
+                await this.sendText(
+                    message.key.remoteJid,
+                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+                );
+            } catch (sendError) {
+                console.error('❌ [WhatsApp] Erro ao enviar mensagem de erro:', sendError);
+            }
         }
+    }
+
+    /**
+     * Executa uma função com retry e backoff exponencial
+     * @private
+     * @param {Function} fn - Função a ser executada
+     * @param {number} maxRetries - Número máximo de tentativas
+     * @returns {Promise<any>} Resultado da função
+     */
+    async _retryWithExponentialBackoff(fn, maxRetries = 3) {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                return await fn();
+            } catch (error) {
+                if (i === maxRetries - 1) throw error;
+                await this.delay(Math.pow(2, i) * 1000);
+            }
+        }
+    }
+
+    /**
+     * Identifica o tipo real da mensagem
+     * @private
+     * @param {Object} message - Mensagem do WhatsApp
+     * @returns {Object} Mensagem real extraída
+     * @throws {Error} Se a estrutura for inválida
+     */
+    _extractRealMessage(message) {
+        const realMessage = message?.message?.ephemeralMessage?.message || // Mensagem ephemeral
+                          message?.message?.viewOnceMessage?.message ||    // Mensagem "ver uma vez"
+                          message?.message?.forwardedMessage ||           // Mensagem encaminhada
+                          message?.message;                              // Mensagem normal
+
+        if (!realMessage) {
+            throw new Error('Estrutura da mensagem inválida');
+        }
+
+        return realMessage;
     }
 
     async handleTextMessage(message) {
@@ -763,7 +785,7 @@ class WhatsAppService {
                         message.text || '';
 
             // Extrai o remetente de forma segura
-            const from = message.key?.remoteJid;
+            const from = message.key?.remoteJid?.replace('@s.whatsapp.net', '');
 
             if (!text || !from) {
                 console.error('❌ [WhatsApp] Dados inválidos:', { text, from });
@@ -782,14 +804,15 @@ class WhatsAppService {
                 text;
 
             // Processa a mensagem com o Assistant
-            const response = await this._openaiService.processMessage(contextText, from);
+            const response = await this._openaiService.runAssistant(from, contextText);
 
-            if (response) {
-                await this.sendText(from, response);
-                console.log('✅ [WhatsApp] Resposta enviada com sucesso');
-            } else {
-                throw new Error('Resposta vazia do OpenAI Service');
+            if (!response || typeof response !== 'string') {
+                console.error('❌ [WhatsApp] Resposta inválida do Assistant:', response);
+                throw new Error('Resposta inválida do Assistant');
             }
+
+            await this.sendText(from, response);
+            console.log('✅ [WhatsApp] Resposta enviada com sucesso');
 
         } catch (error) {
             console.error('❌ [WhatsApp] Erro ao processar mensagem de texto:', {
@@ -797,11 +820,11 @@ class WhatsAppService {
                 stack: error.stack
             });
 
-            const from = message.key?.remoteJid;
+            const from = message.key?.remoteJid?.replace('@s.whatsapp.net', '');
             if (from) {
                 await this.sendText(
                     from,
-                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.'
                 );
             }
         }

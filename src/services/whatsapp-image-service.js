@@ -112,10 +112,67 @@ class WhatsAppImageService {
         }
     }
 
+    /**
+     * Valida e formata uma imagem base64
+     * @private
+     * @param {string} base64 String base64 da imagem
+     * @param {string} mimetype Tipo MIME da imagem
+     * @returns {string} String base64 formatada
+     * @throws {Error} Se o formato for inválido
+     */
+    _formatBase64Image(base64, mimetype = 'image/jpeg') {
+        try {
+            // Remove o prefixo data:image se já existir
+            const cleanBase64 = base64.replace(/^data:image\/[a-z]+;base64,/, '');
+
+            // Valida se é um base64 válido
+            if (!/^[A-Za-z0-9+/=]+$/.test(cleanBase64)) {
+                throw new Error('String base64 inválida');
+            }
+
+            // Verifica o tamanho (máximo 5MB)
+            const sizeInBytes = (cleanBase64.length * 3) / 4;
+            if (sizeInBytes > 5 * 1024 * 1024) {
+                throw new Error('Imagem muito grande. Máximo permitido: 5MB');
+            }
+
+            // Retorna com o prefixo correto
+            return `data:${mimetype};base64,${cleanBase64}`;
+        } catch (error) {
+            console.error('❌ Erro ao formatar base64:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Valida o tipo MIME de uma imagem
+     * @private
+     * @param {string} mimetype Tipo MIME para validar
+     * @returns {string} Tipo MIME validado
+     * @throws {Error} Se o tipo não for suportado
+     */
+    _validateMimeType(mimetype) {
+        const supportedTypes = {
+            'image/jpeg': '.jpg',
+            'image/png': '.png',
+            'image/webp': '.webp'
+        };
+
+        const type = mimetype.toLowerCase();
+        if (!supportedTypes[type]) {
+            throw new Error(`Tipo de imagem não suportado: ${type}. Use: ${Object.keys(supportedTypes).join(', ')}`);
+        }
+
+        return {
+            mimetype: type,
+            extension: supportedTypes[type]
+        };
+    }
+
     async downloadImages(imageMessages) {
         try {
             console.log('📥 Iniciando download das imagens do WhatsApp...', {
-                mensagens: JSON.stringify(imageMessages, null, 2)
+                quantidade: Array.isArray(imageMessages) ? imageMessages.length : 1
             });
             
             if (!Array.isArray(imageMessages)) {
@@ -128,9 +185,7 @@ class WhatsAppImageService {
             }
 
             const downloadedImages = await Promise.all(imageMessages.map(async (imageMessage) => {
-                console.log('Processando mensagem:', JSON.stringify(imageMessage, null, 2));
-
-                // Extrai o remetente usando a nova função robusta
+                // Extrai o remetente
                 const from = this.extractSenderNumber(imageMessage);
 
                 // Extrai ID da mídia
@@ -142,40 +197,44 @@ class WhatsAppImageService {
                     throw new Error('ID da mídia não encontrado na mensagem');
                 }
 
-                // Garante que o mimetype é suportado
-                const supportedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+                // Valida o mimetype
                 const mimetype = imageMessage?.mimetype || 
                                imageMessage?.imageMessage?.mimetype || 
                                'image/jpeg';
                 
-                if (!supportedTypes.includes(mimetype)) {
-                    throw new Error(`Tipo de imagem não suportado: ${mimetype}. Use: ${supportedTypes.join(', ')}`);
-                }
+                const { mimetype: validatedType, extension } = this._validateMimeType(mimetype);
 
                 // Gera um nome único para o arquivo temporário
-                const extension = mimetype.split('/')[1];
                 const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'whatsapp-'));
-                const tempFile = path.join(tempDir, `${uuidv4()}.${extension}`);
+                const tempFile = path.join(tempDir, `${uuidv4()}${extension}`);
 
                 // Faz o download usando o endpoint oficial
                 const mediaBuffer = await this.downloadMedia(mediaId);
 
+                // Valida o tamanho
+                if (mediaBuffer.length > 5 * 1024 * 1024) {
+                    throw new Error('Imagem muito grande. Máximo permitido: 5MB');
+                }
+
                 // Salva a imagem no arquivo temporário
                 await fs.writeFile(tempFile, mediaBuffer);
 
-                // Converte para base64
-                const base64Image = mediaBuffer.toString('base64');
+                // Converte para base64 e formata
+                const base64Image = this._formatBase64Image(
+                    mediaBuffer.toString('base64'),
+                    validatedType
+                );
 
                 console.log('✅ Download da imagem concluído:', {
                     tamanho: mediaBuffer.length,
                     arquivo: tempFile,
-                    mimetype: mimetype,
+                    mimetype: validatedType,
                     from: from
                 });
 
                 return {
                     filePath: tempFile,
-                    mimetype: mimetype,
+                    mimetype: validatedType,
                     caption: imageMessage?.caption || imageMessage?.imageMessage?.caption,
                     base64: base64Image,
                     from: from,
@@ -261,7 +320,7 @@ class WhatsAppImageService {
             // Extrai o remetente usando o método robusto
             const from = this.extractSenderNumber(message);
 
-            // Extrai a imagem de forma mais robusta
+            // Extrai dados da imagem
             const imageMessage = message.message?.imageMessage;
             if (!imageMessage) {
                 throw new Error('Dados da imagem não encontrados');

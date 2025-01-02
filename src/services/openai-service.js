@@ -928,23 +928,92 @@ class OpenAIService {
     /**
      * Processa uma mensagem do cliente
      * @param {string} customerId - ID do cliente
-     * @param {string} message - Mensagem do cliente
+     * @param {string|Object} message - Mensagem do cliente (texto ou objeto com imagem)
      * @returns {Promise<string>} Resposta do assistant
      */
     async processCustomerMessage(customerId, message) {
         try {
+            // Se a mensagem for um objeto com imagens, usa o método específico
+            if (typeof message === 'object' && (message.images || message.image)) {
+                const images = message.images || [message.image];
+                return this.processCustomerMessageWithImage(
+                    customerId,
+                    message.text,
+                    images
+                );
+            }
+
+            // Processa mensagem de texto normal
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
-            
-            return await this.addMessageAndRun(threadId, {
-                role: 'user',
+
+            if (await this.hasActiveRun(threadId)) {
+                this.queueMessage(threadId, { role: "user", content: message });
+                return "Aguarde um momento enquanto processo sua mensagem anterior...";
+            }
+
+            const response = await this.addMessageAndRun(threadId, {
+                role: "user",
                 content: message
             });
+
+            return response;
+
         } catch (error) {
-            console.error('[OpenAI] Erro ao processar mensagem:', {
-                customerId,
-                erro: error.message,
-                stack: error.stack
+            console.error('❌ Erro ao processar mensagem do cliente:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Processa uma mensagem com imagem do cliente
+     * @param {string} customerId - ID do cliente
+     * @param {Object} message - Mensagem do cliente
+     * @param {Array<Object>} images - Array de objetos de imagem
+     * @returns {Promise<string>} Resposta do assistant
+     */
+    async processCustomerMessageWithImage(customerId, message, images) {
+        try {
+            const threadId = await this.getOrCreateThreadForCustomer(customerId);
+
+            // Formata a mensagem com as imagens conforme especificação da OpenAI
+            const messageContent = [];
+
+            // Adiciona o texto da mensagem
+            if (message) {
+                messageContent.push({
+                    type: "text",
+                    text: message
+                });
+            }
+
+            // Adiciona as imagens
+            for (const image of images) {
+                messageContent.push({
+                    type: "image_url",
+                    image_url: {
+                        url: image.base64 ? 
+                            `data:${image.mimetype};base64,${image.base64}` :
+                            image.url
+                    }
+                });
+            }
+
+            // Verifica se há um run ativo
+            if (await this.hasActiveRun(threadId)) {
+                this.queueMessage(threadId, { role: "user", content: messageContent });
+                return "Aguarde um momento enquanto processo sua mensagem anterior...";
+            }
+
+            // Adiciona a mensagem e executa o assistant
+            const response = await this.addMessageAndRun(threadId, {
+                role: "user",
+                content: messageContent
             });
+
+            return response;
+
+        } catch (error) {
+            console.error('❌ Erro ao processar mensagem com imagem:', error);
             throw error;
         }
     }
