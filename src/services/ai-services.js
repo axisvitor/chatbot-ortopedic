@@ -78,12 +78,7 @@ class AIServices {
                 // Processa a transcrição com o OpenAI
                 const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
-                    content: [
-                        {
-                            type: 'text',
-                            text: `Transcrição do áudio do cliente: "${transcription}"`
-                        }
-                    ]
+                    content: `Transcrição do áudio do cliente: "${transcription}"`
                 });
 
                 if (response) {
