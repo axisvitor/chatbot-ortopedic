@@ -48,7 +48,7 @@ const REDIS_CONFIG = {
     host: validateEnvVar('REDIS_HOST'),
     port: validateEnvVar('REDIS_PORT'),
     password: validateEnvVar('REDIS_PASSWORD'),
-    ttl: 60 * 24 * 60 * 60, // 60 days
+    ttl: 30 * 24 * 60 * 60, // 30 days
     prefix: 'ecommerce:'
 };
 

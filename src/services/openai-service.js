@@ -17,6 +17,7 @@ class OpenAIService {
         this.messageQueue = new Map(); // Map para fila de mensagens por thread
         this.processingTimers = new Map(); // Map para controlar timers de processamento
         this.MESSAGE_DELAY = 8000; // 8 segundos de delay
+        this.CONTEXT_UPDATE_INTERVAL = 15 * 60 * 1000; // 15 minutos em ms
 
         // Serviços injetados
         this.nuvemshopService = nuvemshopService || new NuvemshopService();
@@ -86,16 +87,20 @@ class OpenAIService {
                         action: {
                             type: "string",
                             description: "Ação a ser executada",
-                            enum: ["request", "validate", "cancel"]
+                            enum: ["request", "validate", "cancel", "process"]
                         },
                         order_number: {
                             type: "string",
-                            description: "Número do pedido relacionado (opcional)"
+                            description: "Número do pedido relacionado"
                         },
-                        reason: {
+                        image_url: {
                             type: "string",
-                            description: "Motivo da solicitação",
-                            enum: ["payment_pending", "payment_not_found", "payment_rejected", "payment_analysis"]
+                            description: "URL da imagem do comprovante (apenas para action=process)"
+                        },
+                        status: {
+                            type: "string",
+                            description: "Status atual do processamento",
+                            enum: ["pending", "processing", "approved", "rejected"]
                         }
                     },
                     required: ["action"]
@@ -747,6 +752,25 @@ class OpenAIService {
                                 });
                                 break;
 
+                            case 'process':
+                                if (!parsedArgs.image_url) {
+                                    output = JSON.stringify({
+                                        error: true,
+                                        message: 'Não recebi a imagem do comprovante.'
+                                    });
+                                    break;
+                                }
+
+                                const result = await this.processPaymentProof(threadId, {
+                                    url: parsedArgs.image_url
+                                }, parsedArgs.order_number);
+
+                                output = JSON.stringify({
+                                    error: false,
+                                    message: result
+                                });
+                                break;
+
                             default:
                                 output = JSON.stringify({
                                     error: true,
@@ -891,39 +915,40 @@ class OpenAIService {
             console.log('[OpenAI] Processando mensagem do cliente:', {
                 customerId,
                 messageType: Array.isArray(message.content) ? 'array' : typeof message.content,
-                contentLength: Array.isArray(message.content) ? 
-                    JSON.stringify(message.content).length : 
-                    message.content?.length
+                timestamp: new Date().toISOString()
             });
 
-            // Obtém ou cria thread para o cliente
+            // Recupera ou cria thread
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             if (!threadId) {
-                throw new Error('Não foi possível criar/recuperar thread para o cliente');
+                throw new Error('Não foi possível criar/recuperar thread');
             }
 
-            // Adiciona a mensagem e executa o assistant
-            const response = await this.addMessageAndRun(threadId, {
-                role: message.role || 'user',
-                content: message.content
-            });
+            // Recupera contexto do Redis
+            const savedContext = await this._getContextFromRedis(threadId);
+            if (savedContext) {
+                // Adiciona contexto à mensagem
+                if (typeof message.content === 'string') {
+                    message.content = `${savedContext}\n\nNova mensagem do cliente:\n${message.content}`;
+                }
+            }
 
-            if (!response) {
-                console.error('[OpenAI] Resposta vazia do assistant:', {
-                    customerId,
-                    threadId
+            // Adiciona mensagem à fila
+            await this.queueMessage(threadId, message);
+
+            // Processa mensagens na fila
+            const response = await this.processQueuedMessages(threadId);
+
+            // Salva contexto apenas se passou o intervalo
+            if (response && await this._shouldUpdateContext(threadId)) {
+                await this._saveContextToRedis(threadId, response);
+                console.log('[OpenAI] Contexto atualizado após intervalo:', {
+                    threadId,
+                    interval: '15 minutos'
                 });
-                return 'Desculpe, estou com dificuldades técnicas no momento. Pode tentar novamente em alguns minutos?';
             }
-
-            console.log('[OpenAI] Resposta gerada com sucesso:', {
-                customerId,
-                threadId,
-                responseLength: response.length
-            });
 
             return response;
-
         } catch (error) {
             console.error('[OpenAI] Erro ao processar mensagem do cliente:', {
                 customerId,
@@ -936,16 +961,47 @@ class OpenAIService {
         }
     }
 
-    /**
-     * Processa uma mensagem com imagem do cliente
-     * @param {string} customerId - ID do cliente
-     * @param {Object} message - Mensagem do cliente
-     * @param {Array<Object>} images - Array de objetos de imagem
-     * @returns {Promise<string>} Resposta do assistant
-     */
     async processCustomerMessageWithImage(customerId, message, images) {
         try {
+            console.log('[OpenAI] Processando mensagem com imagem:', {
+                customerId,
+                hasMessage: !!message,
+                imageCount: images?.length
+            });
+
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
+
+            // Verifica se está aguardando comprovante
+            const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
+            if (waiting === 'payment_proof') {
+                console.log('[OpenAI] Comprovante recebido:', {
+                    threadId,
+                    hasMessage: !!message
+                });
+
+                // Se tiver mensagem, tenta extrair número do pedido
+                let orderNumber = null;
+                if (message) {
+                    try {
+                        orderNumber = await this.orderValidationService.extractOrderNumber(message);
+                    } catch (error) {
+                        console.error('[OpenAI] Erro ao extrair número do pedido:', error);
+                    }
+                }
+
+                // Se não encontrou no texto, tenta pegar do Redis
+                if (!orderNumber) {
+                    orderNumber = await this.redisStore.get(`pending_order:${threadId}`);
+                }
+
+                // Processa o comprovante
+                if (images && images.length > 0) {
+                    const result = await this.processPaymentProof(threadId, images[0], orderNumber);
+                    return result;
+                } else {
+                    return '❌ Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.';
+                }
+            }
 
             // Formata a mensagem com as imagens conforme especificação da OpenAI
             const messageContent = [];
@@ -982,11 +1038,11 @@ class OpenAIService {
                 content: messageContent
             });
 
-            return response;
+            return response || "Desculpe, não consegui processar sua mensagem. Pode tentar novamente?";
 
         } catch (error) {
             console.error('❌ Erro ao processar mensagem com imagem:', error);
-            throw error;
+            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
         }
     }
 
@@ -1147,6 +1203,131 @@ class OpenAIService {
         } catch (error) {
             console.error('[OpenAI] Erro ao executar assistant:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Processa um comprovante de pagamento
+     * @param {string} threadId - ID da thread
+     * @param {Object} image - Objeto contendo dados da imagem
+     * @param {string} orderNumber - Número do pedido
+     * @returns {Promise<string>} Resultado do processamento
+     */
+    async processPaymentProof(threadId, image, orderNumber) {
+        try {
+            console.log('[OpenAI] Processando comprovante:', {
+                threadId,
+                orderNumber,
+                hasImage: !!image
+            });
+
+            // Validar se há solicitação pendente
+            const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
+            const pendingOrder = await this.redisStore.get(`pending_order:${threadId}`);
+            
+            if (!waiting || waiting !== 'payment_proof') {
+                return 'Não há solicitação de comprovante pendente. Por favor, primeiro me informe o número do pedido.';
+            }
+            
+            if (pendingOrder && orderNumber && pendingOrder !== orderNumber) {
+                return `❌ O número do pedido informado (#${orderNumber}) é diferente do pedido pendente (#${pendingOrder}). Por favor, confirme o número correto do pedido.`;
+            }
+
+            if (!image) {
+                return '❌ Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.';
+            }
+
+            // Validar o pedido
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            if (!order) {
+                return `❌ Não encontrei o pedido #${orderNumber}. Por favor, verifique se o número está correto.`;
+            }
+
+            // Processar o comprovante
+            const result = await this.financialService.processPaymentProof({
+                orderId: order.id,
+                orderNumber: orderNumber,
+                image: image,
+                threadId: threadId,
+                timestamp: new Date().toISOString()
+            });
+
+            // Limpar o estado no Redis após processamento
+            await this.redisStore.del(`waiting_order:${threadId}`);
+            await this.redisStore.del(`pending_order:${threadId}`);
+
+            if (result.success) {
+                return `✅ Comprovante recebido com sucesso para o pedido #${orderNumber}!\n\n` +
+                       `📋 Status: ${result.status}\n` +
+                       `⏳ Tempo estimado de análise: ${result.estimatedTime || '24 horas úteis'}\n\n` +
+                       `Assim que a análise for concluída, você receberá uma notificação.`;
+            } else {
+                return `❌ Houve um problema ao processar seu comprovante:\n${result.message}\n\nPor favor, tente novamente.`;
+            }
+
+        } catch (error) {
+            console.error('[OpenAI] Erro ao processar comprovante:', error);
+            
+            // Não limpa o Redis em caso de erro para permitir nova tentativa
+            return '❌ Ocorreu um erro ao processar seu comprovante. Por favor, tente novamente em alguns instantes.';
+        }
+    }
+
+    /**
+     * Salva contexto da conversa no Redis
+     * @private
+     */
+    async _saveContextToRedis(threadId, context) {
+        try {
+            const key = `openai:context:${threadId}`;
+            await this.redisStore.set(key, JSON.stringify({
+                lastUpdate: new Date().toISOString(),
+                context: context
+            }));
+            console.log('[OpenAI] Contexto salvo no Redis:', { threadId });
+        } catch (error) {
+            console.error('[OpenAI] Erro ao salvar contexto:', error);
+        }
+    }
+
+    /**
+     * Recupera contexto da conversa do Redis
+     * @private
+     */
+    async _getContextFromRedis(threadId) {
+        try {
+            const key = `openai:context:${threadId}`;
+            const data = await this.redisStore.get(key);
+            if (data) {
+                const parsed = JSON.parse(data);
+                console.log('[OpenAI] Contexto recuperado do Redis:', { threadId });
+                return parsed.context;
+            }
+            return null;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao recuperar contexto:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Verifica se precisa atualizar o contexto
+     * @private
+     */
+    async _shouldUpdateContext(threadId) {
+        try {
+            const key = `openai:context:${threadId}`;
+            const data = await this.redisStore.get(key);
+            if (!data) return true;
+
+            const parsed = JSON.parse(data);
+            const lastUpdate = new Date(parsed.lastUpdate);
+            const now = new Date();
+            
+            return (now - lastUpdate) >= this.CONTEXT_UPDATE_INTERVAL;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao verificar atualização de contexto:', error);
+            return true;
         }
     }
 }

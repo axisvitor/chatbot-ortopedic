@@ -387,7 +387,7 @@ class RedisStore {
     async setThreadForCustomer(customerId, threadId) {
         try {
             const key = `openai:customer_threads:${customerId}`;
-            const ttl = 60 * 24 * 60 * 60; // 60 dias em segundos
+            const ttl = 30 * 24 * 60 * 60; // 30 dias em segundos
             await this.client.set(key, threadId, {
                 EX: ttl
             });
@@ -421,8 +421,8 @@ class RedisStore {
             const threadId = await this.client.get(key);
             
             if (threadId) {
-                // Atualiza o TTL para mais 60 dias
-                const ttl = 60 * 24 * 60 * 60;
+                // Atualiza o TTL para mais 30 dias
+                const ttl = 30 * 24 * 60 * 60;
                 await this.client.expire(key, ttl);
                 
                 // Atualiza também o TTL dos metadados
@@ -594,8 +594,8 @@ class RedisStore {
         try {
             const key = `assistant:thread:${customerId}`;
             await this.client.set(key, JSON.stringify(threadData));
-            // Define TTL de 60 dias
-            await this.client.expire(key, 60 * 24 * 60 * 60);
+            // Define TTL de 30 dias
+            await this.client.expire(key, 30 * 24 * 60 * 60);
         } catch (error) {
             console.error('[Redis] Erro ao salvar thread do assistant:', error);
             throw error;
