@@ -1,4 +1,6 @@
 const OpenAI = require('openai');
+const moment = require('moment-timezone');
+const logger = require('../utils/logger');
 const { RedisStore } = require('../store/redis-store');
 const { OPENAI_CONFIG } = require('../config/settings');
 const { TrackingService } = require('./tracking-service');
@@ -162,6 +164,7 @@ class OpenAIService {
         try {
             return await this.redisStore.get(`run:${threadId}:active`) === 'true';
         } catch (error) {
+            logger.error('ErrorCheckingActiveRun', { threadId, error });
             console.error('[OpenAI] Erro ao verificar run ativo:', error);
             return false;
         }
@@ -176,6 +179,7 @@ class OpenAIService {
         try {
             await this.redisStore.set(`run:${threadId}:active`, 'true');
         } catch (error) {
+            logger.error('ErrorRegisteringActiveRun', { threadId, runId, error });
             console.error('[OpenAI] Erro ao registrar run ativo:', error);
         }
     }
@@ -189,6 +193,7 @@ class OpenAIService {
             await this.redisStore.set(`run:${threadId}:active`, 'false');
             await this.processQueuedMessages(threadId);
         } catch (error) {
+            logger.error('ErrorRemovingActiveRun', { threadId, error });
             console.error('[OpenAI] Erro ao remover run ativo:', error);
         }
     }
@@ -237,6 +242,7 @@ class OpenAIService {
             let response;
             // Se houver múltiplas mensagens, vamos combiná-las
             if (messages.length > 1) {
+                logger.info('ProcessingMultipleMessages', { threadId, messageCount: messages.length });
                 console.log(`[OpenAI] Processando ${messages.length} mensagens agrupadas para thread ${threadId}`);
                 const combinedContent = messages.map(m => m.content).join('\n');
                 const combinedMessage = {
@@ -253,6 +259,7 @@ class OpenAIService {
 
             return response;
         } catch (error) {
+            logger.error('ErrorProcessingQueuedMessages', { threadId, error });
             console.error('[OpenAI] Erro ao processar mensagens da fila:', error);
             throw error;
         }
@@ -265,12 +272,14 @@ class OpenAIService {
     async createThread() {
         try {
             const thread = await this.client.beta.threads.create();
+            logger.info('NewThreadCreated', { threadId: thread.id });
             console.log(' Novo thread criado:', {
                 threadId: thread.id,
                 timestamp: new Date().toISOString()
             });
             return thread;
         } catch (error) {
+            logger.error('ErrorCreatingThread', { error });
             console.error(' Erro ao criar thread:', error);
             throw error;
         }
@@ -284,11 +293,13 @@ class OpenAIService {
      */
     async addMessageAndRun(threadId, message) {
         try {
+            logger.info('StartingMessageProcessing', { threadId });
             console.log('[OpenAI] Iniciando processamento:', { threadId });
 
             // Verifica se já existe um run ativo
             const activeRun = await this.redisStore.getAssistantRun(threadId);
             if (activeRun) {
+                logger.info('ActiveRunFound', { threadId, runId: activeRun.id });
                 console.log('[OpenAI] Run ativo encontrado:', { threadId, runId: activeRun.id });
                 return 'Aguarde um momento, ainda estou processando sua mensagem anterior...';
             }
@@ -308,6 +319,7 @@ class OpenAIService {
                 createdAt: new Date().toISOString()
             });
 
+            logger.info('RunCreated', { threadId, runId: run.id });
             console.log('[OpenAI] Run criado:', { threadId, runId: run.id });
 
             // Aguarda a conclusão do run
@@ -330,6 +342,7 @@ class OpenAIService {
             }
 
             const lastMessage = assistantMessages[0];
+            logger.info('AssistantResponse', { threadId, messageId: lastMessage.id });
             console.log('[OpenAI] Resposta do assistente:', {
                 threadId,
                 messageId: lastMessage.id,
@@ -337,13 +350,16 @@ class OpenAIService {
             });
 
             if (lastMessage.content && lastMessage.content[0] && lastMessage.content[0].text && typeof lastMessage.content[0].text.value === 'string') {
+                logger.info('AssistantResponseExtracted', { threadId, response: lastMessage.content[0].text.value });
                 console.log('[OpenAI] Resposta extraída:', lastMessage.content[0].text.value);
                 return lastMessage.content[0].text.value;
             }
+            logger.error('ErrorExtractingAssistantResponse', { threadId, error: 'Unexpected message structure' });
             console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
             throw new Error('Não foi possível extrair a resposta da mensagem');
 
         } catch (error) {
+            logger.error('ErrorProcessingMessage', { threadId, error });
             // Remove o run do Redis em caso de erro
             await this.redisStore.removeAssistantRun(threadId);
             console.error('[OpenAI] Erro ao processar mensagem:', error);
@@ -361,6 +377,7 @@ class OpenAIService {
         try {
             return await this.client.beta.threads.runs.retrieve(threadId, runId);
         } catch (error) {
+            logger.error('ErrorCheckingRunStatus', { threadId, runId, error });
             console.error('[OpenAI] Erro ao verificar status:', error);
             throw error;
         }
@@ -375,6 +392,7 @@ class OpenAIService {
         try {
             return await this.client.beta.threads.messages.list(threadId);
         } catch (error) {
+            logger.error('ErrorListingMessages', { threadId, error });
             console.error('[OpenAI] Erro ao listar mensagens:', error);
             throw error;
         }
@@ -396,11 +414,13 @@ class OpenAIService {
             }
 
             if (run.status === 'requires_action') {
+                logger.info('RunRequiresAction', { threadId, runId });
                 console.log('[OpenAI] Ação requerida, processando tool calls...');
                 
                 if (run.required_action?.type === 'submit_tool_outputs') {
                     const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
-                    console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => `'${t.function.name}'`));
+                    logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
+                    console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => t.function.name));
                     
                     const toolOutputs = await this.handleToolCalls(run, threadId);
                     
@@ -419,9 +439,11 @@ class OpenAIService {
                 if (messages.data && messages.data.length > 0) {
                     const content = messages.data[0].content[0];
                     if (content && content.text && typeof content.text.value === 'string') {
+                        logger.info('AssistantResponse', { threadId, response: content.text.value });
                         console.log('[OpenAI] Resposta extraída:', content.text.value);
                         return content.text.value;
                     }
+                    logger.error('ErrorExtractingAssistantResponse', { threadId, error: 'Unexpected message structure' });
                     console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
                     throw new Error('Não foi possível extrair a resposta da mensagem');
                 }
@@ -429,6 +451,7 @@ class OpenAIService {
             }
 
             if (run.status === 'failed') {
+                logger.error('RunFailed', { threadId, runId, error: run.last_error });
                 console.error('[OpenAI] Run falhou:', run.last_error);
                 throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
             }
@@ -436,6 +459,7 @@ class OpenAIService {
             throw new Error(`Run terminou com status inesperado: ${run.status}`);
             
         } catch (error) {
+            logger.error('ErrorWaitingForResponse', { threadId, runId, error });
             console.error('[OpenAI] Erro ao aguardar resposta:', error);
             await this.removeActiveRun(threadId); // Garante remoção do run em caso de erro
             throw error;
@@ -444,23 +468,30 @@ class OpenAIService {
 
     async handleToolCalls(run, threadId) {
         if (!run?.required_action?.submit_tool_outputs?.tool_calls) {
+            logger.warn('NoToolCalls', { threadId });
             console.warn('[OpenAI] Nenhuma tool call encontrada');
             return [];
         }
 
         const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+        logger.info('ProcessingToolCalls', {
+            threadId,
+            tools: toolCalls.map(t => t.function.name)
+        });
         console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => t.function.name));
         
         const toolOutputs = [];
 
         for (const toolCall of toolCalls) {
             const { name, arguments: args } = toolCall.function;
+            logger.info('ExecutingTool', { threadId, tool: name, args });
             console.log(`[OpenAI] Executando função ${name} com args:`, args);
             
             let parsedArgs;
             try {
                 parsedArgs = JSON.parse(args);
             } catch (error) {
+                logger.error('ErrorParsingToolArguments', { threadId, tool: name, error });
                 console.error('[OpenAI] Erro ao parsear argumentos:', error);
                 continue;
             }
@@ -538,6 +569,12 @@ class OpenAIService {
                                                        `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
                                     }
                                 } catch (error) {
+                                    logger.error('ErrorCheckingDeliveryStatus', { 
+                                        threadId, 
+                                        orderNumber: order.number,
+                                        trackingNumber: order.shipping_tracking_number,
+                                        error 
+                                    });
                                     console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
                                     deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
                                                    `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
@@ -604,6 +641,7 @@ class OpenAIService {
                             });
 
                         } catch (error) {
+                            logger.error('ErrorCheckingTracking', { threadId, trackingCode: parsedArgs.tracking_code, error });
                             console.error('[OpenAI] Erro ao consultar rastreamento:', error);
                             output = JSON.stringify({
                                 error: true,
@@ -688,6 +726,7 @@ class OpenAIService {
                                                    `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}`;
                                 }
                             } catch (error) {
+                                logger.error('ErrorCheckingTracking', { threadId, trackingCode: extractedOrder.shipping_tracking_number, error });
                                 console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
                                 deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
                                                `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}`;
@@ -806,6 +845,7 @@ class OpenAIService {
                                         message: result
                                     });
                                 } catch (error) {
+                                    logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber: parsedArgs.order_number, error });
                                     console.error('[OpenAI] Erro ao processar comprovante:', error);
                                     output = JSON.stringify({
                                         error: true,
@@ -849,6 +889,7 @@ class OpenAIService {
                         break;
 
                     default:
+                        logger.warn('UnknownTool', { threadId, tool: name });
                         console.warn('[OpenAI] Função desconhecida:', name);
                         output = JSON.stringify({
                             error: true,
@@ -856,12 +897,14 @@ class OpenAIService {
                         });
                 }
 
+                logger.info('ToolOutput', { threadId, tool: name, output });
                 console.log(`[OpenAI] Resultado da função ${name}:`, output);
                 toolOutputs.push({
                     tool_call_id: toolCall.id,
                     output
                 });
             } catch (error) {
+                logger.error('ErrorExecutingTool', { threadId, tool: name, error });
                 console.error(`[OpenAI] Erro ao executar função ${name}:`, error);
                 toolOutputs.push({
                     tool_call_id: toolCall.id,
@@ -886,9 +929,11 @@ class OpenAIService {
             const runId = await this.redisStore.getActiveRun(threadId);
             if (runId) {
                 await this.client.beta.threads.runs.cancel(threadId, runId);
+                logger.info('RunCanceled', { threadId, runId });
                 console.log(`[OpenAI] Run ${runId} cancelado para thread ${threadId}`);
             }
         } catch (error) {
+            logger.error('ErrorCancelingRun', { threadId, error });
             console.error('[OpenAI] Erro ao cancelar run:', error);
         } finally {
             await this.removeActiveRun(threadId); // Garante remoção do run mesmo se o cancelamento falhar
@@ -902,8 +947,10 @@ class OpenAIService {
     async deleteThread(threadId) {
         try {
             await this.client.beta.threads.del(threadId);
+            logger.info('ThreadDeleted', { threadId });
             console.log('[OpenAI] Thread deletado com sucesso:', threadId);
         } catch (error) {
+            logger.error('ErrorDeletingThread', { threadId, error });
             console.error('[OpenAI] Erro ao deletar thread:', error);
             // Não lança erro pois o thread pode não existir
         }
@@ -919,6 +966,7 @@ class OpenAIService {
             // Tenta recuperar thread do Redis
             const threadData = await this.redisStore.getAssistantThread(customerId);
             if (threadData) {
+                logger.info('ExistingThreadRecovered', { customerId, threadId: threadData.id });
                 console.log('[OpenAI] Thread existente recuperada do Redis:', {
                     customerId,
                     threadId: threadData.id
@@ -935,6 +983,7 @@ class OpenAIService {
                 createdAt: new Date().toISOString()
             });
             
+            logger.info('NewThreadCreated', { customerId, threadId: thread.id });
             console.log('[OpenAI] Nova thread criada e salva no Redis:', {
                 customerId,
                 threadId: thread.id
@@ -942,6 +991,7 @@ class OpenAIService {
 
             return thread.id;
         } catch (error) {
+            logger.error('ErrorGettingOrCreateThread', { customerId, error });
             console.error('[OpenAI] Erro ao obter/criar thread:', error);
             throw error;
         }
@@ -949,6 +999,7 @@ class OpenAIService {
 
     async processCustomerMessage(customerId, message) {
         try {
+            logger.info('ProcessingCustomerMessage', { customerId, messageType: Array.isArray(message.content) ? 'array' : typeof message.content });
             console.log('[OpenAI] Processando mensagem do cliente:', {
                 customerId,
                 messageType: Array.isArray(message.content) ? 'array' : typeof message.content,
@@ -977,6 +1028,7 @@ class OpenAIService {
             // Salva contexto apenas se passou o intervalo
             if (response && await this._shouldUpdateContext(threadId)) {
                 await this._saveContextToRedis(threadId, response);
+                logger.info('ContextUpdated', { threadId });
                 console.log('[OpenAI] Contexto atualizado após intervalo:', {
                     threadId,
                     interval: '15 minutos'
@@ -985,6 +1037,7 @@ class OpenAIService {
 
             return response;
         } catch (error) {
+            logger.error('ErrorProcessingCustomerMessage', { customerId, error });
             console.error('[OpenAI] Erro ao processar mensagem do cliente:', {
                 customerId,
                 erro: error.message,
@@ -998,6 +1051,7 @@ class OpenAIService {
 
     async processCustomerMessageWithImage(customerId, message, images) {
         try {
+            logger.info('ProcessingCustomerMessageWithImage', { customerId, hasMessage: !!message, imageCount: images?.length });
             console.log('[OpenAI] Processando mensagem com imagem:', {
                 customerId,
                 hasMessage: !!message,
@@ -1009,6 +1063,7 @@ class OpenAIService {
             // Verifica se está aguardando comprovante
             const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
             if (waiting === 'payment_proof') {
+                logger.info('WaitingForPaymentProof', { threadId });
                 console.log('[OpenAI] Comprovante recebido:', {
                     threadId,
                     hasMessage: !!message
@@ -1020,6 +1075,7 @@ class OpenAIService {
                     try {
                         orderNumber = await this.orderValidationService.extractOrderNumber(message);
                     } catch (error) {
+                        logger.error('ErrorExtractingOrderNumber', { threadId, error });
                         console.error('[OpenAI] Erro ao extrair número do pedido:', error);
                     }
                 }
@@ -1076,6 +1132,7 @@ class OpenAIService {
             return response || "Desculpe, não consegui processar sua mensagem. Pode tentar novamente?";
 
         } catch (error) {
+            logger.error('ErrorProcessingCustomerMessageWithImage', { customerId, error });
             console.error('❌ Erro ao processar mensagem com imagem:', error);
             return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
         }
@@ -1089,6 +1146,7 @@ class OpenAIService {
         try {
             return await this.redisStore.getAllThreadMetadata();
         } catch (error) {
+            logger.error('ErrorExportingThreadsMetadata', { error });
             console.error('[OpenAI] Erro ao exportar metadados:', {
                 erro: error.message,
                 stack: error.stack
@@ -1117,6 +1175,7 @@ class OpenAIService {
             
             return null;
         } catch (error) {
+            logger.error('ErrorHandlingCommand', { threadId, command, error });
             console.error('[OpenAI] Erro ao processar comando:', error);
             throw error;
         }
@@ -1124,11 +1183,13 @@ class OpenAIService {
 
     async waitForRunCompletion(threadId, runId, maxAttempts = 60) {
         try {
+            logger.info('WaitingForRunCompletion', { threadId, runId });
             console.log('[OpenAI] Aguardando conclusão do run:', { threadId, runId });
             
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 const run = await this.client.beta.threads.runs.retrieve(threadId, runId);
                 
+                logger.info('RunStatus', { threadId, runId, status: run.status });
                 console.log('[OpenAI] Status do run:', { 
                     threadId, 
                     runId, 
@@ -1150,6 +1211,7 @@ class OpenAIService {
 
             return false;
         } catch (error) {
+            logger.error('ErrorWaitingForRunCompletion', { threadId, runId, error });
             console.error('[OpenAI] Erro ao aguardar conclusão do run:', error);
             throw error;
         }
@@ -1163,6 +1225,7 @@ class OpenAIService {
      */
     async addMessage(threadId, message) {
         try {
+            logger.info('AddingMessage', { threadId, role: message.role, contentType: Array.isArray(message.content) ? 'array' : typeof message.content });
             console.log('[OpenAI] Adicionando mensagem:', {
                 threadId,
                 role: message.role,
@@ -1202,6 +1265,7 @@ class OpenAIService {
                 content: content
             });
 
+            logger.info('MessageCreated', { threadId, messageId: result.id });
             console.log('[OpenAI] Mensagem adicionada com sucesso:', {
                 threadId,
                 messageId: result.id
@@ -1210,6 +1274,7 @@ class OpenAIService {
             return result;
 
         } catch (error) {
+            logger.error('ErrorAddingMessage', { threadId, error });
             console.error('[OpenAI] Erro ao adicionar mensagem:', error);
             throw error;
         }
@@ -1236,6 +1301,7 @@ class OpenAIService {
 
             return run;
         } catch (error) {
+            logger.error('ErrorRunningAssistant', { threadId, error });
             console.error('[OpenAI] Erro ao executar assistant:', error);
             throw error;
         }
@@ -1250,6 +1316,7 @@ class OpenAIService {
      */
     async processPaymentProof(threadId, image, orderNumber) {
         try {
+            logger.info('ProcessingPaymentProof', { threadId, orderNumber, hasImage: !!image });
             console.log('[OpenAI] Processando comprovante:', {
                 threadId,
                 orderNumber,
@@ -1287,9 +1354,8 @@ class OpenAIService {
                 timestamp: new Date().toISOString()
             });
 
-            // Limpar o estado no Redis após processamento
-            await this.redisStore.del(`waiting_order:${threadId}`);
-            await this.redisStore.del(`pending_order:${threadId}`);
+            // Limpar o comprovante pendente após processamento
+            await this.redisStore.del(`pending_proof:${threadId}`);
 
             if (result.success) {
                 return `✅ Comprovante recebido com sucesso para o pedido #${orderNumber}!\n\n` +
@@ -1301,6 +1367,7 @@ class OpenAIService {
             }
 
         } catch (error) {
+            logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber, error });
             console.error('[OpenAI] Erro ao processar comprovante:', error);
             
             // Não limpa o Redis em caso de erro para permitir nova tentativa
@@ -1319,8 +1386,10 @@ class OpenAIService {
                 lastUpdate: new Date().toISOString(),
                 context: context
             }));
+            logger.info('ContextSaved', { threadId });
             console.log('[OpenAI] Contexto salvo no Redis:', { threadId });
         } catch (error) {
+            logger.error('ErrorSavingContext', { threadId, error });
             console.error('[OpenAI] Erro ao salvar contexto:', error);
         }
     }
@@ -1335,11 +1404,13 @@ class OpenAIService {
             const data = await this.redisStore.get(key);
             if (data) {
                 const parsed = JSON.parse(data);
+                logger.info('ContextRecovered', { threadId });
                 console.log('[OpenAI] Contexto recuperado do Redis:', { threadId });
                 return parsed.context;
             }
             return null;
         } catch (error) {
+            logger.error('ErrorRecoveringContext', { threadId, error });
             console.error('[OpenAI] Erro ao recuperar contexto:', error);
             return null;
         }
@@ -1361,6 +1432,7 @@ class OpenAIService {
             
             return (now - lastUpdate) >= this.CONTEXT_UPDATE_INTERVAL;
         } catch (error) {
+            logger.error('ErrorCheckingContextUpdate', { threadId, error });
             console.error('[OpenAI] Erro ao verificar atualização de contexto:', error);
             return true;
         }

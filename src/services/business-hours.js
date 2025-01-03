@@ -153,11 +153,10 @@ class BusinessHoursService {
         
         // Formata o horário de cada dia
         for (const [day, hours] of Object.entries(this.config.schedule)) {
-            if (hours.start && hours.end) {
-                schedule[this.formatDayName(day)] = `${hours.start} às ${hours.end}`;
-            } else {
-                schedule[this.formatDayName(day)] = 'Fechado';
-            }
+            const formattedDay = this.formatDayName(day);
+            schedule[formattedDay] = hours?.start && hours?.end ? 
+                `${hours.start} às ${hours.end}` : 
+                'Fechado';
         }
 
         return {
