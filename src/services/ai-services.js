@@ -72,26 +72,16 @@ class AIServices {
 
             // Se for mensagem de áudio
             if (message.type === 'audio' || message.type === 'ptt') {
-                const result = await this.audioService.processWhatsAppAudio(message);
+                // O áudio já foi processado pelo WebhookService
+                const transcription = message.text;
                 
-                // Se houve erro no processamento do áudio
-                if (result.error) {
-                    await this.whatsAppService.sendText(message.from, 
-                        'Desculpe, não consegui processar seu áudio. Pode tentar enviar novamente?');
-                    return {
-                        type: 'error',
-                        message: result.message,
-                        from: message.from
-                    };
-                }
-
                 // Processa a transcrição com o OpenAI
                 const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
                     content: [
                         {
                             type: 'text',
-                            text: `Transcrição do áudio do cliente: "${result}"`
+                            text: `Transcrição do áudio do cliente: "${transcription}"`
                         }
                     ]
                 });
@@ -102,7 +92,7 @@ class AIServices {
 
                 return {
                     type: 'audio',
-                    transcription: result,
+                    transcription: transcription,
                     response: response,
                     from: message.from
                 };
