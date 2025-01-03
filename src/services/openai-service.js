@@ -952,6 +952,7 @@ class OpenAIService {
             console.log('[OpenAI] Processando mensagem do cliente:', {
                 customerId,
                 messageType: Array.isArray(message.content) ? 'array' : typeof message.content,
+                contentPreview: typeof message.content === 'string' ? message.content.substring(0, 100) : null,
                 timestamp: new Date().toISOString()
             });
 
@@ -961,20 +962,17 @@ class OpenAIService {
                 throw new Error('Não foi possível criar/recuperar thread');
             }
 
-            // Recupera contexto do Redis
-            const savedContext = await this._getContextFromRedis(threadId);
-            if (savedContext) {
-                // Adiciona contexto à mensagem
-                if (typeof message.content === 'string') {
-                    message.content = `${savedContext}\n\nNova mensagem do cliente:\n${message.content}`;
-                }
+            // Adiciona mensagem diretamente ao thread
+            await this.addMessage(threadId, message);
+
+            // Executa o assistant
+            const run = await this.runAssistant(threadId);
+            if (!run?.id) {
+                throw new Error('Falha ao executar assistant');
             }
 
-            // Adiciona mensagem à fila
-            await this.queueMessage(threadId, message);
-
-            // Processa mensagens na fila
-            const response = await this.processQueuedMessages(threadId);
+            // Aguarda e retorna a resposta
+            const response = await this.waitForResponse(threadId, run.id);
 
             // Salva contexto apenas se passou o intervalo
             if (response && await this._shouldUpdateContext(threadId)) {

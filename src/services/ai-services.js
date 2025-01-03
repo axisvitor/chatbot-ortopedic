@@ -72,13 +72,12 @@ class AIServices {
 
             // Se for mensagem de áudio
             if (message.type === 'audio' || message.type === 'ptt') {
-                // O áudio já foi processado pelo WebhookService
                 const transcription = message.text;
                 
-                // Processa a transcrição com o OpenAI
+                // Processa direto com o OpenAI Assistant
                 const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
-                    content: `Transcrição do áudio do cliente: "${transcription}"`
+                    content: transcription
                 });
 
                 if (response) {
@@ -87,8 +86,8 @@ class AIServices {
 
                 return {
                     type: 'audio',
-                    transcription: transcription,
-                    response: response,
+                    transcription,
+                    response,
                     from: message.from
                 };
             }
