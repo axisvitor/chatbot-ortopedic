@@ -59,7 +59,8 @@ class ServiceContainer {
             nuvemshopService,
             trackingService,
             businessHoursService,
-            orderValidationService
+            orderValidationService,
+            financialService
         );
         this.register('openai', openaiService);
         

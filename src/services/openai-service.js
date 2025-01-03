@@ -13,8 +13,9 @@ class OpenAIService {
      * @param {TrackingService} trackingService - Serviço de tracking
      * @param {BusinessHoursService} businessHoursService - Serviço de horário de atendimento
      * @param {OrderValidationService} orderValidationService - Serviço de validação de pedidos
+     * @param {FinancialService} financialService - Serviço financeiro
      */
-    constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService) {
+    constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService, financialService) {
         this.client = new OpenAI({
             apiKey: OPENAI_CONFIG.apiKey
         });
@@ -30,7 +31,7 @@ class OpenAIService {
         this.trackingService = trackingService || new TrackingService();
         this.businessHoursService = businessHoursService || new BusinessHoursService();
         this.orderValidationService = orderValidationService || new OrderValidationService();
-        this.financialService = new FinancialService();
+        this.financialService = financialService; // Recebe o FinancialService do container
 
         // Define as funções disponíveis para o Assistant
         this.functions = [
