@@ -100,12 +100,22 @@ class AIServices {
 
             // Se for mensagem de texto
             if (message.type === 'text') {
+                // Extrai o texto da mensagem
+                let messageText = '';
+                if (message.message?.extendedTextMessage?.text) {
+                    messageText = message.message.extendedTextMessage.text;
+                } else if (message.message?.conversation) {
+                    messageText = message.message.conversation;
+                } else if (message.text) {
+                    messageText = message.text;
+                }
+
                 const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
                     content: [
                         {
                             type: 'text',
-                            text: message.text
+                            text: messageText
                         }
                     ]
                 });

@@ -147,8 +147,12 @@ class OpenAIService {
      * @returns {Promise<boolean>} 
      */
     async hasActiveRun(threadId) {
-        const runId = await this.redisStore.getActiveRun(threadId);
-        return !!runId;
+        try {
+            return await this.redisStore.get(`run:${threadId}:active`) === 'true';
+        } catch (error) {
+            console.error('[OpenAI] Erro ao verificar run ativo:', error);
+            return false;
+        }
     }
 
     /**
@@ -157,7 +161,11 @@ class OpenAIService {
      * @param {string} runId - ID do run
      */
     async registerActiveRun(threadId, runId) {
-        await this.redisStore.setActiveRun(threadId, runId);
+        try {
+            await this.redisStore.set(`run:${threadId}:active`, 'true');
+        } catch (error) {
+            console.error('[OpenAI] Erro ao registrar run ativo:', error);
+        }
     }
 
     /**
@@ -165,8 +173,12 @@ class OpenAIService {
      * @param {string} threadId - ID da thread
      */
     async removeActiveRun(threadId) {
-        await this.redisStore.removeActiveRun(threadId);
-        await this.processQueuedMessages(threadId);
+        try {
+            await this.redisStore.set(`run:${threadId}:active`, 'false');
+            await this.processQueuedMessages(threadId);
+        } catch (error) {
+            console.error('[OpenAI] Erro ao remover run ativo:', error);
+        }
     }
 
     /**
@@ -894,35 +906,30 @@ class OpenAIService {
      */
     async getOrCreateThreadForCustomer(customerId) {
         try {
-            // Tenta obter thread existente
-            let threadId = await this.redisStore.getThreadForCustomer(customerId);
-            
-            if (!threadId) {
-                // Cria nova thread se não existir
-                const thread = await this.createThread();
-                threadId = thread.id;
-                
-                // Salva no Redis com TTL de 60 dias
-                await this.redisStore.setThreadForCustomer(customerId, threadId, 5184000); // 60 dias em segundos
-                
-                console.log('[OpenAI] Nova thread criada:', {
+            // Tenta recuperar thread do Redis
+            const threadId = await this.redisStore.get(`thread:${customerId}`);
+            if (threadId) {
+                console.log('[OpenAI] Thread existente recuperada do Redis:', {
                     customerId,
                     threadId
                 });
-            } else {
-                console.log('[OpenAI] Thread existente recuperada:', {
-                    customerId,
-                    threadId
-                });
+                return threadId;
             }
+
+            // Se não existir, cria nova thread
+            const thread = await this.client.beta.threads.create();
             
-            return threadId;
-        } catch (error) {
-            console.error('[OpenAI] Erro ao obter/criar thread:', {
+            // Salva no Redis
+            await this.redisStore.set(`thread:${customerId}`, thread.id);
+            
+            console.log('[OpenAI] Nova thread criada e salva no Redis:', {
                 customerId,
-                erro: error.message,
-                stack: error.stack
+                threadId: thread.id
             });
+
+            return thread.id;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao obter/criar thread:', error);
             throw error;
         }
     }
