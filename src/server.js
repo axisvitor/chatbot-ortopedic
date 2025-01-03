@@ -166,6 +166,7 @@ async function initializeServices() {
                 whatsAppImageService,
                 openAIVisionService,
                 openAIService,
+                audioService,
                 trackingService,
                 orderValidationService
             );
