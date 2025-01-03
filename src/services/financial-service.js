@@ -1,5 +1,5 @@
 const { RedisStore } = require('../store/redis-store');
-const { container } = require('./service-container');
+const { FINANCIAL_CONFIG } = require('../config/settings');
 
 class FinancialService {
     constructor(whatsAppService = null) {
@@ -12,7 +12,7 @@ class FinancialService {
      * @private
      */
     get _whatsAppService() {
-        return this.whatsAppService || container.get('whatsapp');
+        return this.whatsAppService;
     }
 
     /**

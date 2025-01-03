@@ -1,18 +1,18 @@
 const axios = require('axios');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
-const { container } = require('./service-container');
 const FormData = require('form-data');
 const { OpenAIService } = require('./openai-service');
 
 class WhatsAppService {
-    constructor() {
+    constructor(orderValidationService = null) {
         this.client = null;
         this.connectionKey = null;
         this.retryCount = 0;
         this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
         this.paymentProofMessages = {};
         this.pendingProofs = new Map(); // Armazena comprovantes aguardando número do pedido
+        this.orderValidationService = orderValidationService;
         
         // Limpa comprovantes antigos a cada hora
         setInterval(() => this._cleanupPendingProofs(), 60 * 60 * 1000);
@@ -23,7 +23,7 @@ class WhatsAppService {
      * @private
      */
     get _orderValidationService() {
-        return container.get('orderValidation');
+        return this.orderValidationService;
     }
 
     /**
@@ -31,7 +31,7 @@ class WhatsAppService {
      * @private
      */
     get _trackingService() {
-        return container.get('tracking');
+        return null;
     }
 
     /**
@@ -39,7 +39,7 @@ class WhatsAppService {
      * @private
      */
     get _imageService() {
-        return container.get('whatsappImage');
+        return null;
     }
 
     /**
@@ -47,7 +47,7 @@ class WhatsAppService {
      * @private
      */
     get _audioService() {
-        return container.get('whatsappAudio');
+        return null;
     }
 
     /**
@@ -55,7 +55,7 @@ class WhatsAppService {
      * @private
      */
     get _mediaManager() {
-        return container.get('mediaManager');
+        return null;
     }
 
     /**
@@ -63,7 +63,7 @@ class WhatsAppService {
      * @private
      */
     get _openaiService() {
-        return container.get('openai');
+        return new OpenAIService();
     }
 
     /**

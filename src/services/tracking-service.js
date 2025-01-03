@@ -4,7 +4,6 @@ const https = require('https');
 const { TRACKING_CONFIG } = require('../config/settings');
 const { RedisStore } = require('../store/redis-store');
 const { NuvemshopService } = require('./nuvemshop-service');
-const { container } = require('./service-container');
 
 class TrackingService {
     constructor(whatsAppService = null) {
@@ -32,7 +31,7 @@ class TrackingService {
      * @private
      */
     get _whatsAppService() {
-        return this.whatsAppService || container.get('whatsapp');
+        return this.whatsAppService;
     }
 
     /**

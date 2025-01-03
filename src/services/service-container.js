@@ -21,26 +21,38 @@ class ServiceContainer {
 
     _initializeServices() {
         // Inicializa serviços base primeiro
-        const trackingService = new TrackingService();
         const imageService = new WhatsAppImageService();
         const audioService = new WhatsAppAudioService();
         const mediaManager = new MediaManagerService(audioService, imageService);
         const nuvemshopService = new NuvemshopService();
         const businessHoursService = new BusinessHoursService();
-        const whatsappService = new WhatsAppService();
-        const financialService = new FinancialService(whatsappService);
-        const orderValidationService = new OrderValidationService(whatsappService);
 
         // Registra serviços base
-        this.register('tracking', trackingService);
         this.register('whatsappImage', imageService);
         this.register('whatsappAudio', audioService);
         this.register('mediaManager', mediaManager);
         this.register('nuvemshop', nuvemshopService);
         this.register('businessHours', businessHoursService);
+
+        // Inicializa serviços interdependentes
+        const whatsappService = new WhatsAppService();
         this.register('whatsapp', whatsappService);
-        this.register('financial', financialService);
+
+        const trackingService = new TrackingService(whatsappService);
+        this.register('tracking', trackingService);
+
+        const orderValidationService = new OrderValidationService(null, whatsappService);
         this.register('orderValidation', orderValidationService);
+
+        const financialService = new FinancialService(whatsappService);
+        this.register('financial', financialService);
+
+        // Atualiza WhatsAppService com suas dependências
+        whatsappService.orderValidationService = orderValidationService;
+        whatsappService.trackingService = trackingService;
+        whatsappService.imageService = imageService;
+        whatsappService.audioService = audioService;
+        whatsappService.mediaManager = mediaManager;
 
         // Inicializa e registra serviços que dependem dos base
         const openaiService = new OpenAIService(
@@ -50,6 +62,9 @@ class ServiceContainer {
             orderValidationService
         );
         this.register('openai', openaiService);
+        
+        // Atualiza WhatsAppService com OpenAI
+        whatsappService.openaiService = openaiService;
     }
 
     /**

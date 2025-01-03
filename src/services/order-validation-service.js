@@ -5,7 +5,7 @@ const { formatTimeAgo } = require('../utils/date-utils');
 const { NUVEMSHOP_CONFIG } = require('../config/settings');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { ImageProcessingService } = require('./image-processing-service');
-const { container } = require('./service-container');
+const { FinancialService } = require('./financial-service');
 
 class OrderValidationService {
     constructor(nuvemshopClient = null, whatsAppService = null) {
@@ -20,6 +20,7 @@ class OrderValidationService {
         // Configura WhatsApp e Tracking
         this.whatsAppService = whatsAppService;
         this.trackingService = whatsAppService ? new TrackingService(whatsAppService) : null;
+        this.financialService = new FinancialService(whatsAppService);
     }
 
     /**
@@ -27,7 +28,7 @@ class OrderValidationService {
      * @private
      */
     get _whatsAppService() {
-        return this.whatsAppService || container.get('whatsapp');
+        return this.whatsAppService;
     }
 
     /**
@@ -35,7 +36,15 @@ class OrderValidationService {
      * @private
      */
     get _trackingService() {
-        return this.trackingService || this._whatsAppService?.trackingService;
+        return this.trackingService;
+    }
+
+    /**
+     * Obtém o serviço financeiro
+     * @private
+     */
+    get _financialService() {
+        return this.financialService;
     }
 
     /**
@@ -203,7 +212,7 @@ class OrderValidationService {
                 }
 
                 // Encaminha para o financeiro
-                const financial = container.get('financial');
+                const financial = this._financialService;
                 await financial.forwardCase({
                     order_number: orderNumber,
                     reason: 'payment_proof',
@@ -280,7 +289,7 @@ class OrderValidationService {
             }
 
             // Encaminha para o financeiro
-            const financial = container.get('financial');
+            const financial = this._financialService;
             await financial.forwardCase({
                 order_number: orderNumber,
                 reason: 'payment_proof',
@@ -716,7 +725,7 @@ class OrderValidationService {
                        `*Análise do Comprovante:*\n${proofAnalysis.analysis}\n\n` +
                        `✅ Comprovante validado automaticamente`;
 
-        const whatsapp = this._whatsAppService;
+        const whatsapp = this.whatsAppService;
         await whatsapp.forwardToFinancial({ body: message }, order.number);
     }
 
