@@ -317,7 +317,7 @@ class OpenAIService {
             }
 
             // Obtém as mensagens após o processamento
-            const messages = await this.client.beta.threads.messages.list(threadId);
+            const messages = await this.listMessages(threadId);
             
             // Retorna a última mensagem do assistente
             const assistantMessages = messages.data.filter(msg => msg.role === 'assistant');
@@ -332,7 +332,12 @@ class OpenAIService {
                 content: lastMessage.content
             });
 
-            return lastMessage.content[0].text.value;
+            if (lastMessage.content && lastMessage.content[0] && lastMessage.content[0].text && typeof lastMessage.content[0].text.value === 'string') {
+                console.log('[OpenAI] Resposta extraída:', lastMessage.content[0].text.value);
+                return lastMessage.content[0].text.value;
+            }
+            console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
+            throw new Error('Não foi possível extrair a resposta da mensagem');
 
         } catch (error) {
             // Remove o run do Redis em caso de erro
@@ -408,7 +413,12 @@ class OpenAIService {
             if (run.status === 'completed') {
                 const messages = await this.listMessages(threadId);
                 if (messages.data && messages.data.length > 0) {
-                    return messages.data[0].content[0].text.value;
+                    const content = messages.data[0].content[0];
+                    if (content && content.text && typeof content.text.value === 'string') {
+                        console.log('[OpenAI] Resposta extraída:', content.text.value);
+                        return content.text.value;
+                    }
+                    console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
                 }
             }
 
