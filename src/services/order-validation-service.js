@@ -20,9 +20,6 @@ class OrderValidationService {
         // Configura WhatsApp e Tracking
         this.whatsAppService = whatsAppService;
         this.trackingService = whatsAppService ? new TrackingService(whatsAppService) : null;
-        
-        // Registra este serviço no container
-        container.register('orderValidation', this);
     }
 
     /**

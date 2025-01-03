@@ -5,9 +5,6 @@ class FinancialService {
     constructor(whatsAppService = null) {
         this.redisStore = new RedisStore();
         this.whatsAppService = whatsAppService;
-        
-        // Registra este serviço no container
-        container.register('financial', this);
     }
 
     /**

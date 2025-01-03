@@ -10,6 +10,8 @@ const { TrackingService } = require('./tracking-service');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
+const { WhatsAppService } = require('./whatsapp-service');
+const { FinancialService } = require('./financial-service');
 
 class ServiceContainer {
     constructor() {
@@ -25,7 +27,9 @@ class ServiceContainer {
         const mediaManager = new MediaManagerService(audioService, imageService);
         const nuvemshopService = new NuvemshopService();
         const businessHoursService = new BusinessHoursService();
-        const orderValidationService = new OrderValidationService();
+        const whatsappService = new WhatsAppService();
+        const financialService = new FinancialService(whatsappService);
+        const orderValidationService = new OrderValidationService(whatsappService);
 
         // Registra serviços base
         this.register('tracking', trackingService);
@@ -34,6 +38,8 @@ class ServiceContainer {
         this.register('mediaManager', mediaManager);
         this.register('nuvemshop', nuvemshopService);
         this.register('businessHours', businessHoursService);
+        this.register('whatsapp', whatsappService);
+        this.register('financial', financialService);
         this.register('orderValidation', orderValidationService);
 
         // Inicializa e registra serviços que dependem dos base
