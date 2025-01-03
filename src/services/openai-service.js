@@ -442,6 +442,440 @@ class OpenAIService {
         }
     }
 
+    async handleToolCalls(run, threadId) {
+        if (!run?.required_action?.submit_tool_outputs?.tool_calls) {
+            console.warn('[OpenAI] Nenhuma tool call encontrada');
+            return [];
+        }
+
+        const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+        console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => t.function.name));
+        
+        const toolOutputs = [];
+
+        for (const toolCall of toolCalls) {
+            const { name, arguments: args } = toolCall.function;
+            console.log(`[OpenAI] Executando função ${name} com args:`, args);
+            
+            let parsedArgs;
+            try {
+                parsedArgs = JSON.parse(args);
+            } catch (error) {
+                console.error('[OpenAI] Erro ao parsear argumentos:', error);
+                continue;
+            }
+
+            let output;
+            try {
+                switch (name) {
+                    case 'check_order':
+                        if (!parsedArgs.order_number) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'Por favor, me informe o número do pedido que você quer consultar.'
+                            });
+                            break;
+                        }
+                        const order = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
+                        if (!order) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: `Desculpe, não encontrei nenhum pedido com o número ${parsedArgs.order_number}. Poderia verificar se o número está correto?`
+                            });
+                        } else {
+                            // Formata a data no padrão brasileiro
+                            const orderDate = new Date(order.created_at).toLocaleString('pt-BR', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            });
+
+                            // Lista de produtos com tratamento seguro de preço
+                            const products = order.products.map(product => {
+                                const price = typeof product.price === 'number' ? 
+                                    product.price.toFixed(2) : 
+                                    String(product.price).replace(/[^\d.,]/g, '');
+                                
+                                return `▫ ${product.quantity}x ${product.name}` + 
+                                       `${product.variant_name ? ` (${product.variant_name})` : ''}` +
+                                       ` - R$ ${price}`;
+                            }).join('\n');
+
+                            // Formata o valor total com segurança
+                            const total = typeof order.total === 'number' ? 
+                                order.total.toFixed(2) : 
+                                String(order.total).replace(/[^\d.,]/g, '');
+
+                            // Verifica status do rastreamento se disponível
+                            let deliveryStatus = '';
+                            if (order.shipping_tracking_number) {
+                                try {
+                                    const tracking = await this.trackingService.getTrackingInfo(order.shipping_tracking_number);
+                                    if (tracking && tracking.latest_event_info) {
+                                        const trackingDate = new Date(tracking.latest_event_time).toLocaleString('pt-BR', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            second: '2-digit'
+                                        });
+
+                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}` +
+                                                       `\n📍 Status: ${tracking.latest_event_info}` +
+                                                       `\n🕒 Última Atualização: ${trackingDate}`;
+
+                                        // Adiciona status de entrega se estiver entregue
+                                        if (tracking.package_status === 'Delivered') {
+                                            deliveryStatus += `\n\n✅ Pedido Entregue` +
+                                                            `\n📅 Data de Entrega: ${trackingDate}`;
+                                        }
+                                    } else {
+                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
+                                    }
+                                } catch (error) {
+                                    console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
+                                    deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                   `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
+                                }
+                            }
+
+                            output = JSON.stringify({
+                                error: false,
+                                message: `🛍 Detalhes do Pedido #${order.number}\n\n` +
+                                        `👤 Cliente: ${order.customer.name}\n` +
+                                        `📅 Data: ${orderDate}\n` +
+                                        `📦 Status: ${order.status}\n` +
+                                        `💰 Valor Total: R$ ${total}\n\n` +
+                                        `Produtos:\n${products}${deliveryStatus}`
+                            });
+                        }
+                        break;
+
+                    case 'check_tracking':
+                        if (!parsedArgs.tracking_code) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'Por favor, me informe o código de rastreio que você quer consultar.'
+                            });
+                            break;
+                        }
+
+                        try {
+                            // Usa o novo método getTrackingInfo que já implementa cache e retry
+                            const tracking = await this.trackingService.getTrackingInfo(parsedArgs.tracking_code);
+                            
+                            if (!tracking || !tracking.status) {
+                                output = JSON.stringify({
+                                    error: true,
+                                    message: `Desculpe, não encontrei informações para o código de rastreio ${parsedArgs.tracking_code}. Poderia verificar se o código está correto?`
+                                });
+                                break;
+                            }
+
+                            const status = tracking.status.toLowerCase();
+                            let statusEmoji = '📦';
+                            
+                            if (status.includes('entregue')) {
+                                statusEmoji = '✅';
+                            } else if (status.includes('transito') || status.includes('trânsito')) {
+                                statusEmoji = '🚚';
+                            } else if (status.includes('postado')) {
+                                statusEmoji = '📮';
+                            }
+
+                            // Formata a mensagem com as informações disponíveis
+                            const message = [
+                                `📬 Informações de Rastreio: ${tracking.code}`,
+                                '',
+                                `${statusEmoji} Status: ${tracking.status}`,
+                                tracking.location ? `📍 Localização: ${tracking.location}` : null,
+                                tracking.last_update ? `🕒 Última Atualização: ${tracking.last_update}` : null,
+                                tracking.message ? `\n📝 Observação: ${tracking.message}` : null
+                            ].filter(Boolean).join('\n');
+
+                            output = JSON.stringify({
+                                error: false,
+                                message
+                            });
+
+                        } catch (error) {
+                            console.error('[OpenAI] Erro ao consultar rastreamento:', error);
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'Desculpe, ocorreu um erro ao consultar o rastreamento. Por favor, tente novamente mais tarde.'
+                            });
+                        }
+                        break;
+
+                    case 'get_business_hours':
+                        const businessHours = this.businessHoursService.getBusinessHours();
+                        const currentStatus = businessHours.isOpen ? '🟢 Estamos Abertos!' : '🔴 Estamos Fechados';
+                        
+                        // Formata o horário de cada dia
+                        const schedule = Object.entries(businessHours.schedule)
+                            .map(([day, hours]) => `${day}: ${hours}`)
+                            .join('\n');
+
+                        output = JSON.stringify({
+                            error: false,
+                            message: `${currentStatus}\n\n` +
+                                    `⏰ Horário de Atendimento:\n` +
+                                    `${schedule}\n\n` +
+                                    `🌎 Fuso Horário: ${businessHours.timezone}`
+                        });
+                        break;
+
+                    case 'extract_order_number':
+                        if (!parsedArgs.text) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'Não consegui identificar o texto para buscar o número do pedido.'
+                            });
+                            break;
+                        }
+                        const orderNumber = await this.orderValidationService.extractOrderNumber(parsedArgs.text);
+                        
+                        if (!orderNumber) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: '❌ Desculpe, não consegui identificar um número de pedido válido no texto. Poderia me informar o número do pedido diretamente?'
+                            });
+                            break;
+                        }
+
+                        // Busca as informações do pedido
+                        const extractedOrder = await this.nuvemshopService.getOrderByNumber(orderNumber);
+                        if (!extractedOrder) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: `❌ Encontrei o número #${orderNumber}, mas não consegui localizar este pedido em nossa base. Poderia verificar se o número está correto?`
+                            });
+                            break;
+                        }
+
+                        // Processa o pedido como na função check_order
+                        let deliveryStatus = '';
+                        if (extractedOrder.shipping_tracking_number) {
+                            try {
+                                const tracking = await this.trackingService.getTrackingInfo(extractedOrder.shipping_tracking_number);
+                                if (tracking && tracking.latest_event_info) {
+                                    const trackingDate = new Date(tracking.latest_event_time).toLocaleString('pt-BR', {
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        second: '2-digit'
+                                    });
+
+                                    deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
+                                                   `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}` +
+                                                   `\n📍 Status: ${tracking.latest_event_info}` +
+                                                   `\n🕒 Última Atualização: ${trackingDate}`;
+
+                                    // Adiciona status de entrega se estiver entregue
+                                    if (tracking.package_status === 'Delivered') {
+                                        deliveryStatus += `\n\n✅ Pedido Entregue` +
+                                                        `\n📅 Data de Entrega: ${trackingDate}`;
+                                    }
+                                } else {
+                                    deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
+                                                   `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}`;
+                                }
+                            } catch (error) {
+                                console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
+                                deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
+                                               `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}`;
+                            }
+                        }
+
+                        // Lista de produtos com tratamento seguro de preço
+                        const products = extractedOrder.products.map(product => {
+                            const price = typeof product.price === 'number' ? 
+                                product.price.toFixed(2) : 
+                                String(product.price).replace(/[^\d.,]/g, '');
+                            
+                            return `▫ ${product.quantity}x ${product.name}` + 
+                                   `${product.variant_name ? ` (${product.variant_name})` : ''}` +
+                                   ` - R$ ${price}`;
+                        }).join('\n');
+
+                        // Formata o valor total com segurança
+                        const total = typeof extractedOrder.total === 'number' ? 
+                            extractedOrder.total.toFixed(2) : 
+                            String(extractedOrder.total).replace(/[^\d.,]/g, '');
+
+                        output = JSON.stringify({
+                            error: false,
+                            message: `🛍 Detalhes do Pedido #${extractedOrder.number}\n\n` +
+                                    `👤 Cliente: ${extractedOrder.customer.name}\n` +
+                                    `📅 Data: ${new Date(extractedOrder.created_at).toLocaleString('pt-BR', { 
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}\n` +
+                                    `📦 Status: ${extractedOrder.status}\n` +
+                                    `💰 Valor Total: R$ ${total}\n\n` +
+                                    `Produtos:\n${products}` +
+                                    `${deliveryStatus}`
+                        });
+                        break;
+
+                    case 'request_payment_proof':
+                        if (!parsedArgs.action) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'A ação é obrigatória para gerenciar comprovantes.'
+                            });
+                            break;
+                        }
+
+                        switch (parsedArgs.action) {
+                            case 'request':
+                                // Registra a solicitação no Redis
+                                await this.redisStore.set(`waiting_order:${threadId}`, 'payment_proof', 1800);
+                                if (parsedArgs.order_number) {
+                                    await this.redisStore.set(`pending_order:${threadId}`, parsedArgs.order_number, 1800);
+                                }
+
+                                output = JSON.stringify({
+                                    error: false,
+                                    message: 'Por favor, me envie:\n1. Uma foto clara do comprovante de pagamento\n2. O número do seu pedido\n\nAssim que receber, irei encaminhar para nossa equipe financeira. 📎'
+                                });
+                                break;
+
+                            case 'validate':
+                                // Verifica se há uma solicitação pendente
+                                const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
+                                const pendingOrder = await this.redisStore.get(`pending_order:${threadId}`);
+
+                                output = JSON.stringify({
+                                    error: !waiting,
+                                    message: waiting ? 
+                                        `Aguardando comprovante${pendingOrder ? ` para o pedido #${pendingOrder}` : ''}. Por favor, envie uma foto clara do comprovante.` :
+                                        'Não há solicitação de comprovante pendente.'
+                                });
+                                break;
+
+                            case 'cancel':
+                                // Remove a solicitação do Redis
+                                await this.redisStore.del(`waiting_order:${threadId}`);
+                                await this.redisStore.del(`pending_order:${threadId}`);
+
+                                output = JSON.stringify({
+                                    error: false,
+                                    message: 'Solicitação de comprovante cancelada.'
+                                });
+                                break;
+
+                            case 'process':
+                                if (!parsedArgs.order_number) {
+                                    output = JSON.stringify({
+                                        error: true,
+                                        message: 'Número do pedido não fornecido.'
+                                    });
+                                    break;
+                                }
+
+                                // Recupera a URL da imagem do Redis
+                                const imageUrl = await this.redisStore.get(`pending_proof:${threadId}`);
+                                if (!imageUrl) {
+                                    output = JSON.stringify({
+                                        error: true,
+                                        message: 'Comprovante não encontrado. Por favor, envie o comprovante novamente.'
+                                    });
+                                    break;
+                                }
+
+                                try {
+                                    // Processa o comprovante
+                                    const result = await this.orderValidationService.processPaymentProof(imageUrl, parsedArgs.order_number);
+
+                                    // Limpa o comprovante pendente após processamento bem-sucedido
+                                    await this.redisStore.del(`pending_proof:${threadId}`);
+
+                                    output = JSON.stringify({
+                                        error: false,
+                                        message: result
+                                    });
+                                } catch (error) {
+                                    console.error('[OpenAI] Erro ao processar comprovante:', error);
+                                    output = JSON.stringify({
+                                        error: true,
+                                        message: 'Erro ao processar o comprovante. Por favor, tente novamente.'
+                                    });
+                                }
+                                break;
+
+                            default:
+                                output = JSON.stringify({
+                                    error: true,
+                                    message: 'Ação inválida para gerenciamento de comprovantes.'
+                                });
+                        }
+                        break;
+
+                    case 'forward_to_financial':
+                        if (!parsedArgs.reason || !parsedArgs.customer_message) {
+                            output = JSON.stringify({
+                                error: true,
+                                message: 'Por favor, forneça o motivo do encaminhamento e a mensagem do cliente.'
+                            });
+                            break;
+                        }
+
+                        const success = await this.financialService.forwardCase({
+                            order_number: parsedArgs.order_number,
+                            tracking_code: parsedArgs.tracking_code,
+                            reason: parsedArgs.reason,
+                            customer_message: parsedArgs.customer_message,
+                            priority: parsedArgs.priority || 'medium',
+                            additional_info: parsedArgs.additional_info
+                        });
+
+                        output = JSON.stringify({
+                            error: !success,
+                            message: success 
+                                ? 'Caso encaminhado com sucesso para o setor financeiro. Em breve entrarão em contato.'
+                                : 'Não foi possível encaminhar o caso no momento. Por favor, tente novamente mais tarde.'
+                        });
+                        break;
+
+                    default:
+                        console.warn('[OpenAI] Função desconhecida:', name);
+                        output = JSON.stringify({
+                            error: true,
+                            message: 'Função não implementada'
+                        });
+                }
+
+                console.log(`[OpenAI] Resultado da função ${name}:`, output);
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output
+                });
+            } catch (error) {
+                console.error(`[OpenAI] Erro ao executar função ${name}:`, error);
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: JSON.stringify({
+                        error: true,
+                        message: `Erro ao executar ${name}: ${error.message}`
+                    })
+                });
+            }
+        }
+
+        return toolOutputs;
+    }
+
     /**
      * Cancela um run ativo
      * @param {string} threadId - ID do thread
@@ -462,22 +896,16 @@ class OpenAIService {
     }
 
     /**
-     * Deleta um thread existente
-     * @param {string} threadId - ID do thread a ser deletado
-     * @returns {Promise<boolean>} Sucesso da operação
+     * Deleta um thread do OpenAI
+     * @param {string} threadId - ID do thread para deletar
      */
     async deleteThread(threadId) {
         try {
-            if (!threadId) return false;
             await this.client.beta.threads.del(threadId);
-            return true;
+            console.log('[OpenAI] Thread deletado com sucesso:', threadId);
         } catch (error) {
-            console.error('[OpenAI] Erro ao deletar thread:', {
-                threadId,
-                erro: error.message,
-                timestamp: new Date().toISOString()
-            });
-            return false;
+            console.error('[OpenAI] Erro ao deletar thread:', error);
+            // Não lança erro pois o thread pode não existir
         }
     }
 

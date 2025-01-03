@@ -637,6 +637,23 @@ class RedisStore {
             throw error;
         }
     }
+
+    /**
+     * Deleta todo o contexto de um usuário
+     * @param {string} userId - ID do usuário
+     */
+    async deleteUserContext(userId) {
+        try {
+            const keys = await this.client.keys(`*:${userId}*`);
+            if (keys.length > 0) {
+                await this.client.del(...keys);
+                console.log('[Redis] Contexto do usuário deletado:', userId);
+            }
+        } catch (error) {
+            console.error('[Redis] Erro ao deletar contexto do usuário:', error);
+            // Não lança erro para manter a consistência com outros métodos de delete
+        }
+    }
 }
 
 module.exports = { RedisStore };

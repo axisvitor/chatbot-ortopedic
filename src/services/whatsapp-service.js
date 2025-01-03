@@ -713,6 +713,7 @@ class WhatsAppService {
 
             // Extrai o remetente
             const from = message.key?.remoteJid?.replace('@s.whatsapp.net', '');
+
             if (!from) {
                 throw new Error('Remetente não encontrado na mensagem');
             }
@@ -763,9 +764,8 @@ class WhatsAppService {
             console.log('📩 [WhatsApp] Mensagem recebida:', {
                 messageId: message.key?.id,
                 from: message.key?.remoteJid,
-                pushName: message.pushName,
-                type: message.type || 'unknown',
-                timestamp: new Date().toISOString()
+                type: message.type,
+                timestamp: message.messageTimestamp
             });
 
             // Extrai e valida o remetente
@@ -780,10 +780,14 @@ class WhatsAppService {
                 return;
             }
 
-            // Se for mensagem de grupo, ignora
-            if (isGroup) {
-                console.log('👥 [WhatsApp] Ignorando mensagem de grupo');
-                return;
+            // Verifica se é uma mensagem de texto e se é o comando #resetid
+            if (message.type === 'text' && message.data?.toLowerCase() === '#resetid') {
+                await this.redisStore.deleteUserContext(from);
+                await this.openAIService.deleteThread(from);
+                return {
+                    type: 'text',
+                    message: '🔄 Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.'
+                };
             }
 
             // Extrai a mensagem real
