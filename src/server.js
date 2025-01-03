@@ -160,6 +160,13 @@ async function initializeServices() {
                 throw new Error('WhatsAppService não inicializou corretamente');
             }
 
+            // Inicializa outros serviços
+            groqServices = new GroqServices();
+            console.log('✅ GroqServices inicializado');
+
+            audioService = new AudioService(groqServices, whatsAppService);
+            console.log('✅ AudioService inicializado');
+
             // Inicializa os serviços de IA
             const aiServices = new AIServices(
                 whatsAppService,
@@ -171,13 +178,6 @@ async function initializeServices() {
                 orderValidationService
             );
             console.log('✅ AIServices inicializado');
-
-            // Inicializa outros serviços
-            groqServices = new GroqServices();
-            console.log('✅ GroqServices inicializado');
-
-            audioService = new AudioService(groqServices, whatsAppService);
-            console.log('✅ AudioService inicializado');
 
             imageService = new ImageService(whatsAppService);
             console.log('✅ ImageService inicializado');
