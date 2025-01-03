@@ -907,8 +907,11 @@ class OpenAIService {
     async getOrCreateThreadForCustomer(customerId) {
         try {
             // Tenta recuperar thread do Redis
-            const threadId = await this.redisStore.get(`thread:${customerId}`);
+            let threadId = await this.redisStore.get(`thread:${customerId}`);
+            
+            // Remove aspas extras se existirem
             if (threadId) {
+                threadId = threadId.replace(/^"|"$/g, '');
                 console.log('[OpenAI] Thread existente recuperada do Redis:', {
                     customerId,
                     threadId
@@ -919,7 +922,7 @@ class OpenAIService {
             // Se não existir, cria nova thread
             const thread = await this.client.beta.threads.create();
             
-            // Salva no Redis
+            // Salva no Redis sem aspas extras
             await this.redisStore.set(`thread:${customerId}`, thread.id);
             
             console.log('[OpenAI] Nova thread criada e salva no Redis:', {
