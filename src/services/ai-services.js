@@ -120,9 +120,12 @@ class AIServices {
                     messageText = message.text;
                 }
 
+                // Limpa o número do WhatsApp removendo o sufixo @s.whatsapp.net
+                const phoneNumber = message.from.replace('@s.whatsapp.net', '');
+
                 console.log('[AIServices] Texto extraído:', { messageText });
 
-                const response = await this.openAIService.processCustomerMessage(message.from, {
+                const response = await this.openAIService.processCustomerMessage(phoneNumber, {
                     role: 'user',
                     content: [
                         {
@@ -135,17 +138,17 @@ class AIServices {
                 console.log('[AIServices] Resposta do OpenAI:', { response });
 
                 if (response) {
-                    await this.whatsAppService.sendText(message.from, response);
+                    await this.whatsAppService.sendText(phoneNumber, response);
                 } else {
                     console.error('[AIServices] Resposta vazia do OpenAI');
-                    await this.whatsAppService.sendText(message.from, 
+                    await this.whatsAppService.sendText(phoneNumber, 
                         'Desculpe, estou com dificuldades para processar sua mensagem. Pode tentar novamente?');
                 }
 
                 return {
                     type: 'text',
                     response: response,
-                    from: message.from
+                    from: phoneNumber
                 };
             }
 

@@ -411,7 +411,7 @@ class OpenAIService {
             }
 
             if (run.status === 'completed') {
-                const messages = await this.listMessages(threadId);
+                const messages = await this.client.beta.threads.messages.list(threadId);
                 if (messages.data && messages.data.length > 0) {
                     const content = messages.data[0].content[0];
                     if (content && content.text && typeof content.text.value === 'string') {
@@ -419,7 +419,9 @@ class OpenAIService {
                         return content.text.value;
                     }
                     console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
+                    throw new Error('Não foi possível extrair a resposta da mensagem');
                 }
+                throw new Error('Não foi possível extrair a resposta da mensagem');
             }
 
             if (run.status === 'failed') {
