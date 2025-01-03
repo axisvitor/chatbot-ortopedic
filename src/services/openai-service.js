@@ -886,52 +886,53 @@ class OpenAIService {
         }
     }
 
-    /**
-     * Processa uma mensagem do cliente
-     * @param {string} customerId - ID do cliente
-     * @param {string|Object} message - Mensagem do cliente (texto ou objeto com imagem)
-     * @returns {Promise<string>} Resposta do assistant
-     */
     async processCustomerMessage(customerId, message) {
         try {
-            // Se a mensagem for um objeto com imagens, usa o método específico
-            if (typeof message === 'object' && (message.images || message.image)) {
-                const images = message.images || [message.image];
-                return this.processCustomerMessageWithImage(
-                    customerId,
-                    message.text,
-                    images
-                );
-            }
+            console.log('[OpenAI] Processando mensagem do cliente:', {
+                customerId,
+                messageType: Array.isArray(message.content) ? 'array' : typeof message.content,
+                contentLength: Array.isArray(message.content) ? 
+                    JSON.stringify(message.content).length : 
+                    message.content?.length
+            });
 
-            // Processa mensagem de texto normal
+            // Obtém ou cria thread para o cliente
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
-
-            if (await this.hasActiveRun(threadId)) {
-                this.queueMessage(threadId, { role: "user", content: message });
-                return "Aguarde um momento enquanto processo sua mensagem anterior...";
+            if (!threadId) {
+                throw new Error('Não foi possível criar/recuperar thread para o cliente');
             }
 
-            // Formata o conteúdo da mensagem
-            let formattedContent;
-            if (typeof message === 'string') {
-                formattedContent = [{ type: 'text', text: message }];
-            } else if (typeof message === 'object' && message.content) {
-                formattedContent = message.content;
-            } else {
-                formattedContent = [{ type: 'text', text: String(message) }];
-            }
-
+            // Adiciona a mensagem e executa o assistant
             const response = await this.addMessageAndRun(threadId, {
-                role: "user",
-                content: formattedContent
+                role: message.role || 'user',
+                content: message.content
+            });
+
+            if (!response) {
+                console.error('[OpenAI] Resposta vazia do assistant:', {
+                    customerId,
+                    threadId
+                });
+                return 'Desculpe, estou com dificuldades técnicas no momento. Pode tentar novamente em alguns minutos?';
+            }
+
+            console.log('[OpenAI] Resposta gerada com sucesso:', {
+                customerId,
+                threadId,
+                responseLength: response.length
             });
 
             return response;
 
         } catch (error) {
-            console.error('❌ Erro ao processar mensagem do cliente:', error);
-            throw error;
+            console.error('[OpenAI] Erro ao processar mensagem do cliente:', {
+                customerId,
+                erro: error.message,
+                stack: error.stack
+            });
+
+            // Retorna mensagem amigável em caso de erro
+            return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.';
         }
     }
 

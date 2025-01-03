@@ -63,7 +63,11 @@ class AIServices {
 
             // Se for mensagem de imagem
             if (message.type === 'image') {
-                return this.handleImageMessage(message);
+                const result = await this.handleImageMessage(message);
+                if (result?.response) {
+                    await this.whatsAppService.sendText(result.from, result.response);
+                }
+                return result;
             }
 
             // Se for mensagem de áudio
@@ -72,6 +76,8 @@ class AIServices {
                 
                 // Se houve erro no processamento do áudio
                 if (result.error) {
+                    await this.whatsAppService.sendText(message.from, 
+                        'Desculpe, não consegui processar seu áudio. Pode tentar enviar novamente?');
                     return {
                         type: 'error',
                         message: result.message,
@@ -89,6 +95,10 @@ class AIServices {
                         }
                     ]
                 });
+
+                if (response) {
+                    await this.whatsAppService.sendText(message.from, response);
+                }
 
                 return {
                     type: 'audio',
@@ -110,6 +120,8 @@ class AIServices {
                     messageText = message.text;
                 }
 
+                console.log('[AIServices] Texto extraído:', { messageText });
+
                 const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
                     content: [
@@ -119,6 +131,17 @@ class AIServices {
                         }
                     ]
                 });
+
+                console.log('[AIServices] Resposta do OpenAI:', { response });
+
+                if (response) {
+                    await this.whatsAppService.sendText(message.from, response);
+                } else {
+                    console.error('[AIServices] Resposta vazia do OpenAI');
+                    await this.whatsAppService.sendText(message.from, 
+                        'Desculpe, estou com dificuldades para processar sua mensagem. Pode tentar novamente?');
+                }
+
                 return {
                     type: 'text',
                     response: response,
@@ -130,6 +153,11 @@ class AIServices {
 
         } catch (error) {
             console.error('❌ [AIServices] Erro ao processar mensagem:', error);
+            try {
+                await this.sendErrorMessage(message.from, error);
+            } catch (sendError) {
+                console.error('❌ [AIServices] Erro ao enviar mensagem de erro:', sendError);
+            }
             throw error;
         }
     }
