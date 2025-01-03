@@ -575,6 +575,68 @@ class RedisStore {
             return false;
         }
     }
+
+    async getAssistantThread(customerId) {
+        try {
+            const key = `assistant:thread:${customerId}`;
+            const thread = await this.client.get(key);
+            if (thread) {
+                return JSON.parse(thread);
+            }
+            return null;
+        } catch (error) {
+            console.error('[Redis] Erro ao obter thread do assistant:', error);
+            throw error;
+        }
+    }
+
+    async setAssistantThread(customerId, threadData) {
+        try {
+            const key = `assistant:thread:${customerId}`;
+            await this.client.set(key, JSON.stringify(threadData));
+            // Define TTL de 60 dias
+            await this.client.expire(key, 60 * 24 * 60 * 60);
+        } catch (error) {
+            console.error('[Redis] Erro ao salvar thread do assistant:', error);
+            throw error;
+        }
+    }
+
+    async getAssistantRun(threadId) {
+        try {
+            const key = `assistant:run:${threadId}`;
+            const run = await this.client.get(key);
+            if (run) {
+                return JSON.parse(run);
+            }
+            return null;
+        } catch (error) {
+            console.error('[Redis] Erro ao obter run do assistant:', error);
+            throw error;
+        }
+    }
+
+    async setAssistantRun(threadId, runData) {
+        try {
+            const key = `assistant:run:${threadId}`;
+            await this.client.set(key, JSON.stringify(runData));
+            // Define TTL de 1 hora
+            await this.client.expire(key, 60 * 60);
+        } catch (error) {
+            console.error('[Redis] Erro ao salvar run do assistant:', error);
+            throw error;
+        }
+    }
+
+    async removeAssistantRun(threadId) {
+        try {
+            const key = `assistant:run:${threadId}`;
+            await this.client.del(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao remover run do assistant:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = { RedisStore };

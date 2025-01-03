@@ -268,115 +268,64 @@ class OpenAIService {
      */
     async addMessageAndRun(threadId, message) {
         try {
-            if (await this.hasActiveRun(threadId)) {
-                console.log('[OpenAI] Run ativo detectado, adicionando mensagem à fila');
-                this.queueMessage(threadId, message);
-                return null;
+            console.log('[OpenAI] Iniciando processamento:', { threadId });
+
+            // Verifica se já existe um run ativo
+            const activeRun = await this.redisStore.getAssistantRun(threadId);
+            if (activeRun) {
+                console.log('[OpenAI] Run ativo encontrado:', { threadId, runId: activeRun.id });
+                return 'Aguarde um momento, ainda estou processando sua mensagem anterior...';
             }
 
-            // Verifica se é um comando especial
-            if (typeof message.content === 'string' && message.content.startsWith('#')) {
-                const result = await this.handleCommand(threadId, message.content);
-                if (result) {
-                    return result;
-                }
-            }
-
-            console.log(`[OpenAI] Processando mensagem para thread ${threadId}:`, 
-                message.content.length > 100 ? message.content.substring(0, 100) + '...' : message.content);
-
+            // Adiciona a mensagem à thread
             await this.addMessage(threadId, message);
-            const run = await this.runAssistant(threadId);
-            await this.registerActiveRun(threadId, run.id);
-            
-            try {
-                const response = await this.waitForResponse(threadId, run.id);
-                return response;
-            } finally {
-                await this.removeActiveRun(threadId); // Garante remoção do run mesmo em caso de erro
-            }
-        } catch (error) {
-            await this.removeActiveRun(threadId); // Garante remoção do run em caso de erro na criação
-            throw error;
-        }
-    }
 
-    /**
-     * Adiciona uma mensagem ao thread
-     * @param {string} threadId - ID do thread
-     * @param {Object} message - Mensagem a ser adicionada
-     * @returns {Promise<Object>} Mensagem criada
-     */
-    async addMessage(threadId, message) {
-        try {
-            console.log('[OpenAI] Adicionando mensagem:', {
-                threadId,
-                role: message.role,
-                contentType: Array.isArray(message.content) ? 'array' : typeof message.content,
-                contentLength: Array.isArray(message.content) ? 
-                    JSON.stringify(message.content).length : 
-                    message.content?.length
-            });
-
-            // Valida a mensagem
-            if (!message.content) {
-                throw new Error('Conteúdo da mensagem não pode ser vazio');
-            }
-
-            // Se o conteúdo for uma string, converte para o formato esperado
-            let content = message.content;
-            if (typeof content === 'string') {
-                content = [{ type: 'text', text: content }];
-            }
-
-            // Valida o formato do conteúdo
-            if (!Array.isArray(content)) {
-                throw new Error('Conteúdo da mensagem deve ser uma string ou um array de objetos');
-            }
-
-            // Valida cada item do array
-            for (let i = 0; i < content.length; i++) {
-                const item = content[i];
-                if (!item.type || (item.type === 'text' && !item.text) || 
-                    (item.type === 'image_url' && !item.image_url?.url)) {
-                    throw new Error(`Item ${i} do conteúdo inválido: deve ter type e text/image_url`);
-                }
-            }
-
-            // Cria a mensagem
-            await this.client.beta.threads.messages.create(threadId, {
-                role: message.role,
-                content: content
-            });
-
-        } catch (error) {
-            console.error('[OpenAI] Erro ao adicionar mensagem:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Executa o assistant em uma thread
-     * @param {string} threadId - ID da thread
-     * @returns {Promise<Object>} Run criado
-     */
-    async runAssistant(threadId) {
-        try {
+            // Cria um run com o assistente
             const run = await this.client.beta.threads.runs.create(threadId, {
-                assistant_id: this.assistantId,
-                tools: this.functions.map(f => ({
-                    type: "function",
-                    function: {
-                        name: f.name,
-                        description: f.description,
-                        parameters: f.parameters
-                    }
-                }))
+                assistant_id: this.assistantId
             });
 
-            return run;
+            // Salva o run no Redis
+            await this.redisStore.setAssistantRun(threadId, {
+                id: run.id,
+                status: run.status,
+                createdAt: new Date().toISOString()
+            });
+
+            console.log('[OpenAI] Run criado:', { threadId, runId: run.id });
+
+            // Aguarda a conclusão do run
+            const response = await this.waitForRunCompletion(threadId, run.id);
+            
+            // Remove o run do Redis após a conclusão
+            await this.redisStore.removeAssistantRun(threadId);
+            
+            if (!response) {
+                throw new Error('Tempo limite excedido aguardando resposta do assistente');
+            }
+
+            // Obtém as mensagens após o processamento
+            const messages = await this.client.beta.threads.messages.list(threadId);
+            
+            // Retorna a última mensagem do assistente
+            const assistantMessages = messages.data.filter(msg => msg.role === 'assistant');
+            if (assistantMessages.length === 0) {
+                throw new Error('Nenhuma resposta do assistente encontrada');
+            }
+
+            const lastMessage = assistantMessages[0];
+            console.log('[OpenAI] Resposta do assistente:', {
+                threadId,
+                messageId: lastMessage.id,
+                content: lastMessage.content
+            });
+
+            return lastMessage.content[0].text.value;
+
         } catch (error) {
-            console.error(' Erro ao executar assistant:', error);
+            // Remove o run do Redis em caso de erro
+            await this.redisStore.removeAssistantRun(threadId);
+            console.error('[OpenAI] Erro ao processar mensagem:', error);
             throw error;
         }
     }
@@ -907,23 +856,23 @@ class OpenAIService {
     async getOrCreateThreadForCustomer(customerId) {
         try {
             // Tenta recuperar thread do Redis
-            let threadId = await this.redisStore.get(`thread:${customerId}`);
-            
-            // Remove aspas extras se existirem
-            if (threadId) {
-                threadId = threadId.replace(/^"|"$/g, '');
+            const threadData = await this.redisStore.getAssistantThread(customerId);
+            if (threadData) {
                 console.log('[OpenAI] Thread existente recuperada do Redis:', {
                     customerId,
-                    threadId
+                    threadId: threadData.id
                 });
-                return threadId;
+                return threadData.id;
             }
 
             // Se não existir, cria nova thread
             const thread = await this.client.beta.threads.create();
             
-            // Salva no Redis sem aspas extras
-            await this.redisStore.set(`thread:${customerId}`, thread.id);
+            // Salva no Redis
+            await this.redisStore.setAssistantThread(customerId, {
+                id: thread.id,
+                createdAt: new Date().toISOString()
+            });
             
             console.log('[OpenAI] Nova thread criada e salva no Redis:', {
                 customerId,
@@ -1077,6 +1026,125 @@ class OpenAIService {
             return null;
         } catch (error) {
             console.error('[OpenAI] Erro ao processar comando:', error);
+            throw error;
+        }
+    }
+
+    async waitForRunCompletion(threadId, runId, maxAttempts = 60) {
+        try {
+            console.log('[OpenAI] Aguardando conclusão do run:', { threadId, runId });
+            
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                const run = await this.client.beta.threads.runs.retrieve(threadId, runId);
+                
+                console.log('[OpenAI] Status do run:', { 
+                    threadId, 
+                    runId, 
+                    status: run.status,
+                    attempt: attempt + 1 
+                });
+
+                if (run.status === 'completed') {
+                    return true;
+                }
+
+                if (run.status === 'failed' || run.status === 'cancelled' || run.status === 'expired') {
+                    throw new Error(`Run falhou com status: ${run.status}`);
+                }
+
+                // Espera 1 segundo antes de verificar novamente
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            return false;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao aguardar conclusão do run:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Adiciona uma mensagem ao thread
+     * @param {string} threadId - ID do thread
+     * @param {Object} message - Mensagem a ser adicionada
+     * @returns {Promise<Object>} Mensagem criada
+     */
+    async addMessage(threadId, message) {
+        try {
+            console.log('[OpenAI] Adicionando mensagem:', {
+                threadId,
+                role: message.role,
+                contentType: Array.isArray(message.content) ? 'array' : typeof message.content,
+                contentLength: Array.isArray(message.content) ? 
+                    JSON.stringify(message.content).length : 
+                    message.content?.length
+            });
+
+            // Valida a mensagem
+            if (!message.content) {
+                throw new Error('Conteúdo da mensagem não pode ser vazio');
+            }
+
+            // Se o conteúdo for uma string, converte para o formato esperado
+            let content = message.content;
+            if (typeof content === 'string') {
+                content = [{ type: 'text', text: content }];
+            }
+
+            // Valida o formato do conteúdo
+            if (!Array.isArray(content)) {
+                throw new Error('Conteúdo da mensagem deve ser uma string ou um array de objetos');
+            }
+
+            // Valida cada item do array
+            for (let i = 0; i < content.length; i++) {
+                const item = content[i];
+                if (!item.type || (item.type === 'text' && !item.text)) {
+                    throw new Error(`Item ${i} do conteúdo inválido: deve ter type e text`);
+                }
+            }
+
+            // Cria a mensagem
+            const result = await this.client.beta.threads.messages.create(threadId, {
+                role: message.role,
+                content: content
+            });
+
+            console.log('[OpenAI] Mensagem adicionada com sucesso:', {
+                threadId,
+                messageId: result.id
+            });
+
+            return result;
+
+        } catch (error) {
+            console.error('[OpenAI] Erro ao adicionar mensagem:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Executa o assistant em uma thread
+     * @param {string} threadId - ID da thread
+     * @returns {Promise<Object>} Run criado
+     */
+    async runAssistant(threadId) {
+        try {
+            const run = await this.client.beta.threads.runs.create(threadId, {
+                assistant_id: this.assistantId,
+                tools: this.functions.map(f => ({
+                    type: "function",
+                    function: {
+                        name: f.name,
+                        description: f.description,
+                        parameters: f.parameters
+                    }
+                }))
+            });
+
+            return run;
+        } catch (error) {
+            console.error('[OpenAI] Erro ao executar assistant:', error);
             throw error;
         }
     }
