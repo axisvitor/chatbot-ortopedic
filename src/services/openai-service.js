@@ -8,6 +8,12 @@ const { NuvemshopService } = require('./nuvemshop-service');
 const { FinancialService } = require('./financial-service');
 
 class OpenAIService {
+    /**
+     * @param {NuvemshopService} nuvemshopService - Serviço de integração com a Nuvemshop
+     * @param {TrackingService} trackingService - Serviço de tracking
+     * @param {BusinessHoursService} businessHoursService - Serviço de horário de atendimento
+     * @param {OrderValidationService} orderValidationService - Serviço de validação de pedidos
+     */
     constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService) {
         this.client = new OpenAI({
             apiKey: OPENAI_CONFIG.apiKey

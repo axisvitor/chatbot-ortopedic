@@ -6,6 +6,10 @@ const { WhatsAppImageService } = require('./whatsapp-image-service');
 const { WhatsAppAudioService } = require('./whatsapp-audio-service');
 const { MediaManagerService } = require('./media-manager-service');
 const { OpenAIService } = require('./openai-service');
+const { TrackingService } = require('./tracking-service');
+const { NuvemshopService } = require('./nuvemshop-service');
+const { BusinessHoursService } = require('./business-hours');
+const { OrderValidationService } = require('./order-validation-service');
 
 class ServiceContainer {
     constructor() {
@@ -14,16 +18,31 @@ class ServiceContainer {
     }
 
     _initializeServices() {
-        // Inicializa serviços base
+        // Inicializa serviços base primeiro
+        const trackingService = new TrackingService();
         const imageService = new WhatsAppImageService();
         const audioService = new WhatsAppAudioService();
         const mediaManager = new MediaManagerService(audioService, imageService);
-        const openaiService = new OpenAIService();
+        const nuvemshopService = new NuvemshopService();
+        const businessHoursService = new BusinessHoursService();
+        const orderValidationService = new OrderValidationService();
 
-        // Registra no container
+        // Registra serviços base
+        this.register('tracking', trackingService);
         this.register('whatsappImage', imageService);
         this.register('whatsappAudio', audioService);
         this.register('mediaManager', mediaManager);
+        this.register('nuvemshop', nuvemshopService);
+        this.register('businessHours', businessHoursService);
+        this.register('orderValidation', orderValidationService);
+
+        // Inicializa e registra serviços que dependem dos base
+        const openaiService = new OpenAIService(
+            nuvemshopService,
+            trackingService,
+            businessHoursService,
+            orderValidationService
+        );
         this.register('openai', openaiService);
     }
 

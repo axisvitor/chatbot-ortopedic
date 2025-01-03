@@ -25,9 +25,6 @@ class TrackingService {
             ttl: 30 * 60, // 30 minutos
             prefix: 'tracking:'
         };
-        
-        // Registra este serviço no container
-        container.register('tracking', this);
     }
 
     /**
