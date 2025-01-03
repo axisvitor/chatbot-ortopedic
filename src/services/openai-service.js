@@ -323,11 +323,13 @@ class OpenAIService {
             }
 
             // Valida cada item do array
-            content.forEach((item, index) => {
-                if (!item.type || !item.text) {
-                    throw new Error(`Item ${index} do conteúdo inválido: deve ter type e text`);
+            for (let i = 0; i < content.length; i++) {
+                const item = content[i];
+                if (!item.type || (item.type === 'text' && !item.text) || 
+                    (item.type === 'image_url' && !item.image_url?.url)) {
+                    throw new Error(`Item ${i} do conteúdo inválido: deve ter type e text/image_url`);
                 }
-            });
+            }
 
             // Cria a mensagem
             await this.client.beta.threads.messages.create(threadId, {
@@ -951,9 +953,19 @@ class OpenAIService {
                 return "Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
+            // Formata o conteúdo da mensagem
+            let formattedContent;
+            if (typeof message === 'string') {
+                formattedContent = [{ type: 'text', text: message }];
+            } else if (typeof message === 'object' && message.content) {
+                formattedContent = message.content;
+            } else {
+                formattedContent = [{ type: 'text', text: String(message) }];
+            }
+
             const response = await this.addMessageAndRun(threadId, {
                 role: "user",
-                content: message
+                content: formattedContent
             });
 
             return response;
