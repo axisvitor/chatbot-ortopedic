@@ -2,18 +2,41 @@
  * Container para gerenciar instâncias de serviços
  * Evita dependências circulares mantendo uma única instância de cada serviço
  */
+const { WhatsAppImageService } = require('./whatsapp-image-service');
+const { WhatsAppAudioService } = require('./whatsapp-audio-service');
+const { MediaManagerService } = require('./media-manager-service');
+const { OpenAIService } = require('./openai-service');
+
 class ServiceContainer {
     constructor() {
         this.services = new Map();
+        this._initializeServices();
+    }
+
+    _initializeServices() {
+        // Inicializa serviços base
+        const imageService = new WhatsAppImageService();
+        const audioService = new WhatsAppAudioService();
+        const mediaManager = new MediaManagerService(audioService, imageService);
+        const openaiService = new OpenAIService();
+
+        // Registra no container
+        this.register('whatsappImage', imageService);
+        this.register('whatsappAudio', audioService);
+        this.register('mediaManager', mediaManager);
+        this.register('openai', openaiService);
     }
 
     /**
      * Registra um serviço no container
      * @param {string} name - Nome do serviço
-     * @param {Object} instance - Instância do serviço
+     * @param {Object} service - Instância do serviço
      */
-    register(name, instance) {
-        this.services.set(name, instance);
+    register(name, service) {
+        if (this.services.has(name)) {
+            console.warn(`[Container] Serviço '${name}' já registrado, sobrescrevendo...`);
+        }
+        this.services.set(name, service);
     }
 
     /**
@@ -22,7 +45,11 @@ class ServiceContainer {
      * @returns {Object} Instância do serviço
      */
     get(name) {
-        return this.services.get(name);
+        const service = this.services.get(name);
+        if (!service) {
+            throw new Error(`[Container] Serviço '${name}' não encontrado`);
+        }
+        return service;
     }
 
     /**
