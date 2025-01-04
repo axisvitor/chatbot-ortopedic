@@ -39,13 +39,13 @@ class OpenAIService {
         this.functions = [
             {
                 name: "check_order",
-                description: "Busca informações de um pedido pelo número",
+                description: "Verifica informações básicas de pedidos como status, pagamento e produtos",
                 parameters: {
                     type: "object",
                     properties: {
                         order_number: {
                             type: "string",
-                            description: "Número do pedido a ser consultado"
+                            description: "Número do pedido (ex: #123456)"
                         }
                     },
                     required: ["order_number"]
@@ -53,16 +53,30 @@ class OpenAIService {
             },
             {
                 name: "check_tracking",
-                description: "Verifica o status de rastreamento de um pedido",
+                description: "Busca status atualizado de entrega diretamente na transportadora",
                 parameters: {
                     type: "object",
                     properties: {
                         tracking_code: {
                             type: "string",
-                            description: "Código de rastreio para consulta"
+                            description: "Código de rastreio para consulta (ex: NM123456789BR)"
                         }
                     },
                     required: ["tracking_code"]
+                }
+            },
+            {
+                name: "extract_order_number",
+                description: "Identifica e valida números de pedido no texto do cliente",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        text: {
+                            type: "string",
+                            description: "Texto do cliente para extrair número do pedido"
+                        }
+                    },
+                    required: ["text"]
                 }
             },
             {
@@ -74,50 +88,8 @@ class OpenAIService {
                 }
             },
             {
-                name: "extract_order_number",
-                description: "Tenta extrair um número de pedido do texto do usuário",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        text: {
-                            type: "string",
-                            description: "Texto do usuário para extrair número do pedido"
-                        }
-                    },
-                    required: ["text"]
-                }
-            },
-            {
-                name: "request_payment_proof",
-                description: "Gerencia solicitações de comprovante de pagamento",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        action: {
-                            type: "string",
-                            description: "Ação a ser executada",
-                            enum: ["request", "validate", "cancel", "process"]
-                        },
-                        order_number: {
-                            type: "string",
-                            description: "Número do pedido relacionado"
-                        },
-                        image_url: {
-                            type: "string",
-                            description: "URL da imagem do comprovante (apenas para action=process)"
-                        },
-                        status: {
-                            type: "string",
-                            description: "Status atual do processamento",
-                            enum: ["pending", "processing", "approved", "rejected"]
-                        }
-                    },
-                    required: ["action"]
-                }
-            },
-            {
                 name: "forward_to_financial",
-                description: "Encaminha um caso para análise do setor financeiro",
+                description: "Encaminha casos para análise do setor financeiro",
                 parameters: {
                     type: "object",
                     properties: {
@@ -150,6 +122,34 @@ class OpenAIService {
                         }
                     },
                     required: ["reason", "customer_message"]
+                }
+            },
+            {
+                name: "request_payment_proof",
+                description: "Gerencia o fluxo de solicitação e processamento de comprovantes de pagamento",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        action: {
+                            type: "string",
+                            description: "Ação a ser executada",
+                            enum: ["request", "validate", "process", "cancel"]
+                        },
+                        order_number: {
+                            type: "string",
+                            description: "Número do pedido relacionado"
+                        },
+                        status: {
+                            type: "string",
+                            description: "Status atual do processamento",
+                            enum: ["pending", "processing", "approved", "rejected"]
+                        },
+                        image_url: {
+                            type: "string",
+                            description: "URL da imagem do comprovante (apenas para action=process)"
+                        }
+                    },
+                    required: ["action"]
                 }
             }
         ];
@@ -469,30 +469,23 @@ class OpenAIService {
     async handleToolCalls(run, threadId) {
         if (!run?.required_action?.submit_tool_outputs?.tool_calls) {
             logger.warn('NoToolCalls', { threadId });
-            console.warn('[OpenAI] Nenhuma tool call encontrada');
             return [];
         }
 
         const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
-        logger.info('ProcessingToolCalls', {
-            threadId,
-            tools: toolCalls.map(t => t.function.name)
-        });
-        console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => t.function.name));
+        logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
         
         const toolOutputs = [];
 
         for (const toolCall of toolCalls) {
             const { name, arguments: args } = toolCall.function;
             logger.info('ExecutingTool', { threadId, tool: name, args });
-            console.log(`[OpenAI] Executando função ${name} com args:`, args);
             
             let parsedArgs;
             try {
                 parsedArgs = JSON.parse(args);
             } catch (error) {
                 logger.error('ErrorParsingToolArguments', { threadId, tool: name, error });
-                console.error('[OpenAI] Erro ao parsear argumentos:', error);
                 continue;
             }
 
@@ -500,435 +493,104 @@ class OpenAIService {
             try {
                 switch (name) {
                     case 'check_order':
-                        if (!parsedArgs.order_number) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: 'Por favor, me informe o número do pedido que você quer consultar.'
-                            });
-                            break;
-                        }
-                        const order = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
-                        if (!order) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: `Desculpe, não encontrei nenhum pedido com o número ${parsedArgs.order_number}. Poderia verificar se o número está correto?`
-                            });
-                        } else {
-                            // Formata a data no padrão brasileiro
-                            const orderDate = new Date(order.created_at).toLocaleString('pt-BR', {
-                                day: '2-digit',
-                                month: '2-digit',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                            });
-
-                            // Lista de produtos com tratamento seguro de preço
-                            const products = order.products.map(product => {
-                                const price = typeof product.price === 'number' ? 
-                                    product.price.toFixed(2) : 
-                                    String(product.price).replace(/[^\d.,]/g, '');
-                                
-                                return `▫ ${product.quantity}x ${product.name}` + 
-                                       `${product.variant_name ? ` (${product.variant_name})` : ''}` +
-                                       ` - R$ ${price}`;
-                            }).join('\n');
-
-                            // Formata o valor total com segurança
-                            const total = typeof order.total === 'number' ? 
-                                order.total.toFixed(2) : 
-                                String(order.total).replace(/[^\d.,]/g, '');
-
-                            // Verifica status do rastreamento se disponível
-                            let deliveryStatus = '';
-                            if (order.shipping_tracking_number) {
-                                try {
-                                    const tracking = await this.trackingService.getTrackingInfo(order.shipping_tracking_number);
-                                    if (tracking && tracking.latest_event_info) {
-                                        const trackingDate = new Date(tracking.latest_event_time).toLocaleString('pt-BR', {
-                                            day: '2-digit',
-                                            month: '2-digit',
-                                            year: 'numeric',
-                                            hour: '2-digit',
-                                            minute: '2-digit',
-                                            second: '2-digit'
-                                        });
-
-                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
-                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}` +
-                                                       `\n📍 Status: ${tracking.latest_event_info}` +
-                                                       `\n🕒 Última Atualização: ${trackingDate}`;
-
-                                        // Adiciona status de entrega se estiver entregue
-                                        if (tracking.package_status === 'Delivered') {
-                                            deliveryStatus += `\n\n✅ Pedido Entregue` +
-                                                            `\n📅 Data de Entrega: ${trackingDate}`;
-                                        }
-                                    } else {
-                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
-                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
-                                    }
-                                } catch (error) {
-                                    logger.error('ErrorCheckingDeliveryStatus', { 
-                                        threadId, 
-                                        orderNumber: order.number,
-                                        trackingNumber: order.shipping_tracking_number,
-                                        error 
-                                    });
-                                    console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
-                                    deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
-                                                   `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
-                                }
-                            }
-
-                            output = JSON.stringify({
-                                error: false,
-                                message: `🛍 Detalhes do Pedido #${order.number}\n\n` +
-                                        `👤 Cliente: ${order.customer.name}\n` +
-                                        `📅 Data: ${orderDate}\n` +
-                                        `📦 Status: ${order.status}\n` +
-                                        `💰 Valor Total: R$ ${total}\n\n` +
-                                        `Produtos:\n${products}${deliveryStatus}`
-                            });
+                        output = await this.nuvemshopService.getOrderDetails(parsedArgs.order_number);
+                        if (!output) {
+                            output = { error: true, message: 'Pedido não encontrado' };
                         }
                         break;
 
                     case 'check_tracking':
-                        if (!parsedArgs.tracking_code) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: 'Por favor, me informe o código de rastreio que você quer consultar.'
-                            });
-                            break;
-                        }
-
-                        try {
-                            // Usa o novo método getTrackingInfo que já implementa cache e retry
-                            const tracking = await this.trackingService.getTrackingInfo(parsedArgs.tracking_code);
-                            
-                            if (!tracking || !tracking.status) {
-                                output = JSON.stringify({
-                                    error: true,
-                                    message: `Desculpe, não encontrei informações para o código de rastreio ${parsedArgs.tracking_code}. Poderia verificar se o código está correto?`
-                                });
-                                break;
-                            }
-
-                            const status = tracking.status.toLowerCase();
-                            let statusEmoji = '📦';
-                            
-                            if (status.includes('entregue')) {
-                                statusEmoji = '✅';
-                            } else if (status.includes('transito') || status.includes('trânsito')) {
-                                statusEmoji = '🚚';
-                            } else if (status.includes('postado')) {
-                                statusEmoji = '📮';
-                            }
-
-                            // Formata os últimos 3 eventos
-                            let eventsText = '';
-                            if (tracking.events && tracking.events.length > 0) {
-                                const lastEvents = tracking.events.slice(0, 3);
-                                eventsText = '\n\n📝 *Últimas Atualizações:*\n' + lastEvents.map(event => {
-                                    const eventDate = event.time ? new Date(event.time).toLocaleString('pt-BR', {
-                                        day: '2-digit',
-                                        month: '2-digit',
-                                        year: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit'
-                                    }) : 'Data não disponível';
-                                    
-                                    return `• ${eventDate}\n  ${event.description || event.info}` + 
-                                           (event.location ? `\n  📍 ${event.location}` : '');
-                                }).join('\n\n');
-                            }
-
-                            // Formata a mensagem com as informações disponíveis
-                            const message = [
-                                `📦 *Status do Rastreamento*\n`,
-                                `*Código:* ${tracking.code}`,
-                                `*Status:* ${statusEmoji} ${tracking.status}`,
-                                tracking.last_update ? `*Última Atualização:* ${tracking.last_update}` : null,
-                                tracking.location ? `*Localização:* 📍 ${tracking.location}` : null,
-                                eventsText
-                            ].filter(Boolean).join('\n');
-
-                            output = JSON.stringify({
-                                error: false,
-                                message
-                            });
-
-                        } catch (error) {
-                            logger.error('ErrorCheckingTracking', { threadId, trackingCode: parsedArgs.tracking_code, error });
-                            console.error('[OpenAI] Erro ao consultar rastreamento:', error);
-                            output = JSON.stringify({
-                                error: true,
-                                message: 'Desculpe, ocorreu um erro ao consultar o rastreamento. Por favor, tente novamente mais tarde.'
-                            });
-                        }
+                        const trackingInfo = await this.trackingService.getTrackingInfo(parsedArgs.tracking_code);
+                        output = {
+                            status: trackingInfo.status,
+                            lastUpdate: trackingInfo.lastUpdate,
+                            location: trackingInfo.location,
+                            delivered: trackingInfo.delivered,
+                            events: trackingInfo.events?.slice(0, 3) // Limita a 3 eventos mais recentes
+                        };
                         break;
 
                     case 'get_business_hours':
-                        const businessHours = this.businessHoursService.getBusinessHours();
-                        const currentStatus = businessHours.isOpen ? '🟢 Estamos Abertos!' : '🔴 Estamos Fechados';
-                        
-                        // Formata o horário de cada dia
-                        const schedule = Object.entries(businessHours.schedule)
-                            .map(([day, hours]) => `${day}: ${hours}`)
-                            .join('\n');
-
-                        output = JSON.stringify({
-                            error: false,
-                            message: `${currentStatus}\n\n` +
-                                    `⏰ Horário de Atendimento:\n` +
-                                    `${schedule}\n\n` +
-                                    `🌎 Fuso Horário: ${businessHours.timezone}`
-                        });
+                        output = parsedArgs.type === 'full' ? 
+                            await this.businessHoursService.getAllHours() :
+                            await this.businessHoursService.getCurrentStatus();
                         break;
 
                     case 'extract_order_number':
-                        if (!parsedArgs.text) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: 'Não consegui identificar o texto para buscar o número do pedido.'
-                            });
-                            break;
-                        }
-                        const orderNumber = await this.orderValidationService.extractOrderNumber(parsedArgs.text);
-                        
-                        if (!orderNumber) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: '❌ Desculpe, não consegui identificar um número de pedido válido no texto. Poderia me informar o número do pedido diretamente?'
-                            });
-                            break;
-                        }
-
-                        // Busca as informações do pedido
-                        const extractedOrder = await this.nuvemshopService.getOrderByNumber(orderNumber);
-                        if (!extractedOrder) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: `❌ Encontrei o número #${orderNumber}, mas não consegui localizar este pedido em nossa base. Poderia verificar se o número está correto?`
-                            });
-                            break;
-                        }
-
-                        // Processa o pedido como na função check_order
-                        let deliveryStatus = '';
-                        if (extractedOrder.shipping_tracking_number) {
-                            try {
-                                const tracking = await this.trackingService.getTrackingInfo(extractedOrder.shipping_tracking_number);
-                                if (tracking && tracking.latest_event_info) {
-                                    const trackingDate = new Date(tracking.latest_event_time).toLocaleString('pt-BR', {
-                                        day: '2-digit',
-                                        month: '2-digit',
-                                        year: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                        second: '2-digit'
-                                    });
-
-                                    deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
-                                                   `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}` +
-                                                   `\n📍 Status: ${tracking.latest_event_info}` +
-                                                   `\n🕒 Última Atualização: ${trackingDate}`;
-
-                                    // Adiciona status de entrega se estiver entregue
-                                    if (tracking.package_status === 'Delivered') {
-                                        deliveryStatus += `\n\n✅ Pedido Entregue` +
-                                                        `\n📅 Data de Entrega: ${trackingDate}`;
-                                    }
-                                } else {
-                                    deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
-                                                   `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}`;
-                                }
-                            } catch (error) {
-                                logger.error('ErrorCheckingTracking', { threadId, trackingCode: extractedOrder.shipping_tracking_number, error });
-                                console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
-                                deliveryStatus = `\n📦 Status do Envio: ${extractedOrder.shipping_status}` +
-                                               `\n📬 Rastreamento: ${extractedOrder.shipping_tracking_number}`;
-                            }
-                        }
-
-                        // Lista de produtos com tratamento seguro de preço
-                        const products = extractedOrder.products.map(product => {
-                            const price = typeof product.price === 'number' ? 
-                                product.price.toFixed(2) : 
-                                String(product.price).replace(/[^\d.,]/g, '');
-                            
-                            return `▫ ${product.quantity}x ${product.name}` + 
-                                   `${product.variant_name ? ` (${product.variant_name})` : ''}` +
-                                   ` - R$ ${price}`;
-                        }).join('\n');
-
-                        // Formata o valor total com segurança
-                        const total = typeof extractedOrder.total === 'number' ? 
-                            extractedOrder.total.toFixed(2) : 
-                            String(extractedOrder.total).replace(/[^\d.,]/g, '');
-
-                        output = JSON.stringify({
-                            error: false,
-                            message: `🛍 Detalhes do Pedido #${extractedOrder.number}\n\n` +
-                                    `👤 Cliente: ${extractedOrder.customer.name}\n` +
-                                    `📅 Data: ${new Date(extractedOrder.created_at).toLocaleString('pt-BR', { 
-                                        day: '2-digit',
-                                        month: '2-digit',
-                                        year: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit'
-                                    })}\n` +
-                                    `📦 Status: ${extractedOrder.status}\n` +
-                                    `💰 Valor Total: R$ ${total}\n\n` +
-                                    `Produtos:\n${products}` +
-                                    `${deliveryStatus}`
-                        });
+                        const orderNumber = await this.orderValidationService.extractOrderNumber(
+                            parsedArgs.text,
+                            parsedArgs.strict || false
+                        );
+                        output = { order_number: orderNumber };
                         break;
 
                     case 'request_payment_proof':
-                        if (!parsedArgs.action) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: 'A ação é obrigatória para gerenciar comprovantes.'
-                            });
-                            break;
-                        }
-
                         switch (parsedArgs.action) {
                             case 'request':
-                                // Registra a solicitação no Redis
-                                await this.redisStore.set(`waiting_order:${threadId}`, 'payment_proof', 1800);
-                                if (parsedArgs.order_number) {
-                                    await this.redisStore.set(`pending_order:${threadId}`, parsedArgs.order_number, 1800);
-                                }
-
-                                output = JSON.stringify({
-                                    error: false,
-                                    message: 'Por favor, me envie:\n1. Uma foto clara do comprovante de pagamento\n2. O número do seu pedido\n\nAssim que receber, irei encaminhar para nossa equipe financeira. 📎'
-                                });
+                                await this.redisStore.set(`waiting_order:${threadId}`, 'payment_proof');
+                                await this.redisStore.set(`pending_order:${threadId}`, parsedArgs.order_number);
+                                output = { status: 'waiting', message: 'Aguardando comprovante' };
                                 break;
-
+                            
                             case 'validate':
-                                // Verifica se há uma solicitação pendente
-                                const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
-                                const pendingOrder = await this.redisStore.get(`pending_order:${threadId}`);
-
-                                output = JSON.stringify({
-                                    error: !waiting,
-                                    message: waiting ? 
-                                        `Aguardando comprovante${pendingOrder ? ` para o pedido #${pendingOrder}` : ''}. Por favor, envie uma foto clara do comprovante.` :
-                                        'Não há solicitação de comprovante pendente.'
-                                });
+                                const orderStatus = await this.nuvemshopService.getOrderPaymentStatus(parsedArgs.order_number);
+                                output = {
+                                    valid: orderStatus === 'paid',
+                                    status: orderStatus,
+                                    message: orderStatus === 'paid' ? 
+                                        'Pagamento confirmado' : 
+                                        'Pagamento pendente'
+                                };
                                 break;
 
                             case 'cancel':
-                                // Remove a solicitação do Redis
                                 await this.redisStore.del(`waiting_order:${threadId}`);
                                 await this.redisStore.del(`pending_order:${threadId}`);
-
-                                output = JSON.stringify({
-                                    error: false,
-                                    message: 'Solicitação de comprovante cancelada.'
-                                });
-                                break;
-
-                            case 'process':
-                                if (!parsedArgs.order_number) {
-                                    output = JSON.stringify({
-                                        error: true,
-                                        message: 'Número do pedido não fornecido.'
-                                    });
-                                    break;
-                                }
-
-                                // Recupera a URL da imagem do Redis
-                                const imageUrl = await this.redisStore.get(`pending_proof:${threadId}`);
-                                if (!imageUrl) {
-                                    output = JSON.stringify({
-                                        error: true,
-                                        message: 'Comprovante não encontrado. Por favor, envie o comprovante novamente.'
-                                    });
-                                    break;
-                                }
-
-                                try {
-                                    // Processa o comprovante
-                                    const result = await this.orderValidationService.processPaymentProof(imageUrl, parsedArgs.order_number);
-
-                                    // Limpa o comprovante pendente após processamento bem-sucedido
-                                    await this.redisStore.del(`pending_proof:${threadId}`);
-
-                                    output = JSON.stringify({
-                                        error: false,
-                                        message: result
-                                    });
-                                } catch (error) {
-                                    logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber: parsedArgs.order_number, error });
-                                    console.error('[OpenAI] Erro ao processar comprovante:', error);
-                                    output = JSON.stringify({
-                                        error: true,
-                                        message: 'Erro ao processar o comprovante. Por favor, tente novamente.'
-                                    });
-                                }
+                                output = { status: 'cancelled', message: 'Solicitação cancelada' };
                                 break;
 
                             default:
-                                output = JSON.stringify({
-                                    error: true,
-                                    message: 'Ação inválida para gerenciamento de comprovantes.'
-                                });
+                                throw new Error(`Ação inválida: ${parsedArgs.action}`);
                         }
                         break;
 
                     case 'forward_to_financial':
-                        if (!parsedArgs.reason || !parsedArgs.customer_message) {
-                            output = JSON.stringify({
-                                error: true,
-                                message: 'Por favor, forneça o motivo do encaminhamento e a mensagem do cliente.'
-                            });
-                            break;
-                        }
-
-                        const success = await this.financialService.forwardCase({
-                            order_number: parsedArgs.order_number,
-                            tracking_code: parsedArgs.tracking_code,
-                            reason: parsedArgs.reason,
-                            customer_message: parsedArgs.customer_message,
+                        const caseData = {
+                            type: parsedArgs.case_type,
+                            orderNumber: parsedArgs.order_number,
                             priority: parsedArgs.priority || 'medium',
-                            additional_info: parsedArgs.additional_info
-                        });
-
-                        output = JSON.stringify({
-                            error: !success,
-                            message: success 
-                                ? 'Caso encaminhado com sucesso para o setor financeiro. Em breve entrarão em contato.'
-                                : 'Não foi possível encaminhar o caso no momento. Por favor, tente novamente mais tarde.'
-                        });
+                            details: parsedArgs.details
+                        };
+                        
+                        await this.financialService.createCase(caseData);
+                        output = { 
+                            status: 'forwarded',
+                            message: 'Caso encaminhado para análise',
+                            priority: caseData.priority
+                        };
                         break;
 
                     default:
-                        logger.warn('UnknownTool', { threadId, tool: name });
-                        console.warn('[OpenAI] Função desconhecida:', name);
-                        output = JSON.stringify({
-                            error: true,
-                            message: 'Função não implementada'
-                        });
+                        throw new Error(`Função desconhecida: ${name}`);
                 }
 
-                logger.info('ToolOutput', { threadId, tool: name, output });
-                console.log(`[OpenAI] Resultado da função ${name}:`, output);
                 toolOutputs.push({
                     tool_call_id: toolCall.id,
-                    output
+                    output: JSON.stringify(output)
                 });
+
             } catch (error) {
-                logger.error('ErrorExecutingTool', { threadId, tool: name, error });
-                console.error(`[OpenAI] Erro ao executar função ${name}:`, error);
+                logger.error('ErrorExecutingTool', { 
+                    threadId, 
+                    tool: name, 
+                    error: error.message 
+                });
+
                 toolOutputs.push({
                     tool_call_id: toolCall.id,
-                    output: JSON.stringify({
-                        error: true,
-                        message: `Erro ao executar ${name}: ${error.message}`
+                    output: JSON.stringify({ 
+                        error: true, 
+                        message: 'Erro ao processar solicitação'
                     })
                 });
             }
@@ -1017,105 +679,62 @@ class OpenAIService {
 
     async processCustomerMessage(customerId, message) {
         try {
-            logger.info('ProcessingCustomerMessage', { customerId, messageType: Array.isArray(message.content) ? 'array' : typeof message.content });
-            console.log('[OpenAI] Processando mensagem do cliente:', {
-                customerId,
-                messageType: Array.isArray(message.content) ? 'array' : typeof message.content,
-                contentPreview: typeof message.content === 'string' ? message.content.substring(0, 100) : null,
-                timestamp: new Date().toISOString()
-            });
+            logger.info('ProcessingCustomerMessage', { customerId });
 
-            // Recupera ou cria thread
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             if (!threadId) {
                 throw new Error('Não foi possível criar/recuperar thread');
             }
 
-            // Adiciona mensagem diretamente ao thread
-            await this.addMessage(threadId, message);
-
-            // Executa o assistant
-            const run = await this.runAssistant(threadId);
-            if (!run?.id) {
-                throw new Error('Falha ao executar assistant');
+            // Verifica se já tem um run ativo
+            if (await this.hasActiveRun(threadId)) {
+                this.queueMessage(threadId, message);
+                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
-            // Aguarda e retorna a resposta
-            const response = await this.waitForResponse(threadId, run.id);
-
-            // Salva contexto apenas se passou o intervalo
+            // Adiciona a mensagem e executa o assistant
+            const response = await this.addMessageAndRun(threadId, message);
+            
+            // Atualiza contexto se necessário
             if (response && await this._shouldUpdateContext(threadId)) {
                 await this._saveContextToRedis(threadId, response);
-                logger.info('ContextUpdated', { threadId });
-                console.log('[OpenAI] Contexto atualizado após intervalo:', {
-                    threadId,
-                    interval: '15 minutos'
-                });
             }
 
             return response;
         } catch (error) {
             logger.error('ErrorProcessingCustomerMessage', { customerId, error });
-            console.error('[OpenAI] Erro ao processar mensagem do cliente:', {
-                customerId,
-                erro: error.message,
-                stack: error.stack
-            });
-
-            // Retorna mensagem amigável em caso de erro
-            return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.';
+            return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
         }
     }
 
     async processCustomerMessageWithImage(customerId, message, images) {
         try {
-            logger.info('ProcessingCustomerMessageWithImage', { customerId, hasMessage: !!message, imageCount: images?.length });
-            console.log('[OpenAI] Processando mensagem com imagem:', {
-                customerId,
-                hasMessage: !!message,
-                imageCount: images?.length
+            logger.info('ProcessingCustomerMessageWithImage', { 
+                customerId, 
+                hasMessage: !!message, 
+                imageCount: images?.length 
             });
 
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
-
-            // Verifica se está aguardando comprovante
             const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
+
             if (waiting === 'payment_proof') {
                 logger.info('WaitingForPaymentProof', { threadId });
-                console.log('[OpenAI] Comprovante recebido:', {
-                    threadId,
-                    hasMessage: !!message
-                });
-
-                // Se tiver mensagem, tenta extrair número do pedido
-                let orderNumber = null;
-                if (message) {
-                    try {
-                        orderNumber = await this.orderValidationService.extractOrderNumber(message);
-                    } catch (error) {
-                        logger.error('ErrorExtractingOrderNumber', { threadId, error });
-                        console.error('[OpenAI] Erro ao extrair número do pedido:', error);
-                    }
+                
+                if (!images?.length) {
+                    return '❌ Não recebi nenhuma imagem. Por favor, envie uma foto do comprovante.';
                 }
 
-                // Se não encontrou no texto, tenta pegar do Redis
-                if (!orderNumber) {
-                    orderNumber = await this.redisStore.get(`pending_order:${threadId}`);
-                }
+                let orderNumber = message ? 
+                    await this.orderValidationService.extractOrderNumber(message) :
+                    await this.redisStore.get(`pending_order:${threadId}`);
 
-                // Processa o comprovante
-                if (images && images.length > 0) {
-                    const result = await this.processPaymentProof(threadId, images[0], orderNumber);
-                    return result;
-                } else {
-                    return '❌ Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.';
-                }
+                return await this.processPaymentProof(threadId, images[0], orderNumber);
             }
 
-            // Formata a mensagem com as imagens conforme especificação da OpenAI
+            // Formata a mensagem com as imagens
             const messageContent = [];
-
-            // Adiciona o texto da mensagem
+            
             if (message) {
                 messageContent.push({
                     type: "text",
@@ -1123,22 +742,21 @@ class OpenAIService {
                 });
             }
 
-            // Adiciona as imagens
             for (const image of images) {
                 messageContent.push({
                     type: "image_url",
                     image_url: {
                         url: image.base64 ? 
-                            `data:${image.mimetype};base64,${image.base64}` :
+                            `data:${image.mimetype};base64,${image.base64}` : 
                             image.url
                     }
                 });
             }
 
-            // Verifica se há um run ativo
+            // Verifica se já tem um run ativo
             if (await this.hasActiveRun(threadId)) {
                 this.queueMessage(threadId, { role: "user", content: messageContent });
-                return "Aguarde um momento enquanto processo sua mensagem anterior...";
+                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
             // Adiciona a mensagem e executa o assistant
@@ -1148,11 +766,9 @@ class OpenAIService {
             });
 
             return response || "Desculpe, não consegui processar sua mensagem. Pode tentar novamente?";
-
         } catch (error) {
             logger.error('ErrorProcessingCustomerMessageWithImage', { customerId, error });
-            console.error('❌ Erro ao processar mensagem com imagem:', error);
-            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.";
+            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.";
         }
     }
 
@@ -1221,7 +837,7 @@ class OpenAIService {
                     
                     logger.info('RedisDataCleared', { threadId });
                 } catch (error) {
-                    logger.error('ErrorClearingRedisData', { threadId, error: error.message });
+                    logger.error('ErrorClearingRedisData', { threadId, error });
                 }
                 
                 // Cria uma nova thread
@@ -1410,7 +1026,7 @@ class OpenAIService {
             if (!waiting || waiting !== 'payment_proof') {
                 return 'Não há solicitação de comprovante pendente. Por favor, primeiro me informe o número do pedido.';
             }
-            
+
             if (pendingOrder && orderNumber && pendingOrder !== orderNumber) {
                 return `❌ O número do pedido informado (#${orderNumber}) é diferente do pedido pendente (#${pendingOrder}). Por favor, confirme o número correto do pedido.`;
             }
@@ -1437,21 +1053,10 @@ class OpenAIService {
             // Limpar o comprovante pendente após processamento
             await this.redisStore.del(`pending_proof:${threadId}`);
 
-            if (result.success) {
-                return `✅ Comprovante recebido com sucesso para o pedido #${orderNumber}!\n\n` +
-                       `📋 Status: ${result.status}\n` +
-                       `⏳ Tempo estimado de análise: ${result.estimatedTime || '24 horas úteis'}\n\n` +
-                       `Assim que a análise for concluída, você receberá uma notificação.`;
-            } else {
-                return `❌ Houve um problema ao processar seu comprovante:\n${result.message}\n\nPor favor, tente novamente.`;
-            }
-
+            return '✅ Comprovante recebido! Nosso time financeiro irá analisar e confirmar o pagamento em breve.';
         } catch (error) {
             logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber, error });
-            console.error('[OpenAI] Erro ao processar comprovante:', error);
-            
-            // Não limpa o Redis em caso de erro para permitir nova tentativa
-            return '❌ Ocorreu um erro ao processar seu comprovante. Por favor, tente novamente em alguns instantes.';
+            throw error;
         }
     }
 

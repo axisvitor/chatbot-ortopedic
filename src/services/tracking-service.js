@@ -145,12 +145,11 @@ class TrackingService {
 
             const options = {
                 hostname: this.config.endpoint,
-                path: this.config.paths.status,
+                path: '/tracking/status',
                 method: 'POST',
                 headers: {
-                    '17token': this.config.apiKey,
                     'Content-Type': 'application/json',
-                    'Content-Length': data.length
+                    'Authorization': `Bearer ${this.config.apiKey}`
                 }
             };
 
@@ -163,23 +162,19 @@ class TrackingService {
             const trackInfo = result.data.accepted[0];
             const lastEventTime = trackInfo.latest_event_time ? new Date(trackInfo.latest_event_time) : new Date();
             
+            // Retorna apenas dados essenciais formatados
             return {
-                code: trackingNumber,
-                latest_event_info: trackInfo.latest_event_info || 'Status não disponível',
-                latest_event_time: trackInfo.latest_event_time || new Date().toISOString(),
-                latest_event_location: trackInfo.latest_event_location || 'Localização não disponível',
-                package_status: trackInfo.package_status || 'unknown',
+                codigo: trackingNumber,
                 status: trackInfo.latest_event_info || 'Status não disponível',
-                location: trackInfo.latest_event_location || 'Localização não disponível',
-                last_update: lastEventTime.toLocaleString('pt-BR', {
+                atualizacao: lastEventTime.toLocaleString('pt-BR', {
                     day: '2-digit',
                     month: '2-digit',
                     year: 'numeric',
                     hour: '2-digit',
                     minute: '2-digit'
                 }),
-                message: trackInfo.latest_event_message || trackInfo.latest_event_info || 'Status não disponível',
-                days_of_transit: trackInfo.days_of_transit
+                local: trackInfo.latest_event_location || 'Localização não disponível',
+                diasEmTransito: trackInfo.days_of_transit || 0
             };
         } catch (error) {
             console.error('❌ [Tracking] Erro ao consultar status:', {
@@ -228,7 +223,7 @@ class TrackingService {
             if (hasTaxation) {
                 console.log(`[Tracking][${transactionId}] Detectado evento de taxação`, { 
                     trackingNumber,
-                    status: trackingData.latest_event_info 
+                    status: trackingData.status 
                 });
                 await this._handleTaxationEvent(trackingNumber, trackingData);
             }
@@ -250,7 +245,7 @@ class TrackingService {
 
             console.log(`[Tracking][${transactionId}] Consulta finalizada com sucesso`, {
                 trackingNumber,
-                status: safeTrackingData.latest_event_info,
+                status: safeTrackingData.status,
                 hasTaxation
             });
 
@@ -271,7 +266,7 @@ class TrackingService {
      * @private
      */
     _checkForTaxation(trackingData) {
-        if (!trackingData || !trackingData.latest_event_info) {
+        if (!trackingData || !trackingData.status) {
             return false;
         }
 
@@ -285,7 +280,7 @@ class TrackingService {
         ];
 
         return taxationTerms.some(term => 
-            trackingData.latest_event_info.toLowerCase().includes(term)
+            trackingData.status.toLowerCase().includes(term)
         );
     }
 
@@ -294,7 +289,7 @@ class TrackingService {
      * @private
      */
     _removeTaxationInfo(trackingData) {
-        if (!trackingData || !trackingData.latest_event_info) {
+        if (!trackingData || !trackingData.status) {
             return trackingData;
         }
 
@@ -308,13 +303,13 @@ class TrackingService {
         ];
 
         const hasTaxationTerm = taxationTerms.some(term => 
-            trackingData.latest_event_info.toLowerCase().includes(term)
+            trackingData.status.toLowerCase().includes(term)
         );
 
         if (hasTaxationTerm) {
             return {
                 ...trackingData,
-                latest_event_info: 'Em processamento na unidade'
+                status: 'Em processamento na unidade'
             };
         }
 
@@ -342,7 +337,7 @@ class TrackingService {
             // Busca informações do pedido
             const orderInfo = await this.nuvemshopService.findOrderByTracking(trackingNumber);
 
-            const taxationEvent = trackingData.latest_event_info;
+            const taxationEvent = trackingData.status;
 
             // Monta mensagem para o financeiro
             const message = `*🚨 Pedido Taxado - Ação Necessária*\n\n` +
@@ -440,11 +435,12 @@ class TrackingService {
         try {
             // Formata a resposta com os eventos disponíveis
             let response = `📦 *Status do Rastreamento*\n\n`;
-            response += `*Código:* ${trackInfo.code}\n`;
+            response += `*Código:* ${trackInfo.codigo}\n`;
             
             // Verifica se está em tributação para encaminhar ao financeiro
-            const isCustomsHold = trackInfo.package_status === 'CustomsHold' || 
-                                /tribut|taxa|imposto|aduaneir/i.test(trackInfo.status);
+            const isCustomsHold = trackInfo.status?.toLowerCase().includes('tributação') || 
+                                trackInfo.status?.toLowerCase().includes('taxa') || 
+                                trackInfo.status?.toLowerCase().includes('imposto');
             
             // Se estiver em tributação, encaminha para o financeiro
             if (isCustomsHold) {
@@ -461,9 +457,9 @@ class TrackingService {
                     // Encaminha para o financeiro
                     const financialMessage = {
                         type: 'tracking_customs',
-                        trackingNumber: trackInfo.code,
-                        status: trackInfo.package_status,
-                        lastUpdate: trackInfo.last_update,
+                        trackingNumber: trackInfo.codigo,
+                        status: trackInfo.status,
+                        lastUpdate: trackInfo.atualizacao,
                         originalMessage: trackInfo.status,
                         from: from,
                         orderDetails: orderInfo ? {
@@ -479,11 +475,11 @@ class TrackingService {
                     
                     // Formata mensagem para o financeiro
                     const financialNotification = `🚨 *Pedido em Tributação*\n\n` +
-                        `📦 Rastreio: ${trackInfo.code}\n` +
+                        `📦 Rastreio: ${trackInfo.codigo}\n` +
                         `🛍️ Pedido: #${financialMessage.orderDetails.number}\n` +
                         `👤 Cliente: ${financialMessage.orderDetails.customerName}\n` +
                         `📱 Telefone: ${financialMessage.orderDetails.customerPhone}\n` +
-                        `📅 Atualização: ${new Date(trackInfo.last_update).toLocaleString('pt-BR')}\n` +
+                        `📅 Atualização: ${new Date(trackInfo.atualizacao).toLocaleString('pt-BR')}\n` +
                         `📝 Status Original: ${trackInfo.status}`;
                     
                     await this._whatsAppService.forwardToFinancial({ 
@@ -492,7 +488,7 @@ class TrackingService {
                     }, financialMessage.orderDetails.number);
 
                     console.log('💰 Notificação enviada ao financeiro:', {
-                        rastreio: trackInfo.code,
+                        rastreio: trackInfo.codigo,
                         pedido: financialMessage.orderDetails.number,
                         cliente: financialMessage.orderDetails.customerName,
                         telefone: financialMessage.orderDetails.customerPhone,
@@ -504,12 +500,12 @@ class TrackingService {
             }
 
             // Define o status com emoji
-            let status = trackInfo.package_status;
+            let status = trackInfo.status;
             if (isCustomsHold) {
                 status = '📦 Em processamento';
             } else {
-                const emoji = this.STATUS_EMOJIS[trackInfo.package_status] || '❓';
-                switch (trackInfo.package_status) {
+                const emoji = this.STATUS_EMOJIS[trackInfo.status] || '❓';
+                switch (trackInfo.status) {
                     case 'InTransit':
                         status = `${emoji} Em Trânsito`;
                         break;
@@ -532,48 +528,20 @@ class TrackingService {
                         status = `${emoji} Expirado`;
                         break;
                     default:
-                        status = `${emoji} ${trackInfo.package_status}`;
+                        status = `${emoji} ${trackInfo.status}`;
                 }
             }
             response += `*Status:* ${status}\n`;
 
             // Adiciona última atualização
-            if (trackInfo.last_update) {
-                const date = new Date(trackInfo.last_update);
+            if (trackInfo.atualizacao) {
+                const date = new Date(trackInfo.atualizacao);
                 response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
             }
 
             // Adiciona os últimos eventos
-            if (trackInfo.events && trackInfo.events.length > 0) {
-                response += `\n📝 *Últimas Atualizações:*\n`;
-                trackInfo.events.slice(0, 3).forEach((event, index) => {
-                    const date = new Date(event.time).toLocaleString('pt-BR');
-                    let description = event.description || event.info;
-                    
-                    // Filtra informações sensíveis de tributação
-                    if (isCustomsHold) {
-                        const termsToReplace = [
-                            /aguardando pagamento de tributos/i,
-                            /em processo de tributação/i,
-                            /pagamento de tributos/i,
-                            /taxa/i,
-                            /tribut[oaçã]/i,
-                            /imposto/i,
-                            /declaração aduaneira/i
-                        ];
-                        
-                        if (termsToReplace.some(term => term.test(description))) {
-                            description = 'Em processamento na unidade dos Correios';
-                        }
-                    }
-                    
-                    response += `${index + 1}. ${date}\n   ${description}\n`;
-                });
-            }
-
-            // Adiciona tempo em trânsito
-            if (trackInfo.days_of_transit) {
-                response += `\n_Tempo em trânsito: ${trackInfo.days_of_transit} dias_\n`;
+            if (trackInfo.diasEmTransito) {
+                response += `\n_Tempo em trânsito: ${trackInfo.diasEmTransito} dias_\n`;
             }
 
             return response;
