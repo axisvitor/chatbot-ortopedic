@@ -1202,7 +1202,8 @@ class OpenAIService {
                         this.redisStore.delPattern(`tracking:*`), // Cache de rastreamento
                         this.redisStore.delPattern(`order:*`),    // Cache de pedidos
                         this.redisStore.delPattern(`waiting_order:${threadId}`),
-                        this.redisStore.delPattern(`pending_order:${threadId}`)
+                        this.redisStore.delPattern(`pending_order:${threadId}`),
+                        this.redisStore.delPattern(`customer_thread:*`) // Limpa mapeamento cliente-thread
                     ]);
                     
                     logger.info('RedisDataCleared', { threadId });
