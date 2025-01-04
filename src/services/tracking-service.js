@@ -99,9 +99,9 @@ class TrackingService {
             hasApiKey: !!this.config.apiKey
         });
 
-        const data = JSON.stringify({
-            "tracking_number": trackingNumber
-        });
+        const data = JSON.stringify([
+            { "number": trackingNumber }
+        ]);
 
         const options = {
             hostname: this.config.endpoint,
@@ -129,7 +129,7 @@ class TrackingService {
             console.log('🔍 [Tracking] Consultando status:', { trackingNumber });
 
             const data = JSON.stringify({
-                "tracking_number": trackingNumber
+                "numbers": [trackingNumber]
             });
 
             const options = {
@@ -152,16 +152,12 @@ class TrackingService {
             const trackInfo = result.data.accepted[0];
             const lastEventTime = trackInfo.latest_event_time ? new Date(trackInfo.latest_event_time) : new Date();
             
-            // Formata a resposta mantendo compatibilidade com ambos os formatos
             return {
-                // Campos para o Assistant
                 code: trackingNumber,
                 latest_event_info: trackInfo.latest_event_info || 'Status não disponível',
                 latest_event_time: trackInfo.latest_event_time || new Date().toISOString(),
                 latest_event_location: trackInfo.latest_event_location || 'Localização não disponível',
                 package_status: trackInfo.package_status || 'unknown',
-
-                // Campos para compatibilidade com outros serviços
                 status: trackInfo.latest_event_info || 'Status não disponível',
                 location: trackInfo.latest_event_location || 'Localização não disponível',
                 last_update: lastEventTime.toLocaleString('pt-BR', {
@@ -172,33 +168,8 @@ class TrackingService {
                     minute: '2-digit'
                 }),
                 message: trackInfo.latest_event_message || trackInfo.latest_event_info || 'Status não disponível',
-
-                // Informações adicionais de tempo
-                days_in_transit: trackInfo.days_of_transit,
-                pickup_time: trackInfo.pickup_time ? new Date(trackInfo.pickup_time).toLocaleString('pt-BR', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                }) : null,
-                delivery_time: trackInfo.delievery_time ? new Date(trackInfo.delievery_time).toLocaleString('pt-BR', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                }) : null,
-
-                // Lista de eventos
-                events: trackInfo.track_info?.map(event => ({
-                    time: event.time || event.Date,
-                    info: event.StatusDescription || event.Details || event.info,
-                    description: event.Details || event.StatusDescription || event.description,
-                    location: event.Location || event.location
-                })) || []
+                days_of_transit: trackInfo.days_of_transit
             };
-
         } catch (error) {
             console.error('❌ [Tracking] Erro ao consultar status:', {
                 trackingNumber,
@@ -394,39 +365,6 @@ class TrackingService {
         }
     }
 
-    /**
-     * Atualiza o status do pedido na Nuvemshop quando o pacote é entregue
-     * @private
-     * @param {string} trackingNumber - Número de rastreio
-     */
-    async _updateNuvemshopOrderStatus(trackingNumber) {
-        try {
-            // Busca o pedido pelo código de rastreio
-            const order = await this.nuvemshopService.getOrderByTrackingNumber(trackingNumber);
-            
-            if (!order) {
-                console.log('[Tracking] Pedido não encontrado para o rastreio:', trackingNumber);
-                return;
-            }
-
-            // Atualiza o status para closed quando entregue
-            await this.nuvemshopService.updateOrderStatus(order.id, 'closed');
-            
-            console.log('[Tracking] Status do pedido atualizado com sucesso:', {
-                orderId: order.id,
-                trackingNumber,
-                oldStatus: order.status,
-                newStatus: 'closed'
-            });
-        } catch (error) {
-            console.error('[Tracking] Erro ao atualizar status do pedido:', {
-                trackingNumber,
-                error: error.message
-            });
-            // Não propaga o erro para não interromper o fluxo principal
-        }
-    }
-
     async processTrackingRequest(trackingNumber, from) {
         const transactionId = `trk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         console.log(`[Tracking][${transactionId}] Processando requisição de rastreamento`, {
@@ -581,34 +519,6 @@ class TrackingService {
                 response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
             }
 
-            // Adiciona as 3 últimas atualizações
-            if (trackInfo.events && Array.isArray(trackInfo.events)) {
-                const lastEvents = trackInfo.events.slice(0, 3);
-                if (lastEvents.length > 0) {
-                    response += `\n📝 *Últimas Atualizações:*\n`;
-                    lastEvents.forEach((event, index) => {
-                        const eventDate = new Date(event.time).toLocaleString('pt-BR');
-                        response += `${index + 1}. ${eventDate}\n   ${event.info || event.description}\n`;
-                    });
-                    response += '\n';
-                }
-            }
-
-            // Adiciona tempo em trânsito
-            if (trackInfo.days_in_transit) {
-                response += `\n_Tempo em trânsito: ${trackInfo.days_in_transit} dias_\n`;
-            }
-
-            // Adiciona tempo de coleta
-            if (trackInfo.pickup_time) {
-                response += `\n_Tempo de coleta: ${trackInfo.pickup_time}_\n`;
-            }
-
-            // Adiciona tempo de entrega
-            if (trackInfo.delivery_time) {
-                response += `\n_Tempo de entrega: ${trackInfo.delivery_time}_\n`;
-            }
-
             // Filtra mensagens de tributação/taxação
             if (trackInfo.status) {
                 let situacao = trackInfo.status;
@@ -630,6 +540,11 @@ class TrackingService {
                 }
                 
                 response += `*Situação:* ${situacao}\n`;
+            }
+
+            // Adiciona tempo em trânsito
+            if (trackInfo.days_of_transit) {
+                response += `\n_Tempo em trânsito: ${trackInfo.days_of_transit} dias_\n`;
             }
 
             return response;
@@ -690,12 +605,6 @@ class TrackingService {
 
     async _makeRequest(options, data) {
         return new Promise((resolve, reject) => {
-            console.log('📡 [Tracking] Iniciando requisição:', {
-                hostname: options.hostname,
-                path: options.path,
-                method: options.method
-            });
-
             const req = https.request(options, (res) => {
                 let responseData = '';
 
@@ -705,37 +614,23 @@ class TrackingService {
 
                 res.on('end', () => {
                     try {
-                        const parsedData = JSON.parse(responseData);
-                        
-                        console.log('📥 [Tracking] Resposta recebida:', {
-                            statusCode: res.statusCode,
-                            apiCode: parsedData.code,
-                            message: parsedData.msg
-                        });
-
-                        // Verifica se a resposta indica erro de autenticação
-                        if (parsedData.code === 401 || parsedData.code === 403) {
-                            reject(new Error('Erro de autenticação com a API de rastreamento. Verifique sua chave API.'));
-                            return;
-                        }
-                        
-                        resolve(parsedData);
+                        const result = JSON.parse(responseData);
+                        resolve(result);
                     } catch (error) {
                         console.error('❌ [Tracking] Erro ao processar resposta:', {
                             error: error.message,
                             responseData
                         });
-                        reject(new Error('Erro ao processar resposta da API de rastreamento'));
+                        reject(error);
                     }
                 });
             });
 
             req.on('error', (error) => {
                 console.error('❌ [Tracking] Erro na requisição:', {
-                    error: error.message,
-                    code: error.code
+                    error: error.message
                 });
-                reject(new Error('Erro de conexão com a API de rastreamento'));
+                reject(error);
             });
 
             // Timeout de 30 segundos
