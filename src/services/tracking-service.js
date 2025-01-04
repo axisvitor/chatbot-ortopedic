@@ -7,7 +7,26 @@ const { NuvemshopService } = require('./nuvemshop-service');
 
 class TrackingService {
     constructor(whatsAppService = null) {
-        this.config = TRACKING_CONFIG;
+        // Verifica se as configurações obrigatórias estão presentes
+        if (!TRACKING_CONFIG || !TRACKING_CONFIG.apiKey) {
+            console.error('❌ [Tracking] Configuração inválida:', { 
+                hasConfig: !!TRACKING_CONFIG,
+                hasApiKey: !!TRACKING_CONFIG?.apiKey
+            });
+            throw new Error('Configuração do serviço de rastreamento inválida');
+        }
+
+        this.config = {
+            apiKey: TRACKING_CONFIG.apiKey,
+            endpoint: TRACKING_CONFIG.endpoint || 'api.17track.net',
+            paths: {
+                register: TRACKING_CONFIG.paths?.register || '/track/v2.2/register',
+                status: TRACKING_CONFIG.paths?.status || '/track/v2.2/gettracklist'
+            },
+            updateInterval: TRACKING_CONFIG.updateInterval || 3600000,
+            carriers: TRACKING_CONFIG.carriers || ['correios', 'jadlog', 'fedex', 'dhl']
+        };
+
         this.redisStore = new RedisStore();
         this.nuvemshopService = new NuvemshopService();
         this.whatsAppService = whatsAppService;
@@ -24,6 +43,11 @@ class TrackingService {
             ttl: 30 * 60, // 30 minutos
             prefix: 'tracking:'
         };
+
+        console.log('✅ [Tracking] Serviço inicializado com sucesso:', {
+            endpoint: this.config.endpoint,
+            paths: this.config.paths
+        });
     }
 
     /**
@@ -59,10 +83,8 @@ class TrackingService {
                 this.retryConfig.maxDelay
             );
 
-            console.log(`[Tracking] Tentativa ${attempt} falhou, aguardando ${delay}ms para retry`, {
-                error: error.message,
-                attempt,
-                delay
+            console.log(`🔄 [Tracking] Tentativa ${attempt} falhou, tentando novamente em ${delay}ms`, {
+                error: error.message
             });
 
             await new Promise(resolve => setTimeout(resolve, delay));
@@ -103,87 +125,62 @@ class TrackingService {
     }
 
     async getTrackingStatus(trackingNumber) {
-        const data = JSON.stringify({
-            "tracking_number": trackingNumber
-        });
+        try {
+            console.log('🔍 [Tracking] Consultando status:', { trackingNumber });
 
-        const options = {
-            hostname: this.config.endpoint,
-            path: this.config.paths.status,
-            method: 'POST',
-            headers: {
-                '17token': this.config.apiKey,
-                'Content-Type': 'application/json',
-                'Content-Length': data.length
+            const data = JSON.stringify({
+                "tracking_number": trackingNumber
+            });
+
+            const options = {
+                hostname: this.config.endpoint,
+                path: this.config.paths.status,
+                method: 'POST',
+                headers: {
+                    '17token': this.config.apiKey,
+                    'Content-Type': 'application/json',
+                    'Content-Length': data.length
+                }
+            };
+
+            const result = await this._makeRequest(options, data);
+            
+            if (!result || result.code !== 0 || !result.data?.accepted?.length) {
+                throw new Error('Não foi possível obter informações de rastreamento');
             }
-        };
 
-        const result = await this._makeRequest(options, data);
-        
-        // Se não tem dados ou tem erro
-        if (!result || result.code !== 0 || !result.data?.accepted?.length) {
-            return null;
+            const trackInfo = result.data.accepted[0];
+            const lastEventTime = trackInfo.latest_event_time ? new Date(trackInfo.latest_event_time) : new Date();
+            
+            // Formata a resposta mantendo compatibilidade com ambos os formatos
+            return {
+                // Campos para o Assistant
+                code: trackingNumber,
+                latest_event_info: trackInfo.latest_event_info || 'Status não disponível',
+                latest_event_time: trackInfo.latest_event_time || new Date().toISOString(),
+                latest_event_location: trackInfo.latest_event_location || 'Localização não disponível',
+                package_status: trackInfo.package_status || 'unknown',
+
+                // Campos para compatibilidade com outros serviços
+                status: trackInfo.latest_event_info || 'Status não disponível',
+                location: trackInfo.latest_event_location || 'Localização não disponível',
+                last_update: lastEventTime.toLocaleString('pt-BR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }),
+                message: trackInfo.latest_event_message || trackInfo.latest_event_info || 'Status não disponível'
+            };
+
+        } catch (error) {
+            console.error('❌ [Tracking] Erro ao consultar status:', {
+                trackingNumber,
+                error: error.message
+            });
+            throw error;
         }
-
-        const trackInfo = result.data.accepted[0];
-        
-        // Formata a resposta no padrão esperado
-        return {
-            code: trackingNumber,
-            status: trackInfo.latest_event_info || 'Status não disponível',
-            location: trackInfo.latest_event_location || 'Localização não disponível',
-            last_update: trackInfo.latest_event_time ? new Date(trackInfo.latest_event_time).toLocaleString('pt-BR', {
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            }) : 'Data não disponível',
-            message: trackInfo.latest_event_message
-        };
-    }
-
-    async _makeRequest(options, data) {
-        return new Promise((resolve, reject) => {
-            const req = https.request(options, (res) => {
-                let responseData = '';
-
-                res.on('data', (chunk) => {
-                    responseData += chunk;
-                });
-
-                res.on('end', () => {
-                    try {
-                        const parsedData = JSON.parse(responseData);
-                        
-                        // Verifica se a resposta indica erro de autenticação
-                        if (parsedData.code === 401 || parsedData.code === 403) {
-                            reject(new Error('Erro de autenticação com a API de rastreamento. Verifique sua chave API.'));
-                            return;
-                        }
-                        
-                        resolve(parsedData);
-                    } catch (error) {
-                        console.error('Error parsing response:', error);
-                        reject(new Error('Erro ao processar resposta da API de rastreamento'));
-                    }
-                });
-            });
-
-            req.on('error', (error) => {
-                console.error('Request error:', error);
-                reject(new Error('Erro de conexão com a API de rastreamento'));
-            });
-
-            // Timeout de 30 segundos
-            req.setTimeout(30000, () => {
-                req.destroy();
-                reject(new Error('Timeout na requisição de rastreamento'));
-            });
-
-            req.write(data);
-            req.end();
-        });
     }
 
     async getTrackingInfo(trackingNumber, forceRefresh = false) {
@@ -194,18 +191,23 @@ class TrackingService {
         });
 
         try {
-            // Verifica cache primeiro
+            // Tenta obter do cache primeiro
             if (!forceRefresh) {
-                const cachedData = await this.redisStore.get(this._getCacheKey(trackingNumber));
-                if (cachedData) {
+                const cached = await this.redisStore.get(this._getCacheKey(trackingNumber));
+                if (cached) {
                     console.log(`[Tracking][${transactionId}] Dados encontrados em cache`, {
                         trackingNumber
                     });
-                    return JSON.parse(cachedData);
+                    return JSON.parse(cached);
                 }
             }
 
             // Consulta API de rastreamento com retry
+            console.log(`[Tracking][${transactionId}] Consultando API com retry`, {
+                trackingNumber,
+                maxAttempts: this.retryConfig.maxAttempts
+            });
+
             const trackingData = await this._retryWithBackoff(async () => {
                 const status = await this.getTrackingStatus(trackingNumber);
                 if (!status) {
@@ -214,9 +216,13 @@ class TrackingService {
                 return status;
             });
 
-            // Verifica eventos de taxação
+            // Verifica se há eventos de taxação
             const hasTaxation = this._checkForTaxation(trackingData);
             if (hasTaxation) {
+                console.log(`[Tracking][${transactionId}] Detectado evento de taxação`, { 
+                    trackingNumber,
+                    status: trackingData.latest_event_info 
+                });
                 await this._handleTaxationEvent(trackingNumber, trackingData);
             }
 
@@ -231,13 +237,13 @@ class TrackingService {
             );
 
             // Se o status indica entrega, atualiza Nuvemshop
-            if (safeTrackingData.status.toLowerCase().includes('entregue')) {
+            if (safeTrackingData.package_status?.toLowerCase() === 'delivered') {
                 await this._updateNuvemshopOrderStatus(trackingNumber);
             }
 
             console.log(`[Tracking][${transactionId}] Consulta finalizada com sucesso`, {
                 trackingNumber,
-                status: safeTrackingData.status,
+                status: safeTrackingData.latest_event_info,
                 hasTaxation
             });
 
@@ -249,7 +255,7 @@ class TrackingService {
                 error: error.message,
                 stack: error.stack
             });
-            throw new Error(`Erro ao consultar status: ${error.message}`);
+            throw error;
         }
     }
 
@@ -258,6 +264,10 @@ class TrackingService {
      * @private
      */
     _checkForTaxation(trackingData) {
+        if (!trackingData || !trackingData.latest_event_info) {
+            return false;
+        }
+
         const taxationTerms = [
             'taxa a pagar',
             'aguardando pagamento',
@@ -267,10 +277,8 @@ class TrackingService {
             'darf'
         ];
 
-        return trackingData.events?.some(event => 
-            taxationTerms.some(term => 
-                event.description?.toLowerCase().includes(term)
-            )
+        return taxationTerms.some(term => 
+            trackingData.latest_event_info.toLowerCase().includes(term)
         );
     }
 
@@ -279,7 +287,9 @@ class TrackingService {
      * @private
      */
     _removeTaxationInfo(trackingData) {
-        if (!trackingData || !trackingData.events) return trackingData;
+        if (!trackingData || !trackingData.latest_event_info) {
+            return trackingData;
+        }
 
         const taxationTerms = [
             'taxa',
@@ -290,27 +300,18 @@ class TrackingService {
             'recolhimento'
         ];
 
-        const safeEvents = trackingData.events.map(event => {
-            if (!event.description) return event;
+        const hasTaxationTerm = taxationTerms.some(term => 
+            trackingData.latest_event_info.toLowerCase().includes(term)
+        );
 
-            const hasTaxationTerm = taxationTerms.some(term => 
-                event.description.toLowerCase().includes(term)
-            );
+        if (hasTaxationTerm) {
+            return {
+                ...trackingData,
+                latest_event_info: 'Em processamento na unidade'
+            };
+        }
 
-            if (hasTaxationTerm) {
-                return {
-                    ...event,
-                    description: 'Em processamento na unidade'
-                };
-            }
-
-            return event;
-        });
-
-        return {
-            ...trackingData,
-            events: safeEvents
-        };
+        return trackingData;
     }
 
     /**
@@ -334,17 +335,15 @@ class TrackingService {
             // Busca informações do pedido
             const orderInfo = await this.nuvemshopService.findOrderByTracking(trackingNumber);
 
-            const taxationEvent = trackingData.events.find(event => 
-                this._checkForTaxation({ events: [event] })
-            );
+            const taxationEvent = trackingData.latest_event_info;
 
             // Monta mensagem para o financeiro
             const message = `*🚨 Pedido Taxado - Ação Necessária*\n\n` +
                 `*Pedido:* #${orderInfo?.number || 'N/A'}\n` +
                 `*Rastreamento:* ${trackingNumber}\n` +
-                `*Status:* ${taxationEvent?.description || 'Taxação detectada'}\n` +
-                `*Data:* ${new Date(taxationEvent?.timestamp || Date.now()).toLocaleString('pt-BR')}\n` +
-                `*Local:* ${taxationEvent?.location || 'Não informado'}\n\n` +
+                `*Status:* ${taxationEvent}\n` +
+                `*Data:* ${new Date().toLocaleString('pt-BR')}\n` +
+                `*Local:* Não informado\n\n` +
                 `*Ação Necessária:* Verificar valor da taxa e providenciar pagamento`;
 
             // Envia notificação via WhatsApp
@@ -606,6 +605,68 @@ class TrackingService {
 
         const normalizedText = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         return keywords.some(keyword => normalizedText.includes(keyword));
+    }
+
+    async _makeRequest(options, data) {
+        return new Promise((resolve, reject) => {
+            console.log('📡 [Tracking] Iniciando requisição:', {
+                hostname: options.hostname,
+                path: options.path,
+                method: options.method
+            });
+
+            const req = https.request(options, (res) => {
+                let responseData = '';
+
+                res.on('data', (chunk) => {
+                    responseData += chunk;
+                });
+
+                res.on('end', () => {
+                    try {
+                        const parsedData = JSON.parse(responseData);
+                        
+                        console.log('📥 [Tracking] Resposta recebida:', {
+                            statusCode: res.statusCode,
+                            apiCode: parsedData.code,
+                            message: parsedData.msg
+                        });
+
+                        // Verifica se a resposta indica erro de autenticação
+                        if (parsedData.code === 401 || parsedData.code === 403) {
+                            reject(new Error('Erro de autenticação com a API de rastreamento. Verifique sua chave API.'));
+                            return;
+                        }
+                        
+                        resolve(parsedData);
+                    } catch (error) {
+                        console.error('❌ [Tracking] Erro ao processar resposta:', {
+                            error: error.message,
+                            responseData
+                        });
+                        reject(new Error('Erro ao processar resposta da API de rastreamento'));
+                    }
+                });
+            });
+
+            req.on('error', (error) => {
+                console.error('❌ [Tracking] Erro na requisição:', {
+                    error: error.message,
+                    code: error.code
+                });
+                reject(new Error('Erro de conexão com a API de rastreamento'));
+            });
+
+            // Timeout de 30 segundos
+            req.setTimeout(30000, () => {
+                console.error('⏱ [Tracking] Timeout na requisição');
+                req.destroy();
+                reject(new Error('Timeout na requisição de rastreamento'));
+            });
+
+            req.write(data);
+            req.end();
+        });
     }
 }
 
