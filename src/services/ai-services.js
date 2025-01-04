@@ -121,31 +121,30 @@ class AIServices {
                     }
                 }
 
-                const response = await this.openAIService.processCustomerMessage(message.from, {
-                    role: 'user',
-                    content: [
-                        {
-                            type: 'text',
-                            text: messageText
-                        }
-                    ]
-                });
+                try {
+                    const response = await this.openAIService.processCustomerMessage(message.from, {
+                        role: 'user',
+                        content: [
+                            {
+                                type: 'text',
+                                text: messageText
+                            }
+                        ]
+                    });
 
-                console.log('[AIServices] Resposta do OpenAI:', { response });
+                    console.log('[AIServices] Resposta do OpenAI:', { response });
 
-                if (response) {
-                    await this.whatsAppService.sendText(message.from, response);
-                } else {
-                    console.error('[AIServices] Resposta vazia do OpenAI');
-                    await this.whatsAppService.sendText(message.from, 
-                        'Desculpe, estou com dificuldades para processar sua mensagem. Pode tentar novamente?');
+                    if (response) {
+                        await this.whatsAppService.sendText(message.from, response);
+                    }
+
+                    return { type: 'text', response, from: message.from };
+                } catch (error) {
+                    console.error('[AIServices] Erro ao processar mensagem:', error);
+                    const errorMsg = '❌ Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.';
+                    await this.whatsAppService.sendText(message.from, errorMsg);
+                    return { type: 'text', response: errorMsg, from: message.from };
                 }
-
-                return {
-                    type: 'text',
-                    response: response,
-                    from: message.from
-                };
             }
 
             throw new Error(`Tipo de mensagem não suportado: ${message.type}`);

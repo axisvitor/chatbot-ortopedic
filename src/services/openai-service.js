@@ -641,24 +641,44 @@ class OpenAIService {
             }
             this.messageQueue.delete(threadId);
 
-            // 3. Limpa dados do Redis
+            // 3. Busca customerId antes de limpar os dados
+            let customerId = null;
             try {
-                await Promise.all([
+                const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                if (metadata) {
+                    const parsed = JSON.parse(metadata);
+                    customerId = parsed.customerId;
+                }
+            } catch (error) {
+                logger.warn('ErrorGettingThreadMetadata', { threadId, error: error.message });
+            }
+
+            // 4. Limpa dados do Redis
+            try {
+                const cleanupTasks = [
                     this.redisStore.del(`active_run:${threadId}`),
                     this.redisStore.del(`context:${threadId}`),
+                    this.redisStore.del(`thread_metadata:${threadId}`),
                     this.redisStore.deleteUserContext(threadId),
                     this.redisStore.delPattern(`tracking:${threadId}:*`),
                     this.redisStore.delPattern(`order:${threadId}:*`),
                     this.redisStore.delPattern(`payment:${threadId}:*`),
                     this.redisStore.delPattern(`waiting_order:${threadId}`),
                     this.redisStore.delPattern(`pending_order:${threadId}`)
-                ]);
-                logger.info('RedisDataCleared', { threadId });
+                ];
+
+                // Se encontrou o customerId, remove também o mapeamento customer -> thread
+                if (customerId) {
+                    cleanupTasks.push(this.redisStore.del(`customer_thread:${customerId}`));
+                }
+
+                await Promise.all(cleanupTasks);
+                logger.info('RedisDataCleared', { threadId, customerId });
             } catch (error) {
                 logger.error('ErrorClearingRedisData', { threadId, error: error.message });
             }
 
-            // 4. Deleta thread na OpenAI
+            // 5. Deleta thread na OpenAI
             try {
                 const existingThread = await this.client.beta.threads.retrieve(threadId);
                 if (existingThread) {
@@ -725,44 +745,48 @@ class OpenAIService {
         try {
             logger.info('ProcessingCustomerMessage', { customerId });
 
-            // Verifica se é comando #resetid antes de qualquer processamento
-            if (typeof message === 'string' && message.toLowerCase() === '#resetid' ||
-                message?.content?.toLowerCase() === '#resetid' ||
-                (Array.isArray(message?.content) && message.content[0]?.text?.toLowerCase() === '#resetid')) {
-                
-                logger.info('ResetCommandDetected', { customerId });
-                const threadId = await this.getOrCreateThreadForCustomer(customerId);
-                if (!threadId) {
-                    throw new Error('Não foi possível recuperar thread para reset');
-                }
-                
-                await this.handleCommand(threadId, '#resetid');
-                return " Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.";
-            }
-
+            // 1. Obtém ou cria thread para o cliente
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             if (!threadId) {
                 throw new Error('Não foi possível criar/recuperar thread');
             }
 
-            // Verifica se já tem um run ativo
+            // 2. Verifica se já tem um run ativo
             if (await this.hasActiveRun(threadId)) {
                 this.queueMessage(threadId, message);
-                return " Aguarde um momento enquanto processo sua mensagem anterior...";
+                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
-            // Adiciona a mensagem e executa o assistant
-            const response = await this.addMessageAndRun(threadId, message);
-            
-            // Atualiza contexto se necessário
-            if (response && await this._shouldUpdateContext(threadId)) {
-                await this._saveContextToRedis(threadId, response);
-            }
+            // 3. Adiciona a mensagem e executa o assistant
+            try {
+                const response = await this.addMessageAndRun(threadId, message);
+                
+                // 4. Atualiza contexto se necessário
+                if (response && await this._shouldUpdateContext(threadId)) {
+                    await this._saveContextToRedis(threadId);
+                }
 
-            return response;
+                // 5. Atualiza metadados da thread
+                try {
+                    const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                    if (metadata) {
+                        const parsed = JSON.parse(metadata);
+                        parsed.lastActivity = new Date().toISOString();
+                        parsed.messageCount = (parsed.messageCount || 0) + 1;
+                        await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify(parsed), 30 * 24 * 60 * 60);
+                    }
+                } catch (error) {
+                    logger.warn('ErrorUpdatingThreadMetadata', { threadId, error: error.message });
+                }
+
+                return response;
+            } catch (error) {
+                logger.error('ErrorProcessingMessage', { customerId, threadId, error });
+                throw error;
+            }
         } catch (error) {
             logger.error('ErrorProcessingCustomerMessage', { customerId, error });
-            return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
+            throw error;
         }
     }
 
