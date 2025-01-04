@@ -625,14 +625,32 @@ class OpenAIService {
                                 statusEmoji = '📮';
                             }
 
+                            // Formata os últimos 3 eventos
+                            let eventsText = '';
+                            if (tracking.events && tracking.events.length > 0) {
+                                const lastEvents = tracking.events.slice(0, 3);
+                                eventsText = '\n\n📝 *Últimas Atualizações:*\n' + lastEvents.map(event => {
+                                    const eventDate = event.time ? new Date(event.time).toLocaleString('pt-BR', {
+                                        day: '2-digit',
+                                        month: '2-digit',
+                                        year: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    }) : 'Data não disponível';
+                                    
+                                    return `• ${eventDate}\n  ${event.description || event.info}` + 
+                                           (event.location ? `\n  📍 ${event.location}` : '');
+                                }).join('\n\n');
+                            }
+
                             // Formata a mensagem com as informações disponíveis
                             const message = [
-                                `📬 Informações de Rastreio: ${tracking.code}`,
-                                '',
-                                `${statusEmoji} Status: ${tracking.status}`,
-                                tracking.location ? `📍 Localização: ${tracking.location}` : null,
-                                tracking.last_update ? `🕒 Última Atualização: ${tracking.last_update}` : null,
-                                tracking.message ? `\n📝 Observação: ${tracking.message}` : null
+                                `📦 *Status do Rastreamento*\n`,
+                                `*Código:* ${tracking.code}`,
+                                `*Status:* ${statusEmoji} ${tracking.status}`,
+                                tracking.last_update ? `*Última Atualização:* ${tracking.last_update}` : null,
+                                tracking.location ? `*Localização:* 📍 ${tracking.location}` : null,
+                                eventsText
                             ].filter(Boolean).join('\n');
 
                             output = JSON.stringify({

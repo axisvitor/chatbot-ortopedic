@@ -188,7 +188,15 @@ class TrackingService {
                     year: 'numeric',
                     hour: '2-digit',
                     minute: '2-digit'
-                }) : null
+                }) : null,
+
+                // Lista de eventos
+                events: trackInfo.track_info?.map(event => ({
+                    time: event.time || event.Date,
+                    info: event.StatusDescription || event.Details || event.info,
+                    description: event.Details || event.StatusDescription || event.description,
+                    location: event.Location || event.location
+                })) || []
             };
 
         } catch (error) {
@@ -538,6 +546,19 @@ class TrackingService {
             if (trackInfo.last_update) {
                 const date = new Date(trackInfo.last_update);
                 response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
+            }
+
+            // Adiciona as 3 últimas atualizações
+            if (trackInfo.events && Array.isArray(trackInfo.events)) {
+                const lastEvents = trackInfo.events.slice(0, 3);
+                if (lastEvents.length > 0) {
+                    response += `\n📝 *Últimas Atualizações:*\n`;
+                    lastEvents.forEach((event, index) => {
+                        const eventDate = new Date(event.time).toLocaleString('pt-BR');
+                        response += `${index + 1}. ${eventDate}\n   ${event.info || event.description}\n`;
+                    });
+                    response += '\n';
+                }
             }
 
             // Adiciona tempo em trânsito
