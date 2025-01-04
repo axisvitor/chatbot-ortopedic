@@ -80,21 +80,38 @@ class OrderApi extends NuvemshopApiBase {
                 timestamp: new Date().toISOString()
             });
 
-            // Busca usando o parâmetro q
+            // Busca usando o endpoint de busca geral primeiro
             const searchResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
-                params: { 
+                params: {
                     q: cleanNumber,
-                    fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number'
+                    fields: this.defaultFields,
+                    per_page: 50
                 }
             });
 
+            // Se não encontrar nada, tenta buscar diretamente pelo número
             if (!searchResponse?.data || !Array.isArray(searchResponse.data) || searchResponse.data.length === 0) {
-                console.log('[Nuvemshop] Pedido não encontrado:', {
-                    numeroOriginal: orderNumber,
-                    numeroLimpo: cleanNumber,
-                    timestamp: new Date().toISOString()
+                console.log('[Nuvemshop] Nada encontrado na busca geral, tentando busca direta');
+                
+                const directResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                    params: {
+                        number: cleanNumber,
+                        fields: this.defaultFields
+                    }
                 });
-                return null;
+
+                if (!directResponse?.data || !Array.isArray(directResponse.data) || directResponse.data.length === 0) {
+                    console.log('[Nuvemshop] Pedido não encontrado:', {
+                        numeroOriginal: orderNumber,
+                        numeroLimpo: cleanNumber,
+                        timestamp: new Date().toISOString()
+                    });
+                    return null;
+                }
+
+                const order = directResponse.data[0];
+                await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
+                return order;
             }
 
             // Encontra o pedido com o número exato

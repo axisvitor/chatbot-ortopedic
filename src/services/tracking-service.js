@@ -27,6 +27,17 @@ class TrackingService {
             carriers: TRACKING_CONFIG.carriers || ['correios', 'jadlog', 'fedex', 'dhl']
         };
 
+        // Status padrão com emojis
+        this.STATUS_EMOJIS = {
+            'InTransit': '📫',
+            'Delivered': '✅',
+            'Pickup': '🚚',
+            'CustomsHold': '📦',
+            'NotFound': '❓',
+            'Exception': '⚠️',
+            'Expired': '⏰'
+        };
+
         this.redisStore = new RedisStore();
         this.nuvemshopService = new NuvemshopService();
         this.whatsAppService = whatsAppService;
@@ -435,6 +446,7 @@ class TrackingService {
             const isCustomsHold = trackInfo.package_status === 'CustomsHold' || 
                                 /tribut|taxa|imposto|aduaneir/i.test(trackInfo.status);
             
+            // Se estiver em tributação, encaminha para o financeiro
             if (isCustomsHold) {
                 try {
                     // Busca informações do pedido no Redis
@@ -490,28 +502,40 @@ class TrackingService {
                     console.error('❌ Erro ao notificar financeiro:', error);
                 }
             }
-            
-            // Adiciona informações do status atual
-            if (trackInfo.package_status) {
-                let status = '';
-                switch(trackInfo.package_status) {
+
+            // Define o status com emoji
+            let status = trackInfo.package_status;
+            if (isCustomsHold) {
+                status = '📦 Em processamento';
+            } else {
+                const emoji = this.STATUS_EMOJIS[trackInfo.package_status] || '❓';
+                switch (trackInfo.package_status) {
                     case 'InTransit':
-                        status = '📫 Em Trânsito';
+                        status = `${emoji} Em Trânsito`;
                         break;
                     case 'Delivered':
-                        status = '✅ Entregue';
+                        status = `${emoji} Entregue`;
                         break;
                     case 'Pickup':
-                        status = '🚚 Coletado';
+                        status = `${emoji} Coletado`;
                         break;
                     case 'CustomsHold':
-                        status = '📦 Em processamento';
+                        status = `${emoji} Em processamento`;
+                        break;
+                    case 'NotFound':
+                        status = `${emoji} Não encontrado`;
+                        break;
+                    case 'Exception':
+                        status = `${emoji} Problema na entrega`;
+                        break;
+                    case 'Expired':
+                        status = `${emoji} Expirado`;
                         break;
                     default:
-                        status = trackInfo.package_status;
+                        status = `${emoji} ${trackInfo.package_status}`;
                 }
-                response += `*Status:* ${status}\n`;
             }
+            response += `*Status:* ${status}\n`;
 
             // Adiciona última atualização
             if (trackInfo.last_update) {
@@ -519,27 +543,32 @@ class TrackingService {
                 response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
             }
 
-            // Filtra mensagens de tributação/taxação
-            if (trackInfo.status) {
-                let situacao = trackInfo.status;
-                
-                // Lista de termos para filtrar
-                const termsToReplace = [
-                    /aguardando pagamento de tributos/i,
-                    /em processo de tributação/i,
-                    /pagamento de tributos/i,
-                    /taxa/i,
-                    /tribut[oaçã]/i,
-                    /imposto/i,
-                    /declaração aduaneira/i
-                ];
-                
-                // Substitui termos relacionados à tributação
-                if (termsToReplace.some(term => term.test(situacao))) {
-                    situacao = 'Em processamento na unidade dos Correios';
-                }
-                
-                response += `*Situação:* ${situacao}\n`;
+            // Adiciona os últimos eventos
+            if (trackInfo.events && trackInfo.events.length > 0) {
+                response += `\n📝 *Últimas Atualizações:*\n`;
+                trackInfo.events.slice(0, 3).forEach((event, index) => {
+                    const date = new Date(event.time).toLocaleString('pt-BR');
+                    let description = event.description || event.info;
+                    
+                    // Filtra informações sensíveis de tributação
+                    if (isCustomsHold) {
+                        const termsToReplace = [
+                            /aguardando pagamento de tributos/i,
+                            /em processo de tributação/i,
+                            /pagamento de tributos/i,
+                            /taxa/i,
+                            /tribut[oaçã]/i,
+                            /imposto/i,
+                            /declaração aduaneira/i
+                        ];
+                        
+                        if (termsToReplace.some(term => term.test(description))) {
+                            description = 'Em processamento na unidade dos Correios';
+                        }
+                    }
+                    
+                    response += `${index + 1}. ${date}\n   ${description}\n`;
+                });
             }
 
             // Adiciona tempo em trânsito
