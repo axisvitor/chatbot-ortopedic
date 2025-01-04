@@ -780,11 +780,15 @@ class WhatsAppService {
                 return;
             }
 
+            // Extrai a mensagem real
+            const realMessage = this._extractRealMessage(message);
+
             // Verifica se é uma mensagem de texto e se é o comando #resetid
             if ((message.type === 'text' || message.tipo === 'text') && 
                 (message.data?.toLowerCase() === '#resetid' || 
                  message.texto?.toLowerCase() === '#resetid' ||
                  message.message?.extendedTextMessage?.text?.toLowerCase() === '#resetid')) {
+                console.log('🔄 [WhatsApp] Executando comando #resetid');
                 await this.redisStore.deleteUserContext(from);
                 await this.openAIService.deleteThread(from);
                 return {
@@ -792,9 +796,6 @@ class WhatsAppService {
                     message: '🔄 Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.'
                 };
             }
-
-            // Extrai a mensagem real
-            const realMessage = this._extractRealMessage(message);
 
             // Processa a mensagem de acordo com o tipo
             if (realMessage.imageMessage) {
