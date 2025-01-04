@@ -539,6 +539,48 @@ class OpenAIService {
                                 order.total.toFixed(2) : 
                                 String(order.total).replace(/[^\d.,]/g, '');
 
+                            // Verifica status do rastreamento se disponível
+                            let deliveryStatus = '';
+                            if (order.shipping_tracking_number) {
+                                try {
+                                    const tracking = await this.trackingService.getTrackingInfo(order.shipping_tracking_number);
+                                    if (tracking && tracking.latest_event_info) {
+                                        const trackingDate = new Date(tracking.latest_event_time).toLocaleString('pt-BR', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            second: '2-digit'
+                                        });
+
+                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}` +
+                                                       `\n📍 Status: ${tracking.latest_event_info}` +
+                                                       `\n🕒 Última Atualização: ${trackingDate}`;
+
+                                        // Adiciona status de entrega se estiver entregue
+                                        if (tracking.package_status === 'Delivered') {
+                                            deliveryStatus += `\n\n✅ Pedido Entregue` +
+                                                            `\n📅 Data de Entrega: ${trackingDate}`;
+                                        }
+                                    } else {
+                                        deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                       `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
+                                    }
+                                } catch (error) {
+                                    logger.error('ErrorCheckingDeliveryStatus', { 
+                                        threadId, 
+                                        orderNumber: order.number,
+                                        trackingNumber: order.shipping_tracking_number,
+                                        error 
+                                    });
+                                    console.error('[OpenAI] Erro ao buscar status do rastreio:', error);
+                                    deliveryStatus = `\n📦 Status do Envio: ${order.shipping_status}` +
+                                                   `\n📬 Rastreamento: ${order.shipping_tracking_number}`;
+                                }
+                            }
+
                             output = JSON.stringify({
                                 error: false,
                                 message: `🛍 Detalhes do Pedido #${order.number}\n\n` +
@@ -546,7 +588,7 @@ class OpenAIService {
                                         `📅 Data: ${orderDate}\n` +
                                         `📦 Status: ${order.status}\n` +
                                         `💰 Valor Total: R$ ${total}\n\n` +
-                                        `Produtos:\n${products}`
+                                        `Produtos:\n${products}${deliveryStatus}`
                             });
                         }
                         break;
@@ -1152,12 +1194,17 @@ class OpenAIService {
 
                 // Limpa dados do Redis
                 try {
+                    // Usa o método deleteThreadData que limpa todos os dados relacionados à thread
+                    await this.redisStore.deleteThreadData(threadId);
+                    
+                    // Limpa dados adicionais específicos
                     await Promise.all([
-                        this.redisStore.del(`thread:${threadId}`),
-                        this.redisStore.del(`context:${threadId}`),
-                        this.redisStore.del(`waiting_order:${threadId}`),
-                        this.redisStore.del(`pending_order:${threadId}`)
+                        this.redisStore.delPattern(`tracking:*`), // Cache de rastreamento
+                        this.redisStore.delPattern(`order:*`),    // Cache de pedidos
+                        this.redisStore.delPattern(`waiting_order:${threadId}`),
+                        this.redisStore.delPattern(`pending_order:${threadId}`)
                     ]);
+                    
                     logger.info('RedisDataCleared', { threadId });
                 } catch (error) {
                     logger.error('ErrorClearingRedisData', { threadId, error: error.message });

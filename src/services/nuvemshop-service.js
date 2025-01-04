@@ -936,6 +936,74 @@ class NuvemshopService {
         }
     }
 
+    /**
+     * Busca um pedido pelo código de rastreamento
+     * @param {string} trackingNumber - Código de rastreamento
+     * @returns {Promise<Object|null>} Pedido encontrado ou null
+     */
+    async getOrderByTrackingNumber(trackingNumber) {
+        try {
+            const { data: orders } = await this.getOrders({
+                shipping_tracking_number: trackingNumber
+            });
+
+            if (!orders || orders.length === 0) {
+                console.log('[Nuvemshop] Nenhum pedido encontrado para o rastreio:', trackingNumber);
+                return null;
+            }
+
+            // Retorna o pedido mais recente se houver múltiplos
+            const order = orders[0];
+            console.log('[Nuvemshop] Pedido encontrado para o rastreio:', {
+                trackingNumber,
+                orderId: order.id,
+                status: order.status
+            });
+
+            return order;
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao buscar pedido por rastreio:', {
+                trackingNumber,
+                error: error.message
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Atualiza o status de um pedido
+     * @param {string} orderId - ID do pedido
+     * @param {string} status - Novo status
+     * @returns {Promise<Object>} Pedido atualizado
+     */
+    async updateOrderStatus(orderId, status) {
+        try {
+            console.log('[Nuvemshop] Atualizando status do pedido:', {
+                orderId,
+                newStatus: status
+            });
+
+            const response = await this.client.put(`/${NUVEMSHOP_CONFIG.userId}/orders/${orderId}`, {
+                status: status
+            });
+
+            console.log('[Nuvemshop] Status do pedido atualizado com sucesso:', {
+                orderId,
+                oldStatus: response.data.previous_status,
+                newStatus: response.data.status
+            });
+
+            return response.data;
+        } catch (error) {
+            console.error('[Nuvemshop] Erro ao atualizar status do pedido:', {
+                orderId,
+                status,
+                error: error.message
+            });
+            throw error;
+        }
+    }
+
     // Busca pedidos em aberto
     async getOpenOrders() {
         return await this.orderApi.getOpenOrders();

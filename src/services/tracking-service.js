@@ -394,6 +394,38 @@ class TrackingService {
         }
     }
 
+    /**
+     * Atualiza o status do pedido na Nuvemshop quando o pacote é entregue
+     * @private
+     * @param {string} trackingNumber - Número de rastreio
+     */
+    async _updateNuvemshopOrderStatus(trackingNumber) {
+        try {
+            // Busca o pedido pelo código de rastreio
+            const order = await this.nuvemshopService.getOrderByTrackingNumber(trackingNumber);
+            
+            if (!order) {
+                console.log('[Tracking] Pedido não encontrado para o rastreio:', trackingNumber);
+                return;
+            }
+
+            // Atualiza o status para entregue
+            await this.nuvemshopService.updateOrderStatus(order.id, 'delivered');
+            
+            console.log('[Tracking] Status do pedido atualizado com sucesso:', {
+                orderId: order.id,
+                trackingNumber,
+                newStatus: 'delivered'
+            });
+        } catch (error) {
+            console.error('[Tracking] Erro ao atualizar status do pedido:', {
+                trackingNumber,
+                error: error.message
+            });
+            // Não propaga o erro para não interromper o fluxo principal
+        }
+    }
+
     async processTrackingRequest(trackingNumber, from) {
         const transactionId = `trk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         console.log(`[Tracking][${transactionId}] Processando requisição de rastreamento`, {
