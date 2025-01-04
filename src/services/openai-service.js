@@ -36,52 +36,56 @@ class OpenAIService {
         this.financialService = financialService; // Recebe o FinancialService do container
 
         // Define as funções disponíveis para o Assistant
-        this.functions = [
+        this.functions = this._getAssistantFunctions();
+    }
+
+    _getAssistantFunctions() {
+        return [
             {
                 name: "check_order",
-                description: "Verifica informações básicas de pedidos como status, pagamento e produtos",
+                description: "Verifica informações básicas de pedidos como status, pagamento e produtos. NÃO atualiza automaticamente o status de rastreio.",
                 parameters: {
                     type: "object",
+                    required: ["order_number"],
                     properties: {
                         order_number: {
                             type: "string",
                             description: "Número do pedido (ex: #123456)"
                         }
-                    },
-                    required: ["order_number"]
+                    }
                 }
             },
             {
                 name: "check_tracking",
-                description: "Busca status atualizado de entrega diretamente na transportadora",
+                description: "Busca status atualizado de entrega diretamente na transportadora. Use em conjunto com check_order quando precisar de status atualizado.",
                 parameters: {
                     type: "object",
+                    required: ["tracking_code"],
                     properties: {
                         tracking_code: {
                             type: "string",
-                            description: "Código de rastreio para consulta (ex: NM123456789BR)"
+                            description: "Código de rastreio (ex: NM123456789BR)"
                         }
-                    },
-                    required: ["tracking_code"]
+                    }
                 }
             },
             {
                 name: "extract_order_number",
-                description: "Identifica e valida números de pedido no texto do cliente",
+                description: "Identifica números de pedido no texto do cliente. Use antes de check_order para validar números.",
                 parameters: {
                     type: "object",
+                    required: ["text"],
                     properties: {
                         text: {
                             type: "string",
                             description: "Texto do cliente para extrair número do pedido"
                         }
-                    },
-                    required: ["text"]
+                    }
                 }
             },
             {
                 name: "get_business_hours",
-                description: "Retorna informações sobre horário de atendimento",
+                description: "Retorna informações sobre horário de atendimento e disponibilidade",
                 parameters: {
                     type: "object",
                     properties: {}
@@ -89,67 +93,66 @@ class OpenAIService {
             },
             {
                 name: "forward_to_financial",
-                description: "Encaminha casos para análise do setor financeiro",
+                description: "Encaminha casos para análise do setor financeiro (pagamento, reembolso, taxação, etc)",
                 parameters: {
                     type: "object",
+                    required: ["reason", "customer_message", "priority"],
                     properties: {
                         order_number: {
                             type: "string",
-                            description: "Número do pedido relacionado (opcional)"
+                            description: "Número do pedido (se disponível)"
                         },
                         tracking_code: {
                             type: "string",
-                            description: "Código de rastreio relacionado (opcional)"
+                            description: "Código de rastreio (se disponível)"
                         },
                         reason: {
                             type: "string",
-                            description: "Motivo do encaminhamento",
-                            enum: ["payment_issue", "refund_request", "taxation", "customs", "payment_proof", "other"]
+                            enum: ["payment", "refund", "taxation", "customs", "payment_proof", "other"],
+                            description: "Motivo do encaminhamento"
                         },
                         customer_message: {
                             type: "string",
-                            description: "Mensagem original do cliente que gerou o encaminhamento"
+                            description: "Mensagem original do cliente"
                         },
                         priority: {
                             type: "string",
-                            description: "Prioridade do caso",
-                            enum: ["low", "medium", "high", "urgent"],
-                            default: "medium"
+                            enum: ["high", "medium", "low"],
+                            description: "Nível de urgência"
                         },
                         additional_info: {
                             type: "string",
-                            description: "Informações adicionais relevantes para o financeiro"
+                            description: "Informações adicionais relevantes"
                         }
-                    },
-                    required: ["reason", "customer_message"]
+                    }
                 }
             },
             {
                 name: "request_payment_proof",
-                description: "Gerencia o fluxo de solicitação e processamento de comprovantes de pagamento",
+                description: "Gerencia todo o fluxo de solicitação e processamento de comprovantes de pagamento",
                 parameters: {
                     type: "object",
+                    required: ["action", "order_number"],
                     properties: {
                         action: {
                             type: "string",
-                            description: "Ação a ser executada",
-                            enum: ["request", "validate", "process", "cancel"]
+                            enum: ["request", "validate", "process", "cancel"],
+                            description: "Ação a ser executada"
                         },
                         order_number: {
                             type: "string",
-                            description: "Número do pedido relacionado"
+                            description: "Número do pedido"
                         },
                         status: {
                             type: "string",
-                            description: "Status atual do processamento",
-                            enum: ["pending", "processing", "approved", "rejected"]
+                            enum: ["pending", "processing", "approved", "rejected"],
+                            description: "Status do comprovante"
                         },
                         image_url: {
                             type: "string",
                             description: "URL da imagem do comprovante (apenas para action=process)"
                         }
-                    },
-                    required: ["action"]
+                    }
                 }
             }
         ];
@@ -643,36 +646,42 @@ class OpenAIService {
      */
     async getOrCreateThreadForCustomer(customerId) {
         try {
-            // Tenta recuperar thread do Redis
-            const threadData = await this.redisStore.getAssistantThread(customerId);
-            if (threadData) {
-                logger.info('ExistingThreadRecovered', { customerId, threadId: threadData.id });
-                console.log('[OpenAI] Thread existente recuperada do Redis:', {
-                    customerId,
-                    threadId: threadData.id
-                });
-                return threadData.id;
+            // Busca thread existente
+            const threadKey = `customer_thread:${customerId}`;
+            let threadId = await this.redisStore.get(threadKey);
+
+            if (threadId) {
+                // Verifica se a thread ainda existe na OpenAI
+                try {
+                    await this.client.beta.threads.retrieve(threadId);
+                    return threadId;
+                } catch (error) {
+                    logger.warn('ThreadNotFound', { customerId, threadId });
+                    await this.redisStore.del(threadKey);
+                    threadId = null;
+                }
             }
 
-            // Se não existir, cria nova thread
+            // Cria nova thread
             const thread = await this.client.beta.threads.create();
-            
-            // Salva no Redis
-            await this.redisStore.setAssistantThread(customerId, {
-                id: thread.id,
-                createdAt: new Date().toISOString()
-            });
-            
-            logger.info('NewThreadCreated', { customerId, threadId: thread.id });
-            console.log('[OpenAI] Nova thread criada e salva no Redis:', {
-                customerId,
-                threadId: thread.id
-            });
+            threadId = thread.id;
 
-            return thread.id;
+            // Salva mapeamento cliente -> thread
+            await this.redisStore.set(threadKey, threadId, 30 * 24 * 60 * 60); // 30 dias
+
+            // Inicializa metadados da thread
+            await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify({
+                customerId,
+                createdAt: new Date().toISOString(),
+                lastActivity: new Date().toISOString(),
+                messageCount: 0
+            }), 30 * 24 * 60 * 60);
+
+            logger.info('ThreadCreated', { customerId, threadId });
+            return threadId;
+
         } catch (error) {
-            logger.error('ErrorGettingOrCreateThread', { customerId, error });
-            console.error('[OpenAI] Erro ao obter/criar thread:', error);
+            logger.error('ErrorCreatingThread', { customerId, error });
             throw error;
         }
     }
@@ -1066,16 +1075,27 @@ class OpenAIService {
      */
     async _saveContextToRedis(threadId, context) {
         try {
-            const key = `openai:context:${threadId}`;
-            await this.redisStore.set(key, JSON.stringify({
-                lastUpdate: new Date().toISOString(),
-                context: context
-            }));
+            const contextKey = `context:thread:${threadId}`;
+            const lastUpdateKey = `context:update:${threadId}`;
+            const contextData = {
+                lastMessage: context,
+                timestamp: Date.now(),
+                metadata: {
+                    lastOrderNumber: await this.redisStore.get(`pending_order:${threadId}`),
+                    lastTrackingCode: await this.redisStore.get(`tracking:${threadId}`),
+                    waitingFor: await this.redisStore.get(`waiting_order:${threadId}`),
+                    lastToolCalls: await this.redisStore.get(`tool_calls:${threadId}`)
+                }
+            };
+
+            await Promise.all([
+                this.redisStore.set(contextKey, JSON.stringify(contextData), 24 * 60 * 60), // 24 horas
+                this.redisStore.set(lastUpdateKey, Date.now().toString(), 24 * 60 * 60)
+            ]);
+
             logger.info('ContextSaved', { threadId });
-            console.log('[OpenAI] Contexto salvo no Redis:', { threadId });
         } catch (error) {
             logger.error('ErrorSavingContext', { threadId, error });
-            console.error('[OpenAI] Erro ao salvar contexto:', error);
         }
     }
 
@@ -1085,18 +1105,24 @@ class OpenAIService {
      */
     async _getContextFromRedis(threadId) {
         try {
-            const key = `openai:context:${threadId}`;
-            const data = await this.redisStore.get(key);
-            if (data) {
-                const parsed = JSON.parse(data);
-                logger.info('ContextRecovered', { threadId });
-                console.log('[OpenAI] Contexto recuperado do Redis:', { threadId });
-                return parsed.context;
+            const contextKey = `context:thread:${threadId}`;
+            const contextData = await this.redisStore.get(contextKey);
+            
+            if (!contextData) {
+                return null;
             }
-            return null;
+
+            const context = JSON.parse(contextData);
+            
+            // Verifica se o contexto ainda é válido (24 horas)
+            if (Date.now() - context.timestamp > 24 * 60 * 60 * 1000) {
+                await this.redisStore.del(contextKey);
+                return null;
+            }
+
+            return context;
         } catch (error) {
-            logger.error('ErrorRecoveringContext', { threadId, error });
-            console.error('[OpenAI] Erro ao recuperar contexto:', error);
+            logger.error('ErrorGettingContext', { threadId, error });
             return null;
         }
     }
@@ -1107,18 +1133,17 @@ class OpenAIService {
      */
     async _shouldUpdateContext(threadId) {
         try {
-            const key = `openai:context:${threadId}`;
-            const data = await this.redisStore.get(key);
-            if (!data) return true;
-
-            const parsed = JSON.parse(data);
-            const lastUpdate = new Date(parsed.lastUpdate);
-            const now = new Date();
+            const lastUpdateKey = `context:update:${threadId}`;
+            const lastUpdate = await this.redisStore.get(lastUpdateKey);
             
-            return (now - lastUpdate) >= this.CONTEXT_UPDATE_INTERVAL;
+            if (!lastUpdate) {
+                return true;
+            }
+
+            // Atualiza a cada 15 minutos
+            return (Date.now() - parseInt(lastUpdate)) > this.CONTEXT_UPDATE_INTERVAL;
         } catch (error) {
             logger.error('ErrorCheckingContextUpdate', { threadId, error });
-            console.error('[OpenAI] Erro ao verificar atualização de contexto:', error);
             return true;
         }
     }
