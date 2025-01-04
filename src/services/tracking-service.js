@@ -409,13 +409,14 @@ class TrackingService {
                 return;
             }
 
-            // Atualiza o status para entregue
-            await this.nuvemshopService.updateOrderStatus(order.id, 'delivered');
+            // Atualiza o status para closed quando entregue
+            await this.nuvemshopService.updateOrderStatus(order.id, 'closed');
             
             console.log('[Tracking] Status do pedido atualizado com sucesso:', {
                 orderId: order.id,
                 trackingNumber,
-                newStatus: 'delivered'
+                oldStatus: order.status,
+                newStatus: 'closed'
             });
         } catch (error) {
             console.error('[Tracking] Erro ao atualizar status do pedido:', {
