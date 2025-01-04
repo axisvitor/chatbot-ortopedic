@@ -6,6 +6,7 @@ const { NUVEMSHOP_CONFIG } = require('../config/settings');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { ImageProcessingService } = require('./image-processing-service');
 const { FinancialService } = require('./financial-service');
+const moment = require('moment');
 
 class OrderValidationService {
     constructor(nuvemshopClient = null, whatsAppService = null) {
@@ -549,12 +550,22 @@ class OrderValidationService {
                 timestamp: new Date().toISOString()
             });
 
+            // Formata a data corretamente
+            const orderDate = orderInfo.data ? 
+                moment(orderInfo.data).format('DD/MM/YYYY HH:mm') : 
+                'Data não disponível';
+
+            // Formata o valor total com segurança
+            const totalValue = typeof orderInfo.valor_total === 'number' ? 
+                orderInfo.valor_total.toFixed(2) : 
+                String(orderInfo.valor_total || '0.00').replace(/[^\d.,]/g, '');
+
             // Template base do pedido conforme prompt
-            let message = `🛍 *Detalhes do Pedido #${orderInfo.numero_pedido}*\n\n`;
+            let message = `🛍 Detalhes do Pedido #${orderInfo.numero_pedido}\n\n`;
             message += `👤 Cliente: ${orderInfo.cliente}\n`;
-            message += `📅 Data: ${orderInfo.data}\n`;
+            message += `📅 Data: ${orderDate}\n`;
             message += `📦 Status: ${orderInfo.status}\n`;
-            message += `💰 Valor Total: R$ ${orderInfo.valor_total}\n`;
+            message += `💰 Valor Total: R$ ${totalValue}\n`;
             
             // Adiciona informações de pagamento
             if (orderInfo.pagamento) {
@@ -568,17 +579,56 @@ class OrderValidationService {
             if (Array.isArray(orderInfo.produtos) && orderInfo.produtos.length > 0) {
                 message += `*Produtos:*\n`;
                 orderInfo.produtos.forEach(produto => {
+                    // Formata o preço com segurança
+                    const price = typeof produto.preco === 'number' ? 
+                        produto.preco.toFixed(2) : 
+                        String(produto.preco || '0.00').replace(/[^\d.,]/g, '');
+                    
                     // Inclui variações se existirem
                     const variacoes = produto.variacoes ? ` (${produto.variacoes})` : '';
-                    message += `▫ ${produto.quantidade}x ${produto.nome}${variacoes} - R$ ${produto.preco}\n`;
+                    message += `▫ ${produto.quantidade}x ${produto.nome}${variacoes} - R$ ${price}\n`;
                 });
             }
 
             // Apenas inclui informações básicas de rastreio se disponível
             if (orderInfo.rastreamento?.codigo && orderInfo.rastreamento.codigo !== 'Não disponível') {
-                message += `\n📦 Status do Envio: ${orderInfo.status_envio}\n`;
-                message += `📬 Código de Rastreio: ${orderInfo.rastreamento.codigo}\n`;
-                message += `ℹ️ Use a função check_tracking para ver o status atualizado da entrega`;
+                message += `\n📦 *Status do Rastreamento*\n\n`;
+                message += `*Código:* ${orderInfo.rastreamento.codigo}\n`;
+                
+                // Determina o emoji do status
+                let statusEmoji = '📦'; // Padrão: Em Processamento
+                if (orderInfo.status_envio) {
+                    const status = orderInfo.status_envio.toLowerCase();
+                    if (status.includes('trânsito')) statusEmoji = '📫';
+                    else if (status.includes('entregue')) statusEmoji = '✅';
+                    else if (status.includes('coletado') || status.includes('postado')) statusEmoji = '🚚';
+                    else if (status.includes('tributação') || status.includes('taxa')) statusEmoji = '💰';
+                }
+                
+                message += `*Status:* ${statusEmoji} ${orderInfo.status_envio || 'Em processamento'}\n`;
+                
+                if (orderInfo.rastreamento.ultima_atualizacao) {
+                    message += `*Última Atualização:* ${moment(orderInfo.rastreamento.ultima_atualizacao).format('DD/MM/YYYY HH:mm')}\n`;
+                }
+
+                // Adiciona as últimas 3 atualizações se disponíveis
+                if (Array.isArray(orderInfo.rastreamento.eventos) && orderInfo.rastreamento.eventos.length > 0) {
+                    message += `\n📝 *Últimas Atualizações:*\n`;
+                    
+                    // Pega os 3 eventos mais recentes
+                    const lastEvents = orderInfo.rastreamento.eventos.slice(0, 3);
+                    lastEvents.forEach((evento, index) => {
+                        const eventDate = moment(evento.data).format('DD/MM/YYYY HH:mm');
+                        message += `${index + 1}. ${eventDate}\n   ${evento.descricao}\n`;
+                    });
+
+                    // Adiciona tempo em trânsito se disponível
+                    if (orderInfo.rastreamento.dias_transito) {
+                        message += `\n_Tempo em trânsito: ${orderInfo.rastreamento.dias_transito} dias_`;
+                    }
+                } else {
+                    message += `\n_Use a função check_tracking para ver o status atualizado da entrega_`;
+                }
             }
 
             return message;
