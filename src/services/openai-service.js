@@ -690,6 +690,21 @@ class OpenAIService {
         try {
             logger.info('ProcessingCustomerMessage', { customerId });
 
+            // Verifica se é comando #resetid antes de qualquer processamento
+            if (typeof message === 'string' && message.toLowerCase() === '#resetid' ||
+                message?.content?.toLowerCase() === '#resetid' ||
+                (Array.isArray(message?.content) && message.content[0]?.text?.toLowerCase() === '#resetid')) {
+                
+                logger.info('ResetCommandDetected', { customerId });
+                const threadId = await this.getOrCreateThreadForCustomer(customerId);
+                if (!threadId) {
+                    throw new Error('Não foi possível recuperar thread para reset');
+                }
+                
+                await this.handleCommand(threadId, '#resetid');
+                return " Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.";
+            }
+
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             if (!threadId) {
                 throw new Error('Não foi possível criar/recuperar thread');
@@ -698,7 +713,7 @@ class OpenAIService {
             // Verifica se já tem um run ativo
             if (await this.hasActiveRun(threadId)) {
                 this.queueMessage(threadId, message);
-                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
+                return " Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
             // Adiciona a mensagem e executa o assistant
@@ -731,7 +746,7 @@ class OpenAIService {
                 logger.info('WaitingForPaymentProof', { threadId });
                 
                 if (!images?.length) {
-                    return '❌ Não recebi nenhuma imagem. Por favor, envie uma foto do comprovante.';
+                    return ' Não recebi nenhuma imagem. Por favor, envie uma foto do comprovante.';
                 }
 
                 let orderNumber = message ? 
@@ -765,7 +780,7 @@ class OpenAIService {
             // Verifica se já tem um run ativo
             if (await this.hasActiveRun(threadId)) {
                 this.queueMessage(threadId, { role: "user", content: messageContent });
-                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
+                return " Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
             // Adiciona a mensagem e executa o assistant
@@ -998,17 +1013,17 @@ class OpenAIService {
             }
 
             if (pendingOrder && orderNumber && pendingOrder !== orderNumber) {
-                return `❌ O número do pedido informado (#${orderNumber}) é diferente do pedido pendente (#${pendingOrder}). Por favor, confirme o número correto do pedido.`;
+                return ` O número do pedido informado (#${orderNumber}) é diferente do pedido pendente (#${pendingOrder}). Por favor, confirme o número correto do pedido.`;
             }
 
             if (!image) {
-                return '❌ Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.';
+                return ' Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.';
             }
 
             // Validar o pedido
             const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
             if (!order) {
-                return `❌ Não encontrei o pedido #${orderNumber}. Por favor, verifique se o número está correto.`;
+                return ` Não encontrei o pedido #${orderNumber}. Por favor, verifique se o número está correto.`;
             }
 
             // Processar o comprovante
@@ -1023,7 +1038,7 @@ class OpenAIService {
             // Limpar o comprovante pendente após processamento
             await this.redisStore.del(`pending_proof:${threadId}`);
 
-            return '✅ Comprovante recebido! Nosso time financeiro irá analisar e confirmar o pagamento em breve.';
+            return ' Comprovante recebido! Nosso time financeiro irá analisar e confirmar o pagamento em breve.';
         } catch (error) {
             logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber, error });
             throw error;
