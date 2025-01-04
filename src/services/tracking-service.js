@@ -171,7 +171,24 @@ class TrackingService {
                     hour: '2-digit',
                     minute: '2-digit'
                 }),
-                message: trackInfo.latest_event_message || trackInfo.latest_event_info || 'Status não disponível'
+                message: trackInfo.latest_event_message || trackInfo.latest_event_info || 'Status não disponível',
+
+                // Informações adicionais de tempo
+                days_in_transit: trackInfo.days_of_transit,
+                pickup_time: trackInfo.pickup_time ? new Date(trackInfo.pickup_time).toLocaleString('pt-BR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }) : null,
+                delivery_time: trackInfo.delievery_time ? new Date(trackInfo.delievery_time).toLocaleString('pt-BR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                }) : null
             };
 
         } catch (error) {
@@ -523,6 +540,21 @@ class TrackingService {
                 response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
             }
 
+            // Adiciona tempo em trânsito
+            if (trackInfo.days_in_transit) {
+                response += `\n_Tempo em trânsito: ${trackInfo.days_in_transit} dias_\n`;
+            }
+
+            // Adiciona tempo de coleta
+            if (trackInfo.pickup_time) {
+                response += `\n_Tempo de coleta: ${trackInfo.pickup_time}_\n`;
+            }
+
+            // Adiciona tempo de entrega
+            if (trackInfo.delivery_time) {
+                response += `\n_Tempo de entrega: ${trackInfo.delivery_time}_\n`;
+            }
+
             // Filtra mensagens de tributação/taxação
             if (trackInfo.status) {
                 let situacao = trackInfo.status;
@@ -544,11 +576,6 @@ class TrackingService {
                 }
                 
                 response += `*Situação:* ${situacao}\n`;
-            }
-
-            // Adiciona tempo em trânsito
-            if (trackInfo.days_of_transit) {
-                response += `\n_Tempo em trânsito: ${trackInfo.days_of_transit} dias_\n`;
             }
 
             return response;
