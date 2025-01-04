@@ -549,52 +549,157 @@ class OrderValidationService {
                 timestamp: new Date().toISOString()
             });
 
-            // Monta mensagem base
-            let message = `🛍️ *Detalhes do Pedido #${orderInfo.numero_pedido}*\n\n`;
+            // Template base do pedido conforme prompt
+            let message = `🛍 *Detalhes do Pedido #${orderInfo.numero_pedido}*\n\n`;
             message += `👤 Cliente: ${orderInfo.cliente}\n`;
             message += `📅 Data: ${orderInfo.data}\n`;
             message += `📦 Status: ${orderInfo.status}\n`;
-            message += `💰 Valor Total: ${orderInfo.valor_total}\n\n`;
+            message += `💰 Valor Total: R$ ${orderInfo.valor_total}\n`;
             
-            // Lista de produtos
+            // Adiciona informações de pagamento
+            if (orderInfo.pagamento) {
+                message += `💳 Pagamento: ${orderInfo.pagamento.metodo}\n`;
+                message += `📊 Status Pagamento: ${orderInfo.pagamento.status}\n`;
+            }
+            
+            message += '\n';
+            
+            // Lista de produtos com formato do prompt
             if (Array.isArray(orderInfo.produtos) && orderInfo.produtos.length > 0) {
                 message += `*Produtos:*\n`;
                 orderInfo.produtos.forEach(produto => {
-                    message += `▫️ ${produto.quantidade}x ${produto.nome} - ${produto.preco}\n`;
+                    // Inclui variações se existirem
+                    const variacoes = produto.variacoes ? ` (${produto.variacoes})` : '';
+                    message += `▫ ${produto.quantidade}x ${produto.nome}${variacoes} - R$ ${produto.preco}\n`;
                 });
             }
 
-            // Status de envio e rastreamento
-            message += `\n📦 Status do Envio: ${orderInfo.status_envio}`;
-
-            // Se tem código de rastreio, busca atualizações
-            if (orderInfo.rastreamento?.codigo !== 'Não disponível') {
-                const trackingInfo = await this._trackingService.getTrackingInfo(orderInfo.rastreamento.codigo);
-                
-                message += `\n📬 Rastreamento: ${orderInfo.rastreamento.codigo}`;
-
-                if (trackingInfo?.latest_event_info) {
-                    message += `\n📍 Status: ${trackingInfo.latest_event_info}`;
-                    
-                    if (trackingInfo.latest_event_time) {
-                        message += `\n🕒 Última Atualização: ${formatTimeAgo(trackingInfo.latest_event_time)}`;
-                    }
-
-                    // Se foi entregue, destaca isso
-                    if (trackingInfo.package_status === 'Delivered') {
-                        message += `\n\n✅ *Pedido Entregue*`;
-                        if (trackingInfo.delievery_time) {
-                            message += `\n📅 Data de Entrega: ${formatTimeAgo(trackingInfo.delievery_time)}`;
-                        }
-                    }
-                }
+            // Apenas inclui informações básicas de rastreio se disponível
+            if (orderInfo.rastreamento?.codigo && orderInfo.rastreamento.codigo !== 'Não disponível') {
+                message += `\n📦 Status do Envio: ${orderInfo.status_envio}\n`;
+                message += `📬 Código de Rastreio: ${orderInfo.rastreamento.codigo}\n`;
+                message += `ℹ️ Use a função check_tracking para ver o status atualizado da entrega`;
             }
 
             return message;
+
         } catch (error) {
-            console.error('❌ Erro ao formatar mensagem:', error);
-            throw error;
+            console.error('❌ Erro ao formatar mensagem do pedido:', error);
+            return 'Desculpe, ocorreu um erro ao formatar as informações do pedido. Por favor, tente novamente em alguns instantes.';
         }
+    }
+
+    /**
+     * Busca informações do pedido
+     * @param {string} input Texto ou URL da imagem contendo número do pedido
+     * @returns {Promise<Object|null>} Informações do pedido ou null se não encontrado
+     */
+    async findOrder(input) {
+        try {
+            const { orderNumber } = await this.extractOrderNumber(input);
+            if (!orderNumber) {
+                return null;
+            }
+
+            return await this.nuvemshopService.findOrder(orderNumber);
+        } catch (error) {
+            console.error('[OrderValidation] Erro ao buscar pedido:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Valida número do pedido
+     * @param {string} orderNumber - Número do pedido
+     * @returns {Promise<Object|null>} Pedido ou null se não encontrado
+     */
+    async validateOrderNumber(orderNumber) {
+        try {
+            // Remove caracteres especiais e espaços
+            const cleanNumber = String(orderNumber).replace(/[^0-9]/g, '');
+            
+            // Valida o formato do número
+            if (!this.isValidOrderNumber(cleanNumber)) {
+                console.log('❌ Número de pedido inválido:', {
+                    numero: cleanNumber,
+                    numeroOriginal: orderNumber,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+            
+            console.log('🔍 Validando pedido:', {
+                numero: cleanNumber,
+                numeroOriginal: orderNumber,
+                timestamp: new Date().toISOString()
+            });
+
+            // Busca o pedido
+            const order = await this.orderApi.getOrderByNumber(cleanNumber);
+            
+            if (!order) {
+                console.log('❌ Pedido não encontrado:', {
+                    numero: cleanNumber,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+
+            // Se tem código de rastreio, busca informações atualizadas
+            let trackingDetails = null;
+            if (order.shipping_tracking_number) {
+                try {
+                    console.log('🔍 Buscando rastreamento:', {
+                        codigo: order.shipping_tracking_number,
+                        timestamp: new Date().toISOString()
+                    });
+                    
+                    trackingDetails = await this._trackingService.getTrackingInfo(order.shipping_tracking_number);
+                    
+                    if (trackingDetails?.success) {
+                        console.log('✅ Rastreamento encontrado:', {
+                            codigo: order.shipping_tracking_number,
+                            status: trackingDetails.status,
+                            ultima_atualizacao: trackingDetails.lastEvent?.time,
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                } catch (error) {
+                    console.error('⚠️ Erro ao buscar rastreamento:', {
+                        codigo: order.shipping_tracking_number,
+                        erro: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                    // Não falha se o rastreamento der erro
+                }
+            }
+
+            // Formata as informações com os detalhes de rastreamento
+            return this.formatSafeOrderInfo(order, trackingDetails);
+        } catch (error) {
+            console.error('❌ Erro ao validar pedido:', {
+                erro: error.message,
+                numero: orderNumber,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Formata mensagem de rastreamento
+     * @param {string} trackingNumber - Código de rastreio
+     * @returns {string} Mensagem formatada
+     */
+    formatTrackingMessage(trackingNumber) {
+        if (!trackingNumber) return null;
+
+        return `🚚 *Rastreamento do Pedido*\n\n` +
+            `📦 Código de Rastreio: ${trackingNumber}\n\n` +
+            `🔍 Acompanhe seu pedido em:\n` +
+            `https://t.17track.net/pt-br#nums=${trackingNumber}\n\n` +
+            `_Clique no link acima para ver o status atualizado da entrega_`;
     }
 
     /**
@@ -964,6 +1069,83 @@ class OrderValidationService {
             };
         }
     }
+
+    /**
+     * Valida e processa imagem de pagamento
+     * @param {string} orderNumber - Número do pedido
+     * @returns {Promise<Object>} Resultado do processamento
+     */
+    async validatePaymentInfo(orderNumber) {
+        try {
+            const key = `pending_image:${orderNumber}`;
+            const pendingImageStr = await this.redisStore.get(key);
+            
+            if (!pendingImageStr) {
+                return {
+                    success: false,
+                    message: 'Não encontrei nenhuma imagem pendente. Por favor, envie a imagem novamente.'
+                };
+            }
+
+            const pendingImage = JSON.parse(pendingImageStr);
+
+            // Remove a imagem pendente
+            await this.redisStore.del(key);
+
+            // Busca pedido
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            if (!order) {
+                return {
+                    success: false,
+                    message: 'Pedido não encontrado. Por favor, verifique o número e tente novamente.'
+                };
+            }
+
+            // Encaminha para o setor apropriado baseado no tipo de imagem
+            let message = '';
+            switch (pendingImage.type) {
+                case 'product_photo':
+                    message = `Foto do calçado vinculada ao pedido #${orderNumber}. ` +
+                             'Nossa equipe de atendimento irá analisar e retornar em breve.';
+                    // TODO: Encaminhar para atendimento
+                    break;
+                    
+                case 'foot_photo':
+                    message = `Foto vinculada ao pedido #${orderNumber}. ` +
+                             'Nossa equipe irá analisar as medidas e retornar em breve.';
+                    // TODO: Encaminhar para equipe de sizing
+                    break;
+                    
+                case 'size_chart':
+                    message = `Tabela de medidas vinculada ao pedido #${orderNumber}. ` +
+                             'Nossa equipe irá analisar e ajudar com a escolha do tamanho ideal.';
+                    // TODO: Encaminhar para equipe de sizing
+                    break;
+                    
+                case 'document':
+                    message = `Documento vinculado ao pedido #${orderNumber}. ` +
+                             'Nossa equipe irá analisar e retornar em breve.';
+                    // TODO: Encaminhar para setor administrativo
+                    break;
+                    
+                default:
+                    message = `Imagem vinculada ao pedido #${orderNumber}. ` +
+                             'Nossa equipe irá analisar e retornar em breve.';
+            }
+
+            return {
+                success: true,
+                message
+            };
+
+        } catch (error) {
+            console.error('[OrderValidation] Erro ao processar pedido para imagem:', error);
+            return {
+                success: false,
+                message: 'Ocorreu um erro ao processar o pedido. Por favor, tente novamente.'
+            };
+        }
+    }
 }
 
-module.exports = { OrderValidationService }; 
+module.exports = { OrderValidationService };
