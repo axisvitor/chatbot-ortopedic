@@ -623,27 +623,62 @@ class OpenAIService {
         }
     }
 
-    /**
-     * Deleta um thread do OpenAI
-     * @param {string} threadId - ID do thread para deletar
-     */
     async deleteThread(threadId) {
         try {
-            await this.client.beta.threads.del(threadId);
+            logger.info('DeletingThread', { threadId });
+
+            // 1. Cancela qualquer run ativo
+            try {
+                await this.cancelActiveRun(threadId);
+            } catch (error) {
+                logger.warn('ErrorCancelingActiveRun', { threadId, error: error.message });
+            }
+
+            // 2. Remove timers e filas
+            if (this.processingTimers.has(threadId)) {
+                clearTimeout(this.processingTimers.get(threadId));
+                this.processingTimers.delete(threadId);
+            }
+            this.messageQueue.delete(threadId);
+
+            // 3. Limpa dados do Redis
+            try {
+                await Promise.all([
+                    this.redisStore.del(`active_run:${threadId}`),
+                    this.redisStore.del(`context:${threadId}`),
+                    this.redisStore.deleteUserContext(threadId),
+                    this.redisStore.delPattern(`tracking:${threadId}:*`),
+                    this.redisStore.delPattern(`order:${threadId}:*`),
+                    this.redisStore.delPattern(`payment:${threadId}:*`),
+                    this.redisStore.delPattern(`waiting_order:${threadId}`),
+                    this.redisStore.delPattern(`pending_order:${threadId}`)
+                ]);
+                logger.info('RedisDataCleared', { threadId });
+            } catch (error) {
+                logger.error('ErrorClearingRedisData', { threadId, error: error.message });
+            }
+
+            // 4. Deleta thread na OpenAI
+            try {
+                const existingThread = await this.client.beta.threads.retrieve(threadId);
+                if (existingThread) {
+                    await this.client.beta.threads.del(threadId);
+                }
+            } catch (error) {
+                // Ignora erro se a thread não existir
+                if (!error.message.includes('No thread found')) {
+                    logger.error('ErrorDeletingOpenAIThread', { threadId, error: error.message });
+                }
+            }
+
             logger.info('ThreadDeleted', { threadId });
-            console.log('[OpenAI] Thread deletado com sucesso:', threadId);
+            return true;
         } catch (error) {
             logger.error('ErrorDeletingThread', { threadId, error });
-            console.error('[OpenAI] Erro ao deletar thread:', error);
-            // Não lança erro pois o thread pode não existir
+            throw error;
         }
     }
 
-    /**
-     * Obtém ou cria uma thread para o cliente
-     * @param {string} customerId - ID do cliente
-     * @returns {Promise<string>} ID da thread
-     */
     async getOrCreateThreadForCustomer(customerId) {
         try {
             // Busca thread existente

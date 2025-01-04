@@ -106,6 +106,21 @@ class AIServices {
 
                 console.log('[AIServices] Texto extraído:', { messageText });
 
+                // Verifica se é comando #resetid
+                if (messageText.toLowerCase() === '#resetid') {
+                    try {
+                        await this.openAIService.deleteThread(message.from);
+                        const response = '🔄 Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.';
+                        await this.whatsAppService.sendText(message.from, response);
+                        return { type: 'text', response, from: message.from };
+                    } catch (error) {
+                        console.error('[AIServices] Erro ao resetar ID:', error);
+                        const errorMsg = '❌ Desculpe, não consegui resetar seu ID. Por favor, tente novamente em alguns instantes.';
+                        await this.whatsAppService.sendText(message.from, errorMsg);
+                        return { type: 'text', response: errorMsg, from: message.from };
+                    }
+                }
+
                 const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
                     content: [
