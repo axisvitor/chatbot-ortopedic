@@ -1197,13 +1197,26 @@ class OpenAIService {
                     // Usa o método deleteThreadData que limpa todos os dados relacionados à thread
                     await this.redisStore.deleteThreadData(threadId);
                     
-                    // Limpa dados adicionais específicos
+                    // Limpa todos os dados relacionados a esta thread
                     await Promise.all([
-                        this.redisStore.delPattern(`tracking:*`), // Cache de rastreamento
-                        this.redisStore.delPattern(`order:*`),    // Cache de pedidos
+                        // Cache de rastreamento relacionado à thread
+                        this.redisStore.delPattern(`tracking:thread:${threadId}:*`),
+                        // Cache de pedidos relacionados à thread
+                        this.redisStore.delPattern(`order:thread:${threadId}:*`),
+                        // Cache de produtos relacionados à thread
+                        this.redisStore.delPattern(`product:thread:${threadId}:*`),
+                        // Cache de pagamentos relacionados à thread
+                        this.redisStore.delPattern(`payment:thread:${threadId}:*`),
+                        // Cache do OpenAI para a thread
+                        this.redisStore.delPattern(`openai:thread:${threadId}:*`),
+                        // Cache de contexto da thread
+                        this.redisStore.delPattern(`context:thread:${threadId}:*`),
+                        // Pedidos em espera da thread
                         this.redisStore.delPattern(`waiting_order:${threadId}`),
+                        // Pedidos pendentes da thread
                         this.redisStore.delPattern(`pending_order:${threadId}`),
-                        this.redisStore.delPattern(`customer_thread:*`) // Limpa mapeamento cliente-thread
+                        // Mapeamento cliente-thread para esta thread
+                        this.redisStore.delPattern(`customer_thread:*:${threadId}`)
                     ]);
                     
                     logger.info('RedisDataCleared', { threadId });
