@@ -782,7 +782,9 @@ class WhatsAppService {
 
             // Verifica se é uma mensagem de texto e se é o comando #resetid
             if ((message.type === 'text' || message.tipo === 'text') && 
-                (message.data?.toLowerCase() === '#resetid' || message.texto?.toLowerCase() === '#resetid')) {
+                (message.data?.toLowerCase() === '#resetid' || 
+                 message.texto?.toLowerCase() === '#resetid' ||
+                 message.message?.extendedTextMessage?.text?.toLowerCase() === '#resetid')) {
                 await this.redisStore.deleteUserContext(from);
                 await this.openAIService.deleteThread(from);
                 return {
