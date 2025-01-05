@@ -605,18 +605,48 @@ class TrackingService {
             const req = https.request(options, (res) => {
                 let responseData = '';
 
+                // Trata redirecionamentos
+                if (res.statusCode === 301 || res.statusCode === 302) {
+                    const newLocation = res.headers.location;
+                    if (newLocation) {
+                        console.log('🔄 [Tracking] Redirecionando para:', newLocation);
+                        const newOptions = new URL(newLocation);
+                        return this._makeRequest({
+                            ...options,
+                            hostname: newOptions.hostname,
+                            path: newOptions.pathname + newOptions.search
+                        }, data).then(resolve).catch(reject);
+                    }
+                }
+
                 res.on('data', (chunk) => {
                     responseData += chunk;
                 });
 
                 res.on('end', () => {
                     try {
+                        // Se a resposta não for JSON, tenta extrair URL de redirecionamento
+                        if (responseData.includes('Redirecting to')) {
+                            const match = responseData.match(/Redirecting to ([^\s]+)/);
+                            if (match && match[1]) {
+                                console.log('🔄 [Tracking] Redirecionamento encontrado:', match[1]);
+                                const newOptions = new URL(match[1]);
+                                return this._makeRequest({
+                                    ...options,
+                                    hostname: newOptions.hostname,
+                                    path: newOptions.pathname + newOptions.search
+                                }, data).then(resolve).catch(reject);
+                            }
+                        }
+
                         const result = JSON.parse(responseData);
                         resolve(result);
                     } catch (error) {
                         console.error('❌ [Tracking] Erro ao processar resposta:', {
                             error: error.message,
-                            responseData
+                            responseData,
+                            statusCode: res.statusCode,
+                            headers: res.headers
                         });
                         reject(error);
                     }
@@ -625,19 +655,15 @@ class TrackingService {
 
             req.on('error', (error) => {
                 console.error('❌ [Tracking] Erro na requisição:', {
-                    error: error.message
+                    error: error.message,
+                    options
                 });
                 reject(error);
             });
 
-            // Timeout de 30 segundos
-            req.setTimeout(30000, () => {
-                console.error('⏱ [Tracking] Timeout na requisição');
-                req.destroy();
-                reject(new Error('Timeout na requisição de rastreamento'));
-            });
-
-            req.write(data);
+            if (data) {
+                req.write(JSON.stringify(data));
+            }
             req.end();
         });
     }

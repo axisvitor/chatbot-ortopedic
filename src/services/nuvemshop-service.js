@@ -1011,7 +1011,7 @@ class NuvemshopService {
 
     async getOrderDetails(orderNumber) {
         try {
-            const order = await this.findOrder(orderNumber);
+            const order = await this.getOrderByNumber(orderNumber);
             if (!order) {
                 return null;
             }
@@ -1019,13 +1019,13 @@ class NuvemshopService {
             // Retorna apenas dados essenciais formatados
             return {
                 numero: order.number,
-                status: order.status,
+                status: this.formatOrderStatus(order.status),
                 cliente: {
                     nome: order.customer?.name || 'Não informado',
                     telefone: order.customer?.phone || 'Não informado'
                 },
                 produto: order.products?.[0]?.name || 'Não especificado',
-                valor: order.total ? `R$ ${order.total.toFixed(2)}` : 'Não informado',
+                valor: this.formatPrice(order.total),
                 rastreio: order.shipping?.tracking_number || null,
                 data: order.created_at ? new Date(order.created_at).toLocaleString('pt-BR') : null
             };
