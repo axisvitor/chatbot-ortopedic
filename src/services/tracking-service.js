@@ -372,56 +372,28 @@ class TrackingService {
     }
 
     async processTrackingRequest(trackingNumber, from) {
-        const transactionId = `trk_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        console.log(`[Tracking][${transactionId}] Processando requisição de rastreamento`, {
-            trackingNumber,
-            from
-        });
-
         try {
-            if (!trackingNumber) {
-                throw new Error('Número de rastreamento é obrigatório');
+            // Remove placeholder se presente
+            if (trackingNumber.includes('[código de rastreio do pedido')) {
+                console.warn('⚠️ [Tracking] Recebido placeholder ao invés do código real:', trackingNumber);
+                return null;
             }
 
-            // Remove espaços e caracteres especiais do número de rastreamento
-            trackingNumber = trackingNumber.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-
-            // Usa o novo método getTrackingInfo que já implementa cache e retry
-            const trackingData = await this.getTrackingInfo(trackingNumber);
-
-            // Se não tem dados de rastreamento
-            if (!trackingData) {
-                const message = 'Não foi possível encontrar informações para este rastreamento no momento. Por favor, tente novamente mais tarde.';
-                console.log(`[Tracking][${transactionId}] Rastreamento não encontrado`, {
-                    trackingNumber
-                });
-                return message;
-            }
-
-            // Se não tem eventos
-            if (!trackingData.status) {
-                const message = `📦 *Status do Rastreamento*\n\n*Código:* ${trackingNumber}\n\n_Ainda não há eventos de movimentação registrados._`;
-                console.log(`[Tracking][${transactionId}] Sem eventos de movimentação`, {
-                    trackingNumber
-                });
-                return message;
-            }
-
-            // Formata a resposta com os eventos
-            const formattedResponse = await this._formatTrackingResponse(trackingData, from);
+            // Remove espaços e caracteres especiais
+            const cleanTrackingNumber = trackingNumber.trim().replace(/[^a-zA-Z0-9]/g, '');
             
-            console.log(`[Tracking][${transactionId}] Resposta formatada com sucesso`, {
-                trackingNumber,
-                responseLength: formattedResponse.length
+            console.log('🔍 [Tracking] Processando rastreamento:', {
+                original: trackingNumber,
+                limpo: cleanTrackingNumber,
+                from
             });
-            
-            return formattedResponse;
-            
+
+            const trackInfo = await this.getTrackingInfo(cleanTrackingNumber);
+            return this._formatTrackingResponse(trackInfo, from);
         } catch (error) {
-            console.error(`[Tracking][${transactionId}] Erro ao processar rastreamento`, {
+            console.error('❌ [Tracking] Erro ao processar rastreamento:', {
                 trackingNumber,
-                error: error.message,
-                stack: error.stack
+                error: error.message
             });
             throw error;
         }

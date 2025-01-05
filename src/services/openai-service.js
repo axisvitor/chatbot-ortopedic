@@ -462,14 +462,28 @@ class OpenAIService {
                         break;
 
                     case 'check_tracking':
-                        const trackingInfo = await this.trackingService.getTrackingInfo(parsedArgs.tracking_code);
-                        output = {
-                            status: trackingInfo.status,
-                            lastUpdate: trackingInfo.lastUpdate,
-                            location: trackingInfo.location,
-                            delivered: trackingInfo.delivered,
-                            events: trackingInfo.events?.slice(0, 3) // Limita a 3 eventos mais recentes
-                        };
+                        // Verifica se é um placeholder
+                        if (parsedArgs.tracking_code.includes('[código de rastreio')) {
+                            output = { error: true, message: 'Código de rastreio inválido' };
+                            break;
+                        }
+                        
+                        // Remove caracteres especiais
+                        const cleanTrackingCode = parsedArgs.tracking_code.trim().replace(/[^a-zA-Z0-9]/g, '');
+                        
+                        try {
+                            const trackingInfo = await this.trackingService.getTrackingInfo(cleanTrackingCode);
+                            output = {
+                                status: trackingInfo.status,
+                                lastUpdate: trackingInfo.lastUpdate,
+                                location: trackingInfo.location,
+                                delivered: trackingInfo.delivered,
+                                events: trackingInfo.events?.slice(0, 3) // Limita a 3 eventos mais recentes
+                            };
+                        } catch (error) {
+                            console.error('[OpenAI] Erro ao consultar rastreamento:', error);
+                            output = { error: true, message: 'Erro ao consultar rastreamento' };
+                        }
                         break;
 
                     case 'get_business_hours':
