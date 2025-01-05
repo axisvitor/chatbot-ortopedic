@@ -83,18 +83,32 @@ class OrderValidationService {
     }
 
     /**
+     * Normaliza o número do pedido para um formato padrão
+     * @param {string} orderNumber - Número do pedido em qualquer formato
+     * @returns {string|null} Número do pedido normalizado ou null se inválido
+     */
+    normalizeOrderNumber(orderNumber) {
+        if (!orderNumber) return null;
+        
+        // Remove todos os caracteres não numéricos
+        const cleanNumber = String(orderNumber).replace(/[^0-9]/g, '');
+        
+        // Verifica se é um número com 4 ou mais dígitos
+        if (!/^\d{4,}$/.test(cleanNumber)) {
+            return null;
+        }
+        
+        // Retorna no formato padrão com #
+        return `#${cleanNumber}`;
+    }
+
+    /**
      * Verifica se o texto é um número de pedido válido
      * @param {string} text - Texto a ser verificado
      * @returns {boolean} True se for número de pedido válido
      */
     isValidOrderNumber(text) {
-        if (!text) return false;
-        
-        // Remove caracteres especiais e espaços
-        const cleanText = text.replace(/[^0-9]/g, '');
-        
-        // Verifica se é um número com 4 ou mais dígitos
-        return /^\d{4,}$/.test(cleanText);
+        return this.normalizeOrderNumber(text) !== null;
     }
 
     /**
@@ -114,13 +128,7 @@ class OrderValidationService {
             } 
             // Se for texto
             else if (typeof input === 'string') {
-                // Remove caracteres especiais e espaços
-                orderNumber = input.replace(/[^0-9]/g, '');
-                
-                // Verifica se é um número com 4 ou mais dígitos
-                if (!this.isValidOrderNumber(orderNumber)) {
-                    orderNumber = null;
-                }
+                orderNumber = this.normalizeOrderNumber(input);
             }
 
             if (!orderNumber) {
@@ -131,8 +139,8 @@ class OrderValidationService {
                 return { orderNumber: null, isImage };
             }
 
-            // Verifica se o pedido existe
-            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            // Verifica se o pedido existe - remove o # para consulta na Nuvemshop
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber.replace('#', ''));
             if (!order) {
                 console.log('[OrderValidation] Pedido não encontrado:', orderNumber);
                 return { orderNumber: null, isImage };

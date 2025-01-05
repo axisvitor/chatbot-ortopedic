@@ -938,22 +938,23 @@ class WhatsAppService {
             const hasPendingProof = this.pendingProofs.get(message.from) || 
                                   this.paymentProofMessages[message.from];
 
-            // Extrai e valida o número do pedido
-            const orderNumber = this._orderValidationService.extractOrderNumber(message.body);
+            // Extrai e valida o número do pedido usando a nova função
+            const { orderNumber } = await this._orderValidationService.extractOrderNumber(message.body);
+            
             if (!orderNumber) {
                 await this.sendText(
                     message.from, 
-                    ' Por favor, me envie um número de pedido válido.'
+                    'Por favor, me envie um número de pedido válido com 4 ou mais dígitos.'
                 );
                 return hasPendingProof; // Retorna true se tiver comprovante pendente
             }
 
-            // Valida o pedido
+            // Valida o pedido - agora orderNumber já vem com #
             const order = await this._orderValidationService.validateOrderNumber(orderNumber);
             if (!order) {
                 await this.sendText(
                     message.from, 
-                    ` Não encontrei o pedido #${orderNumber}. Por favor, verifique o número.`
+                    `Não encontrei o pedido ${orderNumber}. Por favor, verifique o número.`
                 );
                 return hasPendingProof;
             }
@@ -965,14 +966,14 @@ class WhatsAppService {
             }
 
             // Se chegou aqui é fluxo de consulta normal
-            console.log(' Consulta de pedido:', {
+            console.log('📦 Consulta de pedido:', {
                 from: message.from,
                 orderNumber: order.number,
                 timestamp: new Date().toISOString()
             });
             return false;
         } catch (error) {
-            console.error(' Erro ao processar número do pedido:', error);
+            console.error('❌ Erro ao processar número do pedido:', error);
             throw error;
         }
     }
