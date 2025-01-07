@@ -5,7 +5,13 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon --no-warnings src/server.js"
+    "dev": "nodemon --no-warnings src/server.js",
+    "track": "node src/tracking-system/app.js",
+    "sync": "node src/tracking-system/sync_tracking_codes.js",
+    "test:track": "node src/tracking-system/test_tracking.js",
+    "test:redis": "node src/tracking-system/test_redis.js",
+    "test:nuvem": "node src/tracking-system/test_nuvemshop.js",
+    "register90": "node src/tracking-system/scripts/register_recent_orders.js"
   },
   "keywords": [
     "chatbot",
@@ -38,6 +44,7 @@
     "moment": "^2.30.1",
     "moment-timezone": "^0.5.45",
     "morgan": "^1.10.0",
+    "node-cron": "^3.0.3",
     "openai": "^4.26.0",
     "redis": "^4.6.12",
     "sharp": "^0.33.2",

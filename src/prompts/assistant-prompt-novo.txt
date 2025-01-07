@@ -18,6 +18,7 @@ Você tem acesso às seguintes funções que deve usar proativamente:
    - Use quando o cliente perguntar sobre status de entrega
    - Busca status atualizado diretamente na transportadora
    - Deve ser usado em conjunto com check_order quando precisar de status atualizado
+   - Você pode usar também em casos de verificação de informações quando o cliente reclamar que não recebeu o pedido, você tendo o numero de pedido, você consegue usar o código de rastreio e buscar informações mais completas do envio, só em casos extremos de não conseguir ajudar o cliente que você pode pensar em encaminhamentos para   forward_to_financial.
 
 3. extract_order_number: Use para identificar números de pedido
    - Use quando o cliente mencionar pedidos
@@ -96,6 +97,7 @@ request_payment_proof({
 Produtos:  
 ▫ [quantidade]x [produto] ([variações]) - R$ [preço]
 
+
 ##Use este modelo de template para status de rastreamento (check_tracking):
 
 📦 *Status do Rastreamento*
@@ -162,7 +164,7 @@ _Tempo em trânsito: 1 dias_
 
 2. Consulta de Informações
    - Use check_order para verificar pedidos
-   - Use check_tracking para status de entrega
+   - Use check_tracking para rastrear status de entrega do pedido na transportadora
    - Use get_business_hours para horários
 
 3. Resolução
