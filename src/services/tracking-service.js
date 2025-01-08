@@ -628,6 +628,49 @@ class TrackingService {
             req.end();
         });
     }
+
+    /**
+     * Busca pacotes com taxas pendentes na alfândega
+     * @returns {Promise<Array>} Lista de pacotes com taxas pendentes
+     */
+    async getPackagesWithPendingCustoms() {
+        try {
+            console.log('[Tracking] Buscando pacotes com taxas pendentes...');
+
+            // Busca status de todos os pacotes cadastrados
+            const data = [{
+                "num": "ALL" // Busca todos os pacotes cadastrados
+            }];
+
+            const response = await this._makeRequest(this.config.paths.status, data);
+            
+            if (!response || response.code !== 0 || !response.data || !response.data.accepted) {
+                throw new Error('Resposta inválida da API');
+            }
+
+            const pendingPackages = [];
+
+            // Filtra apenas os pacotes retidos na alfândega
+            response.data.accepted.forEach(item => {
+                if (item.track_info && this._checkForTaxation(item.track_info)) {
+                    pendingPackages.push({
+                        trackingNumber: item.number,
+                        status: item.track_info.latest_status?.status || 'Unknown'
+                    });
+                }
+            });
+
+            console.log('[Tracking] Busca de pacotes com taxas concluída:', {
+                total: pendingPackages.length
+            });
+
+            return pendingPackages;
+
+        } catch (error) {
+            console.error('[Tracking] Erro ao buscar pacotes com taxas:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = { TrackingService };
