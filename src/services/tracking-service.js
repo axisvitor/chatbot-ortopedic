@@ -140,7 +140,9 @@ class TrackingService {
             console.log('🔍 [Tracking] Consultando status:', { trackingNumber });
 
             const data = JSON.stringify({
-                "numbers": [trackingNumber]
+                "data": [
+                    { "number": trackingNumber }
+                ]
             });
 
             const options = {
@@ -155,26 +157,25 @@ class TrackingService {
 
             const result = await this._makeRequest(options, data);
             
-            if (!result || result.code !== 0 || !result.data?.accepted?.length) {
+            if (!result || result.code !== 0 || !result.data?.[0]) {
                 throw new Error('Não foi possível obter informações de rastreamento');
             }
 
-            const trackInfo = result.data.accepted[0];
-            const lastEventTime = trackInfo.latest_event_time ? new Date(trackInfo.latest_event_time) : new Date();
-            
-            // Retorna apenas dados essenciais formatados
+            const trackInfo = result.data[0];
+            const events = trackInfo.track_info || [];
+            const lastEvent = events[0] || {};
+
             return {
                 codigo: trackingNumber,
-                status: trackInfo.latest_event_info || 'Status não disponível',
-                atualizacao: lastEventTime.toLocaleString('pt-BR', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                }),
-                local: trackInfo.latest_event_location || 'Localização não disponível',
-                diasEmTransito: trackInfo.days_of_transit || 0
+                status: lastEvent.status_description || 'Status não disponível',
+                atualizacao: lastEvent.time ? new Date(lastEvent.time).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR'),
+                local: lastEvent.location || 'Local não disponível',
+                diasEmTransito: trackInfo.delivery_time || 0,
+                eventos: events.map(event => ({
+                    data: new Date(event.time).toLocaleString('pt-BR'),
+                    status: event.status_description,
+                    local: event.location || 'Local não disponível'
+                }))
             };
         } catch (error) {
             console.error('❌ [Tracking] Erro ao consultar status:', {
@@ -535,18 +536,35 @@ class TrackingService {
         // Remove espaços e caracteres especiais
         const cleanText = text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-        // Padrões comuns de rastreio
-        const patterns = [
+        // Padrões por transportadora
+        const carriers = {
+            correios: /^[A-Z]{2}[0-9]{9}[A-Z]{2}$/,
+            jadlog: /^[0-9]{14}$/,
+            fedex: /^[0-9]{12}$/,
+            dhl: /^[0-9]{10}$/,
+            cainiao: /^LP\d{14}$|^[A-Z]{2}\d{14}$|^[A-Z]{3}\d{12}$/  // Padrões Cainiao: LP00000000000000, XX00000000000000, XXX000000000000
+        };
+
+        for (const [carrier, pattern] of Object.entries(carriers)) {
+            if (pattern.test(cleanText)) {
+                return { code: cleanText, carrier };
+            }
+        }
+
+        // Padrões genéricos como fallback
+        const genericPatterns = [
             /^[A-Z]{2}\d{9}[A-Z]{2}$/,     // Correios: BR123456789BR
             /^[A-Z]{2}\d{12}$/,             // DHL, FedEx: XX123456789012
             /^1Z[A-Z0-9]{16}$/,             // UPS: 1Z999AA1234567890
             /^[A-Z]{3}\d{7}$/,              // TNT: ABC1234567
-            /^\d{12,14}$/                    // Outros: 123456789012
+            /^\d{12,14}$/,                  // Outros: 123456789012
+            /^LP\d{14}$/,                   // Cainiao: LP00000000000000
+            /^[A-Z]{2}\d{14}$/,             // Cainiao: XX00000000000000
+            /^[A-Z]{3}\d{12}$/              // Cainiao: XXX000000000000
         ];
 
-        // Verifica se o texto limpo corresponde a algum padrão
-        if (patterns.some(pattern => pattern.test(cleanText))) {
-            return cleanText;
+        if (genericPatterns.some(pattern => pattern.test(cleanText))) {
+            return { code: cleanText, carrier: 'unknown' };
         }
 
         return null;
@@ -597,21 +615,33 @@ class TrackingService {
 
                 res.on('end', () => {
                     try {
-                        // Se a resposta não for JSON, tenta extrair URL de redirecionamento
-                        if (responseData.includes('Redirecting to')) {
-                            const match = responseData.match(/Redirecting to ([^\s]+)/);
-                            if (match && match[1]) {
-                                console.log('🔄 [Tracking] Redirecionamento encontrado:', match[1]);
-                                const newOptions = new URL(match[1]);
-                                return this._makeRequest({
-                                    ...options,
-                                    hostname: newOptions.hostname,
-                                    path: newOptions.pathname + newOptions.search
-                                }, data).then(resolve).catch(reject);
-                            }
+                        // Verifica se é uma resposta HTML
+                        if (res.headers['content-type']?.includes('text/html')) {
+                            throw new Error('Serviço de rastreamento temporariamente indisponível');
                         }
 
+                        // Parse do JSON
                         const result = JSON.parse(responseData);
+
+                        // Verifica erros no formato da API
+                        if (result.code !== 0) {
+                            let errorMessage = 'Erro ao consultar rastreamento';
+                            
+                            // Códigos de erro comuns da 17track
+                            switch(result.code) {
+                                case 4031:
+                                    errorMessage = 'API key inválida';
+                                    break;
+                                case 4032:
+                                    errorMessage = 'Limite de requisições excedido';
+                                    break;
+                                default:
+                                    errorMessage = result.message || 'Erro desconhecido';
+                            }
+                            
+                            throw new Error(errorMessage);
+                        }
+
                         resolve(result);
                     } catch (error) {
                         console.error('❌ [Tracking] Erro ao processar resposta:', {

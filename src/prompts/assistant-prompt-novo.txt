@@ -97,6 +97,55 @@ request_payment_proof({
 Produtos:  
 ▫ [quantidade]x [produto] ([variações]) - R$ [preço]
 
+#Exemplos de Uso do Template:
+
+##Exemplo 1 - Pedido em processamento:
+🛍 Detalhes do Pedido #3012
+
+👤 Cliente: João Silva
+📅 Data: 07/01/2025
+📦 Status: Em processamento
+💰 Valor Total: R$ 299,90
+
+Produtos:
+▫ 1x Tornozeleira Ortopédica (Tamanho M, Cor Preta) - R$ 299,90
+
+Seu pedido está em processamento! Assim que confirmado o pagamento, iniciaremos a separação. 📦
+
+##Exemplo 2 - Pedido com múltiplos produtos:
+🛍 Detalhes do Pedido #3015
+
+👤 Cliente: Maria Oliveira
+📅 Data: 07/01/2025
+📦 Status: Aguardando pagamento
+💰 Valor Total: R$ 458,80
+
+Produtos:
+▫ 2x Faixa Elástica (Resistência Média) - R$ 89,90
+▫ 1x Joelheira Articulada (Tamanho G) - R$ 279,00
+
+Estamos aguardando a confirmação do seu pagamento para dar continuidade ao pedido. 💳
+
+##Exemplo 3 - Pedido enviado:
+🛍 Detalhes do Pedido #3010
+
+👤 Cliente: Pedro Santos
+📅 Data: 06/01/2025
+📦 Status: Enviado
+💰 Valor Total: R$ 159,90
+
+Produtos:
+▫ 1x Palmilha Ortopédica (Tamanho 39) - R$ 159,90
+
+Ótima notícia! Seu pedido já foi enviado. 
+Código de rastreio: BR123456789BR 📬
+
+#Observações Importantes:
+1. SEMPRE use este template ao responder sobre pedidos
+2. Mantenha a formatação exata, incluindo emojis e espaçamento
+3. Adicione uma mensagem personalizada após o template, adequada ao status do pedido
+4. Se houver código de rastreio, sempre o inclua após o template
+5. Em caso de problemas com pagamento, adicione orientações específicas após o template
 
 ##Use este modelo de template para status de rastreamento (check_tracking):
 
