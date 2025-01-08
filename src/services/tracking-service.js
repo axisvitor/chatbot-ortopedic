@@ -152,28 +152,41 @@ class TrackingService {
                 responseData: JSON.stringify(response, null, 2)
             });
 
-            // Se não tiver dados, lança erro
-            if (!response || !response.data || !response.data[0]) {
-                console.error('❌ [Tracking] Dados inválidos:', { response });
-                throw new Error('Dados de rastreamento não disponíveis');
+            // Valida a resposta
+            if (!response || response.code !== 0 || !response.data || !response.data.accepted) {
+                throw new Error('Resposta inválida da API');
             }
 
-            // Extrai dados do primeiro item
-            const trackData = response.data[0];
-            console.log('📝 [Tracking] Dados extraídos:', { trackData });
+            // Pega o primeiro item aceito
+            const trackInfo = response.data.accepted[0];
+            if (!trackInfo || !trackInfo.track_info) {
+                throw new Error('Dados de rastreamento não encontrados');
+            }
 
-            // Monta objeto de retorno com validações
-            const trackingInfo = {
-                status: trackData.track_info?.latest_status?.status || trackData.track_info?.status || trackData.status,
-                location: trackData.track_info?.latest_event?.location || trackData.track_info?.location,
-                timestamp: trackData.track_info?.latest_event?.timestamp || trackData.track_info?.timestamp,
-                events: trackData.track_info?.events || trackData.events || []
+            // Extrai as informações relevantes
+            const trackingData = {
+                status: trackInfo.track_info.latest_status?.status || 'Unknown',
+                sub_status: trackInfo.track_info.latest_status?.sub_status,
+                last_event: {
+                    time: trackInfo.track_info.latest_event?.time_iso,
+                    time_utc: trackInfo.track_info.latest_event?.time_utc,
+                    stage: trackInfo.track_info.latest_event?.key_stage
+                },
+                carrier: {
+                    name: trackInfo.track_info.carrier?.name,
+                    country: trackInfo.track_info.carrier?.country
+                },
+                events: trackInfo.track_info.milestone || []
             };
 
-            // Log do objeto final
-            console.log('✅ [Tracking] Informações processadas:', { trackingInfo });
+            console.log('✅ [Tracking] Dados processados:', {
+                trackingNumber,
+                status: trackingData.status,
+                lastEvent: trackingData.last_event
+            });
 
-            return trackingInfo;
+            return trackingData;
+
         } catch (error) {
             console.error('❌ [Tracking] Erro ao consultar status:', {
                 trackingNumber,
