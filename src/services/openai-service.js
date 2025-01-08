@@ -455,7 +455,7 @@ class OpenAIService {
             try {
                 switch (name) {
                     case 'check_order':
-                        output = await this.nuvemshopService.getOrderDetails(parsedArgs.order_number);
+                        output = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
                         if (!output) {
                             output = { error: true, message: 'Pedido não encontrado' };
                         }

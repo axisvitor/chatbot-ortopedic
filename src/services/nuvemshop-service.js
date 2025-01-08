@@ -82,31 +82,75 @@ class NuvemshopService {
         try {
             console.log('[Nuvemshop] Buscando pedido por número:', orderNumber);
             
-            // Busca direta pelo número do pedido
-            const response = await this.client.get(`/orders/${orderNumber}`, {
+            // Remove caracteres não numéricos
+            const cleanNumber = String(orderNumber).replace(/\D/g, '');
+            
+            // Busca usando o endpoint de busca geral primeiro
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params: {
+                    q: cleanNumber,
                     fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number,shipping_tracking_url'
                 }
             });
 
             if (response.status === 200 && response.data) {
-                console.log('[Nuvemshop] Pedido encontrado:', {
-                    numeroOriginal: orderNumber,
-                    numeroLimpo: orderNumber,
-                    id: response.data.id,
-                    status: response.data.status,
-                    rastreio: response.data.shipping_tracking_number,
-                    timestamp: new Date().toISOString()
-                });
-                return response.data;
+                // Encontra o pedido com o número exato
+                const order = Array.isArray(response.data) ? 
+                    response.data.find(o => String(o.number) === cleanNumber) :
+                    (String(response.data.number) === cleanNumber ? response.data : null);
+
+                if (order) {
+                    console.log('[Nuvemshop] Pedido encontrado:', {
+                        numeroOriginal: orderNumber,
+                        numeroLimpo: cleanNumber,
+                        id: order.id,
+                        status: order.status,
+                        rastreio: order.shipping_tracking_number,
+                        timestamp: new Date().toISOString()
+                    });
+                    return order;
+                }
             }
+            
+            // Se não encontrou, tenta buscar diretamente pelo número
+            const directResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: {
+                    number: cleanNumber,
+                    fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number,shipping_tracking_url'
+                }
+            });
+
+            if (directResponse.status === 200 && directResponse.data) {
+                const order = Array.isArray(directResponse.data) ?
+                    directResponse.data[0] :
+                    directResponse.data;
+
+                if (order) {
+                    console.log('[Nuvemshop] Pedido encontrado (busca direta):', {
+                        numeroOriginal: orderNumber,
+                        numeroLimpo: cleanNumber,
+                        id: order.id,
+                        status: order.status,
+                        rastreio: order.shipping_tracking_number,
+                        timestamp: new Date().toISOString()
+                    });
+                    return order;
+                }
+            }
+
+            console.log('[Nuvemshop] Pedido não encontrado:', orderNumber);
             return null;
         } catch (error) {
             if (error.response?.status === 404) {
                 console.log('[Nuvemshop] Pedido não encontrado:', orderNumber);
                 return null;
             }
-            console.error('[Nuvemshop] Erro ao buscar pedido:', error.message);
+            console.error('[Nuvemshop] Erro ao buscar pedido:', {
+                erro: error.message,
+                stack: error.stack,
+                pedido: orderNumber,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }
@@ -685,7 +729,7 @@ class NuvemshopService {
     }
 
     formatPrice(price) {
-        return this.orderApi.formatPrice(price);
+        return this.productApi.formatPrice(price);
     }
 
     async getOrderByNumber(orderNumber) {
