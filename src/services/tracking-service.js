@@ -139,44 +139,13 @@ class TrackingService {
         try {
             console.log('🔍 [Tracking] Consultando status:', { trackingNumber });
 
-            const data = JSON.stringify({
+            const data = {
                 "data": [
                     { "number": trackingNumber }
                 ]
-            });
-
-            const options = {
-                hostname: this.config.endpoint,
-                path: '/tracking/status',
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.config.apiKey}`
-                }
             };
 
-            const result = await this._makeRequest(options, data);
-            
-            if (!result || result.code !== 0 || !result.data?.[0]) {
-                throw new Error('Não foi possível obter informações de rastreamento');
-            }
-
-            const trackInfo = result.data[0];
-            const events = trackInfo.track_info || [];
-            const lastEvent = events[0] || {};
-
-            return {
-                codigo: trackingNumber,
-                status: lastEvent.status_description || 'Status não disponível',
-                atualizacao: lastEvent.time ? new Date(lastEvent.time).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR'),
-                local: lastEvent.location || 'Local não disponível',
-                diasEmTransito: trackInfo.delivery_time || 0,
-                eventos: events.map(event => ({
-                    data: new Date(event.time).toLocaleString('pt-BR'),
-                    status: event.status_description,
-                    local: event.location || 'Local não disponível'
-                }))
-            };
+            return await this._makeRequest(this.config.paths.status, data);
         } catch (error) {
             console.error('❌ [Tracking] Erro ao consultar status:', {
                 trackingNumber,
@@ -442,53 +411,32 @@ class TrackingService {
             // Se estiver em tributação, encaminha para o financeiro
             if (isCustomsHold) {
                 try {
-                    // Busca informações do pedido no Redis
-                    const orderKey = `pending_order:${from}`;
-                    const orderNumber = await this.redisStore.get(orderKey);
-                    let orderInfo = null;
-                    
-                    if (orderNumber) {
-                        orderInfo = await this.nuvemshopService.getOrderByNumber(orderNumber);
-                    }
-                    
-                    // Encaminha para o financeiro
-                    const financialMessage = {
-                        type: 'tracking_customs',
-                        trackingNumber: trackInfo.codigo,
-                        status: trackInfo.status,
-                        lastUpdate: trackInfo.atualizacao,
-                        originalMessage: trackInfo.status,
-                        from: from,
-                        orderDetails: orderInfo ? {
-                            number: orderInfo.number,
-                            customerName: orderInfo.customer?.name || 'Não informado',
-                            customerPhone: orderInfo.customer?.phone || from
-                        } : {
-                            number: 'Não encontrado',
-                            customerName: 'Não encontrado',
-                            customerPhone: from
-                        }
-                    };
-                    
-                    // Formata mensagem para o financeiro
-                    const financialNotification = `🚨 *Pedido em Tributação*\n\n` +
-                        `📦 Rastreio: ${trackInfo.codigo}\n` +
-                        `🛍️ Pedido: #${financialMessage.orderDetails.number}\n` +
-                        `👤 Cliente: ${financialMessage.orderDetails.customerName}\n` +
-                        `📱 Telefone: ${financialMessage.orderDetails.customerPhone}\n` +
-                        `📅 Atualização: ${new Date(trackInfo.atualizacao).toLocaleString('pt-BR')}\n` +
-                        `📝 Status Original: ${trackInfo.status}`;
-                    
-                    await this._whatsAppService.forwardToFinancial({ 
-                        body: financialNotification,
+                    // Busca informações do pedido
+                    const orderInfo = await this.nuvemshopService.findOrderByTracking(trackInfo.codigo);
+
+                    const taxationEvent = trackInfo.status;
+
+                    // Monta mensagem para o financeiro
+                    const message = `*🚨 Pedido Taxado - Ação Necessária*\n\n` +
+                        `*Pedido:* #${orderInfo?.number || 'N/A'}\n` +
+                        `*Rastreamento:* ${trackInfo.codigo}\n` +
+                        `*Status:* ${taxationEvent}\n` +
+                        `*Data:* ${new Date().toLocaleString('pt-BR')}\n` +
+                        `*Local:* Não informado\n\n` +
+                        `*Ação Necessária:* Verificar valor da taxa e providenciar pagamento`;
+
+                    // Envia notificação via WhatsApp
+                    const whatsapp = this._whatsAppService;
+                    await whatsapp.forwardToFinancial({ 
+                        body: message,
                         from: 'SISTEMA'
-                    }, financialMessage.orderDetails.number);
+                    }, orderInfo?.number);
 
                     console.log('💰 Notificação enviada ao financeiro:', {
                         rastreio: trackInfo.codigo,
-                        pedido: financialMessage.orderDetails.number,
-                        cliente: financialMessage.orderDetails.customerName,
-                        telefone: financialMessage.orderDetails.customerPhone,
+                        pedido: orderInfo?.number,
+                        cliente: orderInfo?.customerName,
+                        telefone: orderInfo?.customerPhone,
                         timestamp: new Date().toISOString()
                     });
                 } catch (error) {
