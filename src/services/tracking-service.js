@@ -119,7 +119,7 @@ class TrackingService {
             path: this.config.paths.register,
             method: 'POST',
             headers: {
-                '17token': this.config.apiKey,
+                '17token': `Bearer ${this.config.apiKey}`,
                 'Content-Type': 'application/json',
                 'Content-Length': data.length
             }
