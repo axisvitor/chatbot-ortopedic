@@ -192,14 +192,22 @@ class TrackingService {
         });
 
         try {
-            // Tenta obter do cache primeiro
+            // Tenta obter do cache primeiro (apenas se não forçar atualização)
             if (!forceRefresh) {
                 const cached = await this.redisStore.get(this._getCacheKey(trackingNumber));
                 if (cached) {
-                    console.log(`[Tracking][${transactionId}] Dados encontrados em cache`, {
+                    const parsedCache = JSON.parse(cached);
+                    // Verifica se o cache tem dados válidos
+                    if (parsedCache && parsedCache.status) {
+                        console.log(`[Tracking][${transactionId}] Dados encontrados em cache`, {
+                            trackingNumber,
+                            status: parsedCache.status
+                        });
+                        return parsedCache;
+                    }
+                    console.log(`[Tracking][${transactionId}] Cache inválido, atualizando...`, {
                         trackingNumber
                     });
-                    return JSON.parse(cached);
                 }
             }
 
@@ -217,6 +225,12 @@ class TrackingService {
                 return status;
             });
 
+            // Log dos dados recebidos
+            console.log(`[Tracking][${transactionId}] Dados recebidos da API:`, {
+                trackingNumber,
+                data: trackingData
+            });
+
             // Verifica se há eventos de taxação
             const hasTaxation = this._checkForTaxation(trackingData);
             if (hasTaxation) {
@@ -230,15 +244,17 @@ class TrackingService {
             // Remove informações sensíveis de taxação antes de cachear
             const safeTrackingData = this._removeTaxationInfo(trackingData);
 
-            // Atualiza cache
-            await this.redisStore.set(
-                this._getCacheKey(trackingNumber),
-                JSON.stringify(safeTrackingData),
-                this.cacheConfig.ttl
-            );
+            // Atualiza cache apenas se tiver dados válidos
+            if (safeTrackingData && safeTrackingData.status) {
+                await this.redisStore.set(
+                    this._getCacheKey(trackingNumber),
+                    JSON.stringify(safeTrackingData),
+                    this.cacheConfig.ttl
+                );
+            }
 
             // Se o status indica entrega, atualiza Nuvemshop
-            if (safeTrackingData.package_status?.toLowerCase() === 'delivered') {
+            if (safeTrackingData.status?.toLowerCase() === 'delivered') {
                 await this._updateNuvemshopOrderStatus(trackingNumber);
             }
 
