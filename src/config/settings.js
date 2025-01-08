@@ -132,7 +132,7 @@ const TRACKING_CONFIG = {
     endpoint: 'api.17track.net',
     paths: {
         register: '/track/v2.2/register',
-        status: '/track/v2.2/gettracklist'
+        status: '/track/v2.2/gettrackinfo'
     },
     updateInterval: 3600000, // 1 hora em ms
     carriers: ['correios', 'jadlog', 'fedex', 'dhl']
