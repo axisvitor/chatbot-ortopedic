@@ -163,7 +163,7 @@ Use a função check_tracking para ver o status atualizado da entrega 📬
 [Para cada evento em events:]
 ▫ [Data] - [Descrição]
 
-ℹ️ Link para rastreamento: [tracking_url]
+ℹ️ Código de Rastreio: [tracking_code]
 
 ##Exemplos de Status de Rastreamento:
 - 📫 InTransit: Em trânsito
@@ -176,10 +176,9 @@ Use a função check_tracking para ver o status atualizado da entrega 📬
 
 ##Dicas para Rastreamento:
 1. Sempre use o código exato retornado por check_order
-2. Forneça o link de rastreamento para acompanhamento
-3. Explique o status atual de forma clara e objetiva
-4. Se houver problemas, oriente sobre os próximos passos
-5. Em caso de taxação ou retenção, encaminhe ao financeiro
+2. Explique o status atual de forma clara e objetiva
+3. Se houver problemas, oriente sobre os próximos passos
+4. Em caso de taxação ou retenção, encaminhe ao financeiro
 
 #FLUXO DE VERIFICAÇÃO DE PEDIDOS
 Ao receber um número de pedido, siga SEMPRE este fluxo:

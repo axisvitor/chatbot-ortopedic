@@ -438,6 +438,7 @@ class OpenAIService {
         logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
         
         const toolOutputs = [];
+        const context = {};
 
         for (const toolCall of toolCalls) {
             const { name, arguments: args } = toolCall.function;
@@ -459,16 +460,39 @@ class OpenAIService {
                         if (!output) {
                             output = { error: true, message: 'Pedido não encontrado' };
                         } else {
+                            // Salva informações do pedido no contexto
+                            context.order = output;
                             // Adiciona tracking_code ao output para facilitar o check_tracking
                             output.tracking_code = output.shipping_tracking_number;
+                            
+                            // Formata a saída usando o template de pedido
+                            const formattedOutput = `🛍️ Detalhes do Pedido #${output.number}\n\n` +
+                                `📦 Status: ${output.status}\n` +
+                                `💰 Status Pagamento: ${output.payment_status}\n` +
+                                `📬 Status Envio: ${output.shipping_status}\n\n` +
+                                `Produtos:\n${output.products.map(p => 
+                                    `▫️ ${p.quantity}x ${p.name} - R$ ${p.price}`
+                                ).join('\n')}`;
+                            
+                            output = {
+                                ...output,
+                                shipping_tracking_number: output.shipping_tracking_number,
+                                formatted: formattedOutput,
+                                message: formattedOutput // Para compatibilidade
+                            };
                         }
                         break;
 
                     case 'check_tracking':
                         // Verifica se é um placeholder
                         if (parsedArgs.tracking_code.includes('[código de rastreio')) {
-                            output = { error: true, message: 'Código de rastreio inválido' };
-                            break;
+                            // Tenta usar o código do pedido do contexto
+                            if (context.order?.shipping_tracking_number) {
+                                parsedArgs.tracking_code = context.order.shipping_tracking_number;
+                            } else {
+                                output = { error: true, message: 'Código de rastreio inválido' };
+                                break;
+                            }
                         }
                         
                         // Remove caracteres especiais e espaços
@@ -478,18 +502,25 @@ class OpenAIService {
                             // Força atualização do rastreamento
                             const trackingInfo = await this.trackingService.getTrackingInfo(cleanTrackingCode, true);
                             
-                            // Formata a saída com informações mais detalhadas
-                            output = {
-                                status: trackingInfo.status,
-                                sub_status: trackingInfo.sub_status,
-                                last_event: trackingInfo.last_event,
-                                carrier: trackingInfo.carrier,
-                                events: trackingInfo.events?.slice(0, 3) // Limita a 3 eventos mais recentes
-                            };
-
-                            // Adiciona emoji baseado no status
+                            // Formata a saída usando o template de rastreamento
                             const statusEmoji = this.trackingService.STATUS_EMOJIS[trackingInfo.status] || '📦';
-                            output.status_emoji = statusEmoji;
+                            const formattedTracking = `📦 Status do Rastreamento ${statusEmoji}\n\n` +
+                                `🔍 Status: ${trackingInfo.status}\n` +
+                                `📝 Detalhes: ${trackingInfo.sub_status || 'N/A'}\n` +
+                                `📅 Última Atualização: ${trackingInfo.last_event?.time || 'N/A'}\n` +
+                                `🚚 Transportadora: ${trackingInfo.carrier?.name || 'N/A'}\n\n` +
+                                `📋 Últimos Eventos:\n${trackingInfo.events?.slice(0, 3).map(e => 
+                                    `▫️ ${e.time} - ${e.description}`
+                                ).join('\n') || 'Nenhum evento disponível'}\n\n` +
+                                `ℹ️ Código de Rastreio: ${cleanTrackingCode}`;
+                            
+                            output = {
+                                ...trackingInfo,
+                                tracking_code: cleanTrackingCode,
+                                status_emoji: statusEmoji,
+                                formatted: formattedTracking,
+                                message: formattedTracking // Para compatibilidade
+                            };
                             
                         } catch (error) {
                             console.error('[OpenAI] Erro ao consultar rastreamento:', error);
@@ -567,7 +598,11 @@ class OpenAIService {
 
                 toolOutputs.push({
                     tool_call_id: toolCall.id,
-                    output: JSON.stringify(output)
+                    output: JSON.stringify({
+                        ...output,
+                        // Garante que a formatação seja incluída na resposta
+                        formatted_response: output.formatted || output.message
+                    })
                 });
 
             } catch (error) {
