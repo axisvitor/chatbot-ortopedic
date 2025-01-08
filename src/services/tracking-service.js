@@ -444,167 +444,104 @@ class TrackingService {
      */
     async _formatTrackingResponse(trackInfo, from) {
         try {
-            // Formata a resposta com os eventos disponíveis
-            let response = `📦 *Status do Rastreamento*\n\n`;
-            response += `*Código:* ${trackInfo.codigo}\n`;
-            
-            // Verifica se está em tributação para encaminhar ao financeiro
-            const isCustomsHold = trackInfo.status?.toLowerCase().includes('tributação') || 
-                                trackInfo.status?.toLowerCase().includes('taxa') || 
-                                trackInfo.status?.toLowerCase().includes('imposto');
-            
-            // Se estiver em tributação, encaminha para o financeiro
-            if (isCustomsHold) {
-                try {
-                    // Busca informações do pedido
-                    const orderInfo = await this.nuvemshopService.findOrderByTracking(trackInfo.codigo);
-
-                    const taxationEvent = trackInfo.status;
-
-                    // Monta mensagem para o financeiro
-                    const message = `*🚨 Pedido Taxado - Ação Necessária*\n\n` +
-                        `*Pedido:* #${orderInfo?.number || 'N/A'}\n` +
-                        `*Rastreamento:* ${trackInfo.codigo}\n` +
-                        `*Status:* ${taxationEvent}\n` +
-                        `*Data:* ${new Date().toLocaleString('pt-BR')}\n` +
-                        `*Local:* Não informado\n\n` +
-                        `*Ação Necessária:* Verificar valor da taxa e providenciar pagamento`;
-
-                    // Envia notificação via WhatsApp
-                    const whatsapp = this._whatsAppService;
-                    await whatsapp.forwardToFinancial({ 
-                        body: message,
-                        from: 'SISTEMA'
-                    }, orderInfo?.number);
-
-                    console.log('💰 Notificação enviada ao financeiro:', {
-                        rastreio: trackInfo.codigo,
-                        pedido: orderInfo?.number,
-                        cliente: orderInfo?.customerName,
-                        telefone: orderInfo?.customerPhone,
-                        timestamp: new Date().toISOString()
-                    });
-                } catch (error) {
-                    console.error('❌ Erro ao notificar financeiro:', error);
-                }
+            if (!trackInfo || !trackInfo.status) {
+                return 'Desculpe, não foi possível obter informações de rastreamento no momento.';
             }
 
-            // Define o status com emoji
-            let status = trackInfo.status;
-            if (isCustomsHold) {
-                status = '📦 Em processamento';
-            } else {
-                const emoji = this.STATUS_EMOJIS[trackInfo.status] || '❓';
-                switch (trackInfo.status) {
-                    case 'InTransit':
-                        status = `${emoji} Em Trânsito`;
-                        break;
-                    case 'Delivered':
-                        status = `${emoji} Entregue`;
-                        break;
-                    case 'Pickup':
-                        status = `${emoji} Coletado`;
-                        break;
-                    case 'CustomsHold':
-                        status = `${emoji} Em processamento`;
-                        break;
-                    case 'NotFound':
-                        status = `${emoji} Não encontrado`;
-                        break;
-                    case 'Exception':
-                        status = `${emoji} Problema na entrega`;
-                        break;
-                    case 'Expired':
-                        status = `${emoji} Expirado`;
-                        break;
-                    default:
-                        status = `${emoji} ${trackInfo.status}`;
-                }
-            }
-            response += `*Status:* ${status}\n`;
+            // Emoji baseado no status
+            const statusEmoji = this.STATUS_EMOJIS[trackInfo.status] || '📦';
 
-            // Adiciona última atualização
-            if (trackInfo.atualizacao) {
-                const date = new Date(trackInfo.atualizacao);
-                response += `*Última Atualização:* ${date.toLocaleString('pt-BR')}\n`;
+            // Formata a data do último evento
+            const lastEventDate = trackInfo.last_event?.time 
+                ? new Date(trackInfo.last_event.time).toLocaleString('pt-BR', {
+                    timeZone: 'America/Sao_Paulo',
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })
+                : 'Data não disponível';
+
+            // Status principal
+            let message = `${statusEmoji} *Status da Encomenda*\n\n`;
+            message += `📍 *Status:* ${this._translateStatus(trackInfo.status)}\n`;
+            message += `🕒 *Última Atualização:* ${lastEventDate}\n`;
+
+            // Adiciona detalhes do sub-status se disponível
+            if (trackInfo.sub_status) {
+                message += `📝 *Detalhe:* ${this._translateSubStatus(trackInfo.sub_status)}\n`;
             }
 
-            // Adiciona os últimos eventos
-            if (trackInfo.diasEmTransito) {
-                response += `\n_Tempo em trânsito: ${trackInfo.diasEmTransito} dias_\n`;
+            // Adiciona local do último evento se disponível
+            if (trackInfo.last_event?.stage) {
+                message += `📌 *Situação:* ${this._translateStage(trackInfo.last_event.stage)}\n`;
             }
 
-            return response;
+            // Adiciona eventos recentes se disponíveis
+            if (trackInfo.events && trackInfo.events.length > 0) {
+                message += '\n📋 *Últimos eventos:*\n';
+                const recentEvents = trackInfo.events.slice(0, 3); // Mostra apenas os 3 eventos mais recentes
+                recentEvents.forEach(event => {
+                    const eventDate = event.time_iso 
+                        ? new Date(event.time_iso).toLocaleString('pt-BR', {
+                            timeZone: 'America/Sao_Paulo',
+                            day: '2-digit',
+                            month: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })
+                        : 'Data não disponível';
+                    message += `\n• ${eventDate}: ${this._translateStage(event.key_stage) || 'Status não disponível'}`;
+                });
+            }
 
+            return message;
         } catch (error) {
-            console.error('[Tracking] Erro ao formatar resposta:', error);
-            return 'Desculpe, ocorreu um erro ao formatar as informações do rastreamento.';
+            console.error('❌ [Tracking] Erro ao formatar resposta:', {
+                error: error.message,
+                trackInfo
+            });
+            return 'Desculpe, houve um erro ao formatar as informações de rastreamento.';
         }
     }
 
-    /**
-     * Valida se o texto parece ser um código de rastreio
-     * @param {string} text - Texto para validar
-     * @returns {string|null} Código de rastreio limpo ou null
-     */
-    validateTrackingNumber(text) {
-        if (!text) return null;
-
-        // Remove espaços e caracteres especiais
-        const cleanText = text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-
-        // Padrões por transportadora
-        const carriers = {
-            correios: /^[A-Z]{2}[0-9]{9}[A-Z]{2}$/,
-            jadlog: /^[0-9]{14}$/,
-            fedex: /^[0-9]{12}$/,
-            dhl: /^[0-9]{10}$/,
-            cainiao: /^LP\d{14}$|^[A-Z]{2}\d{14}$|^[A-Z]{3}\d{12}$/  // Padrões Cainiao: LP00000000000000, XX00000000000000, XXX000000000000
+    _translateStatus(status) {
+        const statusMap = {
+            'InfoReceived': 'Informação recebida',
+            'InTransit': 'Em trânsito',
+            'OutForDelivery': 'Saiu para entrega',
+            'Delivered': 'Entregue',
+            'Exception': 'Exceção',
+            'Expired': 'Expirado',
+            'Pending': 'Pendente'
         };
-
-        for (const [carrier, pattern] of Object.entries(carriers)) {
-            if (pattern.test(cleanText)) {
-                return { code: cleanText, carrier };
-            }
-        }
-
-        // Padrões genéricos como fallback
-        const genericPatterns = [
-            /^[A-Z]{2}\d{9}[A-Z]{2}$/,     // Correios: BR123456789BR
-            /^[A-Z]{2}\d{12}$/,             // DHL, FedEx: XX123456789012
-            /^1Z[A-Z0-9]{16}$/,             // UPS: 1Z999AA1234567890
-            /^[A-Z]{3}\d{7}$/,              // TNT: ABC1234567
-            /^\d{12,14}$/,                  // Outros: 123456789012
-            /^LP\d{14}$/,                   // Cainiao: LP00000000000000
-            /^[A-Z]{2}\d{14}$/,             // Cainiao: XX00000000000000
-            /^[A-Z]{3}\d{12}$/              // Cainiao: XXX000000000000
-        ];
-
-        if (genericPatterns.some(pattern => pattern.test(cleanText))) {
-            return { code: cleanText, carrier: 'unknown' };
-        }
-
-        return null;
+        return statusMap[status] || status;
     }
 
-    /**
-     * Verifica se o texto contém palavras relacionadas a rastreamento
-     * @param {string} text - Texto para verificar
-     * @returns {boolean}
-     */
-    hasTrackingKeywords(text) {
-        if (!text) return false;
+    _translateSubStatus(subStatus) {
+        const subStatusMap = {
+            'InTransit_PickedUp': 'Objeto coletado',
+            'InTransit_Arrival': 'Chegou na unidade',
+            'InTransit_Departure': 'Saiu da unidade',
+            'Exception_Other': 'Problema na entrega',
+            'Delivered_Signed': 'Entregue e assinado'
+        };
+        return subStatusMap[subStatus] || subStatus;
+    }
 
-        const keywords = [
-            'rastrear', 'rastreio', 'rastreamento',
-            'entrega', 'entregar', 'entregue',
-            'código', 'codigo', 'track',
-            'correio', 'correios', 'transportadora',
-            'pedido', 'encomenda', 'pacote'
-        ];
-
-        const normalizedText = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        return keywords.some(keyword => normalizedText.includes(keyword));
+    _translateStage(stage) {
+        const stageMap = {
+            'InfoReceived': 'Informação recebida',
+            'PickedUp': 'Coletado',
+            'Departure': 'Saiu da unidade',
+            'Arrival': 'Chegou na unidade',
+            'OutForDelivery': 'Saiu para entrega',
+            'Delivered': 'Entregue',
+            'Returning': 'Retornando',
+            'Returned': 'Retornado'
+        };
+        return stageMap[stage] || stage;
     }
 
     async _makeRequest(path, data) {
