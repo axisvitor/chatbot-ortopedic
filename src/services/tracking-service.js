@@ -21,7 +21,7 @@ class TrackingService {
             endpoint: TRACKING_CONFIG.endpoint || 'api.17track.net',
             paths: {
                 register: TRACKING_CONFIG.paths?.register || '/track/v2.2/register',
-                status: TRACKING_CONFIG.paths?.status || '/track/v2.2/gettracklist'
+                status: TRACKING_CONFIG.paths?.status || '/track/v2.2/gettrackinfo'
             },
             updateInterval: TRACKING_CONFIG.updateInterval || 3600000,
             carriers: TRACKING_CONFIG.carriers || ['correios', 'jadlog', 'fedex', 'dhl']
@@ -140,9 +140,7 @@ class TrackingService {
             console.log('🔍 [Tracking] Consultando status:', { trackingNumber });
 
             const data = {
-                "data": [
-                    { "number": trackingNumber }
-                ]
+                "numbers": [trackingNumber]
             };
 
             return await this._makeRequest(this.config.paths.status, data);
