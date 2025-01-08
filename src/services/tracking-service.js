@@ -143,11 +143,42 @@ class TrackingService {
                 number: trackingNumber
             }];
 
-            return await this._makeRequest(this.config.paths.status, data);
+            const response = await this._makeRequest(this.config.paths.status, data);
+            
+            // Log detalhado da resposta
+            console.log('📦 [Tracking] Resposta completa da API:', {
+                code: response?.code,
+                message: response?.message,
+                responseData: JSON.stringify(response, null, 2)
+            });
+
+            // Se não tiver dados, lança erro
+            if (!response || !response.data || !response.data[0]) {
+                console.error('❌ [Tracking] Dados inválidos:', { response });
+                throw new Error('Dados de rastreamento não disponíveis');
+            }
+
+            // Extrai dados do primeiro item
+            const trackData = response.data[0];
+            console.log('📝 [Tracking] Dados extraídos:', { trackData });
+
+            // Monta objeto de retorno com validações
+            const trackingInfo = {
+                status: trackData.track_info?.latest_status?.status || trackData.track_info?.status || trackData.status,
+                location: trackData.track_info?.latest_event?.location || trackData.track_info?.location,
+                timestamp: trackData.track_info?.latest_event?.timestamp || trackData.track_info?.timestamp,
+                events: trackData.track_info?.events || trackData.events || []
+            };
+
+            // Log do objeto final
+            console.log('✅ [Tracking] Informações processadas:', { trackingInfo });
+
+            return trackingInfo;
         } catch (error) {
             console.error('❌ [Tracking] Erro ao consultar status:', {
                 trackingNumber,
-                error: error.message
+                error: error.message,
+                stack: error.stack
             });
             throw error;
         }
