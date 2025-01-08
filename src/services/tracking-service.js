@@ -119,7 +119,7 @@ class TrackingService {
             path: this.config.paths.register,
             method: 'POST',
             headers: {
-                '17token': `Bearer ${this.config.apiKey}`,
+                '17token': `${this.config.apiKey}`,
                 'Content-Type': 'application/json',
                 'Content-Length': data.length
             }
@@ -140,7 +140,10 @@ class TrackingService {
             console.log('🔍 [Tracking] Consultando status:', { trackingNumber });
 
             const data = {
-                "numbers": [trackingNumber]
+                data: [{
+                    number: trackingNumber,
+                    carrier: 3 // Correios
+                }]
             };
 
             return await this._makeRequest(this.config.paths.status, data);
