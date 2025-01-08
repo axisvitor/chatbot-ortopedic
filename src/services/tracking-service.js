@@ -139,12 +139,9 @@ class TrackingService {
         try {
             console.log('🔍 [Tracking] Consultando status:', { trackingNumber });
 
-            const data = {
-                data: [{
-                    number: trackingNumber,
-                    carrier: 3 // Correios
-                }]
-            };
+            const data = [{
+                number: trackingNumber
+            }];
 
             return await this._makeRequest(this.config.paths.status, data);
         } catch (error) {
