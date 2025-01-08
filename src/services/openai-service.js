@@ -471,21 +471,33 @@ class OpenAIService {
                             break;
                         }
                         
-                        // Remove caracteres especiais
+                        // Remove caracteres especiais e espaços
                         const cleanTrackingCode = parsedArgs.tracking_code.trim().replace(/[^a-zA-Z0-9]/g, '');
                         
                         try {
-                            const trackingInfo = await this.trackingService.getTrackingInfo(cleanTrackingCode);
+                            // Força atualização do rastreamento
+                            const trackingInfo = await this.trackingService.getTrackingInfo(cleanTrackingCode, true);
+                            
+                            // Formata a saída com informações mais detalhadas
                             output = {
                                 status: trackingInfo.status,
-                                lastUpdate: trackingInfo.lastUpdate,
-                                location: trackingInfo.location,
-                                delivered: trackingInfo.delivered,
+                                sub_status: trackingInfo.sub_status,
+                                last_event: trackingInfo.last_event,
+                                carrier: trackingInfo.carrier,
                                 events: trackingInfo.events?.slice(0, 3) // Limita a 3 eventos mais recentes
                             };
+
+                            // Adiciona emoji baseado no status
+                            const statusEmoji = this.trackingService.STATUS_EMOJIS[trackingInfo.status] || '📦';
+                            output.status_emoji = statusEmoji;
+                            
                         } catch (error) {
                             console.error('[OpenAI] Erro ao consultar rastreamento:', error);
-                            output = { error: true, message: 'Erro ao consultar rastreamento' };
+                            output = { 
+                                error: true, 
+                                message: 'Erro ao consultar rastreamento',
+                                details: error.message
+                            };
                         }
                         break;
 
