@@ -458,6 +458,9 @@ class OpenAIService {
                         output = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
                         if (!output) {
                             output = { error: true, message: 'Pedido não encontrado' };
+                        } else {
+                            // Adiciona tracking_code ao output para facilitar o check_tracking
+                            output.tracking_code = output.shipping_tracking_number;
                         }
                         break;
 
@@ -1005,6 +1008,29 @@ class OpenAIService {
      */
     async runAssistant(threadId) {
         try {
+            // Busca as últimas mensagens
+            const messages = await this.client.beta.threads.messages.list(threadId, {
+                limit: 16, // 8 pares de mensagens (usuário + assistente)
+                order: 'desc'
+            });
+
+            // Mantém apenas as últimas 8 interações
+            if (messages.data.length > 16) {
+                // Deleta mensagens antigas
+                for (let i = 16; i < messages.data.length; i++) {
+                    try {
+                        await this.client.beta.threads.messages.del(threadId, messages.data[i].id);
+                    } catch (error) {
+                        logger.warn('ErrorDeletingOldMessage', { 
+                            threadId, 
+                            messageId: messages.data[i].id, 
+                            error: error.message 
+                        });
+                    }
+                }
+            }
+
+            // Cria o run com as funções disponíveis
             const run = await this.client.beta.threads.runs.create(threadId, {
                 assistant_id: this.assistantId,
                 tools: this.functions.map(f => ({
