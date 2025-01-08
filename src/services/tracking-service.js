@@ -240,19 +240,6 @@ class TrackingService {
 
         return this._makeRequest(this.config.paths.register, data);
     }
-
-    /**
-     * Obtém o status de um rastreamento
-     * @private
-     */
-    async _getTrackingStatus(trackingNumber) {
-        const data = [{
-            number: trackingNumber
-        }];
-
-        return this._makeRequest(this.config.paths.status, data);
-    }
-
     /**
      * Verifica se há eventos de taxação nos dados de rastreamento
      * @private
