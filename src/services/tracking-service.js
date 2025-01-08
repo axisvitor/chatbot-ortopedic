@@ -263,6 +263,30 @@ class TrackingService {
     }
 
     /**
+     * Registra um número para rastreamento
+     * @private
+     */
+    async _registerTracking(trackingNumber) {
+        const data = [{
+            number: trackingNumber
+        }];
+
+        return this._makeRequest(this.config.paths.register, data);
+    }
+
+    /**
+     * Obtém o status de um rastreamento
+     * @private
+     */
+    async _getTrackingStatus(trackingNumber) {
+        const data = [{
+            number: trackingNumber
+        }];
+
+        return this._makeRequest(this.config.paths.status, data);
+    }
+
+    /**
      * Verifica se há eventos de taxação nos dados de rastreamento
      * @private
      */
@@ -590,7 +614,18 @@ class TrackingService {
         return keywords.some(keyword => normalizedText.includes(keyword));
     }
 
-    async _makeRequest(options, data) {
+    async _makeRequest(path, data) {
+        const options = {
+            hostname: this.config.endpoint,
+            path,
+            method: 'POST',
+            headers: {
+                '17token': this.config.apiKey,
+                'Content-Type': 'application/json',
+                'Content-Length': JSON.stringify(data).length
+            }
+        };
+
         return new Promise((resolve, reject) => {
             const req = https.request(options, (res) => {
                 let responseData = '';
@@ -601,11 +636,7 @@ class TrackingService {
                     if (newLocation) {
                         console.log('🔄 [Tracking] Redirecionando para:', newLocation);
                         const newOptions = new URL(newLocation);
-                        return this._makeRequest({
-                            ...options,
-                            hostname: newOptions.hostname,
-                            path: newOptions.pathname + newOptions.search
-                        }, data).then(resolve).catch(reject);
+                        return this._makeRequest(newOptions.pathname + newOptions.search, data).then(resolve).catch(reject);
                     }
                 }
 
@@ -663,9 +694,7 @@ class TrackingService {
                 reject(error);
             });
 
-            if (data) {
-                req.write(JSON.stringify(data));
-            }
+            req.write(JSON.stringify(data));
             req.end();
         });
     }
