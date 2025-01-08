@@ -123,7 +123,8 @@ const WHATSAPP_CONFIG = {
                 maxSize: 5 * 1024 * 1024 // 5MB
             }
         }
-    }
+    },
+    whatsappNumber: process.env.WHATSAPP_NUMBER || '',  
 };
 
 // 17Track Configuration
@@ -355,5 +356,11 @@ module.exports = {
     NUVEMSHOP_CONFIG,
     WHATSAPP_CONFIG,
     TRACKING_CONFIG,
-    REQUIRED_ENV_VARS
+    REQUIRED_ENV_VARS,
+    settings: {
+        ...OPENAI_CONFIG,
+        ...REDIS_CONFIG,
+        ...MEDIA_CONFIG,
+        whatsappNumber: process.env.WHATSAPP_NUMBER || '',
+    }
 };
