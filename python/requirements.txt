@@ -1,0 +1,5 @@
+python-dotenv==1.0.0
+requests==2.31.0
+APScheduler==3.10.4
+aiohttp==3.9.1  # Para requisições assíncronas
+asyncio==3.4.3  # Para suporte a async/await

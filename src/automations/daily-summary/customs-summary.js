@@ -73,6 +73,15 @@ class CustomsSummary {
         
         console.log('Agendador de resumo diário iniciado');
     }
+
+    // Método para testes
+    async test() {
+        console.log('Iniciando teste do resumo diário...');
+        await this.generateDailySummary();
+        console.log('Teste concluído!');
+    }
 }
 
-module.exports = new CustomsSummary();
+// Exporta a instância
+const customsSummary = new CustomsSummary();
+module.exports = customsSummary;

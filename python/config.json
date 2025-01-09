@@ -1,0 +1,15 @@
+{
+    "whatsapp": {
+        "apiUrl": "https://host07.serverapi.dev",
+        "token": "cnQfI8UaFha8fVY7dR80srpxKALKkUmgG",
+        "connectionKey": "w-api_ufZ0hDAYLz",
+        "whatsappNumber": "5594991307744"
+    },
+    "tracking": {
+        "endpoint": "api.17track.net",
+        "apiKey": "your-17track-api-key",
+        "paths": {
+            "status": "/track/v2.2/gettracklist"
+        }
+    }
+}
