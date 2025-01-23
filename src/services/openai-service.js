@@ -24,9 +24,17 @@ class OpenAIService {
         });
         this.assistantId = OPENAI_CONFIG.assistantId;
         this.redisStore = new RedisStore(); // Redis para controlar runs ativos
+        
+        // Cache de threads em memória
+        this.threadCache = new Map(); // Armazena threads ativos
+        this.threadLastAccess = new Map(); // Última vez que thread foi acessada
         this.messageQueue = new Map(); // Map para fila de mensagens por thread
         this.processingTimers = new Map(); // Map para controlar timers de processamento
+        
+        // Configurações de otimização
         this.MESSAGE_DELAY = 8000; // 8 segundos de delay
+        this.THREAD_CACHE_TTL = 30 * 60 * 1000; // 30 minutos de cache
+        this.MAX_THREAD_MESSAGES = 10; // Máximo de mensagens por thread
         this.CONTEXT_UPDATE_INTERVAL = 15 * 60 * 1000; // 15 minutos em ms
 
         // Serviços injetados
@@ -36,8 +44,83 @@ class OpenAIService {
         this.orderValidationService = orderValidationService || new OrderValidationService();
         this.financialService = financialService; // Recebe o FinancialService do container
 
+        // Inicializa limpeza periódica
+        setInterval(() => this._cleanupCache(), this.THREAD_CACHE_TTL);
+        
         // Define as funções disponíveis para o Assistant
         this.functions = this._getAssistantFunctions();
+    }
+
+    /**
+     * Limpa cache de threads inativos
+     * @private
+     */
+    async _cleanupCache() {
+        const now = Date.now();
+        for (const [threadId, lastAccess] of this.threadLastAccess.entries()) {
+            if (now - lastAccess > this.THREAD_CACHE_TTL) {
+                // Persiste thread no Redis antes de remover do cache
+                const thread = this.threadCache.get(threadId);
+                if (thread) {
+                    await this._persistThreadToRedis(threadId, thread);
+                }
+                this.threadCache.delete(threadId);
+                this.threadLastAccess.delete(threadId);
+                logger.info('ThreadCacheCleanup', {
+                    threadId,
+                    lastAccess: new Date(lastAccess).toISOString()
+                });
+            }
+        }
+    }
+
+    /**
+     * Persiste thread no Redis
+     * @private
+     */
+    async _persistThreadToRedis(threadId, thread) {
+        try {
+            const key = `thread:${threadId}`;
+            await this.redisStore.set(key, JSON.stringify(thread));
+            logger.info('ThreadPersistedToRedis', { threadId });
+        } catch (error) {
+            logger.error('ErrorPersistingThread', {
+                threadId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Recupera thread do cache ou Redis
+     * @private
+     */
+    async _getThread(threadId) {
+        // Verifica cache primeiro
+        if (this.threadCache.has(threadId)) {
+            this.threadLastAccess.set(threadId, Date.now());
+            return this.threadCache.get(threadId);
+        }
+
+        // Se não está em cache, busca no Redis
+        try {
+            const key = `thread:${threadId}`;
+            const threadData = await this.redisStore.get(key);
+            if (threadData) {
+                const thread = JSON.parse(threadData);
+                // Adiciona ao cache
+                this.threadCache.set(threadId, thread);
+                this.threadLastAccess.set(threadId, Date.now());
+                return thread;
+            }
+        } catch (error) {
+            logger.error('ErrorGettingThread', {
+                threadId,
+                error: error.message
+            });
+        }
+
+        return null;
     }
 
     _getAssistantFunctions() {
@@ -299,41 +382,122 @@ class OpenAIService {
      */
     async processQueuedMessages(threadId) {
         try {
+            // Obtém fila de mensagens
             const queue = this.messageQueue.get(threadId) || [];
             if (queue.length === 0) return;
 
-            logger.info('ProcessingQueuedMessages', { 
+            logger.info('ProcessingQueuedMessages', {
                 threadId,
                 queueLength: queue.length
             });
 
-            // Limpa a fila atual
+            // Limpa fila e timer
             this.messageQueue.set(threadId, []);
+            this.processingTimers.delete(threadId);
 
-            // Processa todas as mensagens em sequência
-            for (const message of queue) {
-                try {
-                    await this.addMessageAndRun(threadId, message);
-                } catch (error) {
-                    logger.error('ErrorProcessingQueuedMessage', { 
-                        threadId, 
-                        error: error.message,
-                        stack: error.stack
-                    });
-                }
-            }
-
-            logger.info('QueueProcessingComplete', { 
-                threadId,
-                processedCount: queue.length
+            // Obtém thread do cache/Redis
+            const thread = await this._getThread(threadId);
+            
+            // Cria mensagem consolidada com todas as entradas da fila
+            const consolidatedMessage = queue.map(m => m.text).join('\n');
+            
+            // Adiciona mensagem à thread
+            const message = await this.addMessage(threadId, {
+                role: 'user',
+                content: consolidatedMessage
             });
 
+            // Atualiza cache
+            if (thread) {
+                thread.messages = thread.messages || [];
+                thread.messages.push(message);
+                // Mantém apenas as últimas mensagens
+                if (thread.messages.length > this.MAX_THREAD_MESSAGES) {
+                    thread.messages = thread.messages.slice(-this.MAX_THREAD_MESSAGES);
+                }
+                this.threadCache.set(threadId, thread);
+            }
+
+            // Executa o assistant
+            const run = await this.runAssistant(threadId);
+            
+            // Registra run ativo
+            await this.registerActiveRun(threadId, run.id);
+            
+            // Aguarda resposta
+            const response = await this.waitForResponse(threadId, run.id);
+            
+            // Remove run ativo
+            await this.removeActiveRun(threadId);
+            
+            return response;
+
         } catch (error) {
-            logger.error('ErrorProcessingQueuedMessages', { 
-                threadId, 
+            logger.error('ErrorProcessingQueuedMessages', {
+                threadId,
                 error: error.message,
                 stack: error.stack
             });
+            
+            // Limpa estado em caso de erro
+            this.messageQueue.delete(threadId);
+            this.processingTimers.delete(threadId);
+            await this.removeActiveRun(threadId);
+            
+            throw error;
+        }
+    }
+
+    /**
+     * Processa mensagem do cliente
+     * @param {string} customerId ID do cliente
+     * @param {Object} message Mensagem a ser processada
+     * @returns {Promise<Object>} Resposta do processamento
+     */
+    async processCustomerMessage(customerId, message) {
+        try {
+            // Obtém ou cria thread
+            const threadId = await this.getOrCreateThreadForCustomer(customerId);
+            
+            // Verifica se há run ativo
+            const hasActiveRun = await this.hasActiveRun(threadId);
+            if (hasActiveRun) {
+                // Adiciona à fila e retorna null (será processado depois)
+                await this.queueMessage(threadId, message);
+                return null;
+            }
+
+            // Obtém thread do cache/Redis
+            const thread = await this._getThread(threadId);
+            
+            // Se thread existe e tem muitas mensagens, mantém apenas as últimas
+            if (thread && thread.messages && thread.messages.length > this.MAX_THREAD_MESSAGES) {
+                thread.messages = thread.messages.slice(-this.MAX_THREAD_MESSAGES);
+                this.threadCache.set(threadId, thread);
+            }
+
+            // Adiciona mensagem à fila
+            await this.queueMessage(threadId, message);
+            
+            // Agenda processamento
+            if (!this.processingTimers.has(threadId)) {
+                const timer = setTimeout(
+                    () => this.processQueuedMessages(threadId),
+                    this.MESSAGE_DELAY
+                );
+                this.processingTimers.set(threadId, timer);
+            }
+
+            // Retorna null indicando que mensagem foi enfileirada
+            return null;
+
+        } catch (error) {
+            logger.error('ErrorProcessingMessage', {
+                customerId,
+                error: error.message,
+                stack: error.stack
+            });
+            throw error;
         }
     }
 
@@ -976,102 +1140,6 @@ class OpenAIService {
                 stack: error.stack 
             });
             return null;
-        }
-    }
-
-    async processCustomerMessage(customerId, message) {
-        try {
-            let messageText = '';
-            
-            // Log da mensagem original para debug
-            logger.debug('ProcessingRawMessage', { 
-                customerId, 
-                messageType: typeof message,
-                hasMessage: !!message,
-                messageKeys: message ? Object.keys(message) : [],
-                rawMessage: JSON.stringify(message, null, 2)
-            });
-
-            // Extrai o texto da mensagem usando a estrutura correta do WhatsApp
-            if (typeof message === 'string') {
-                messageText = message;
-            } else if (message?.message?.extendedTextMessage?.text) {
-                messageText = message.message.extendedTextMessage.text;
-            } else if (message?.message?.conversation) {
-                messageText = message.message.conversation;
-            } else if (message?.text) {
-                messageText = message.text;
-            }
-
-            // Validação e limpeza do texto
-            messageText = messageText ? messageText.trim() : '';
-
-            logger.info('ExtractedMessageText', { 
-                customerId, 
-                messageText,
-                messageType: typeof messageText,
-                messageLength: messageText.length,
-                extractionPath: messageText ? 'Sucesso' : 'Falha'
-            });
-
-            if (!messageText) {
-                logger.warn('EmptyMessageText', { 
-                    customerId,
-                    originalMessage: JSON.stringify(message, null, 2)
-                });
-                return 'Desculpe, não consegui entender sua mensagem. Pode tentar novamente?';
-            }
-
-            // 1. Obtém ou cria thread para o cliente
-            const threadId = await this.getOrCreateThreadForCustomer(customerId);
-            if (!threadId) {
-                logger.error('FailedToCreateThread', { customerId });
-                return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
-            }
-
-            logger.info('ThreadObtained', { customerId, threadId });
-
-            // 2. Prepara a mensagem para o Assistant
-            const assistantMessage = {
-                role: 'user',
-                content: messageText
-            };
-
-            // 3. Verifica se há um run ativo
-            const hasActiveRun = await this.hasActiveRun(threadId);
-            
-            if (hasActiveRun) {
-                // Se houver run ativo, adiciona à fila e retorna
-                logger.info('QueueingMessage', { 
-                    customerId, 
-                    threadId,
-                    messageText,
-                    queueLength: (this.messageQueue.get(threadId) || []).length + 1
-                });
-                
-                this.queueMessage(threadId, assistantMessage);
-                return null; // Retorna null para não enviar resposta intermediária
-            }
-
-            // 4. Se não houver run ativo, processa a mensagem
-            logger.info('ProcessingMessageDirectly', { 
-                customerId, 
-                threadId,
-                messageText
-            });
-
-            // Adiciona a mensagem e executa o assistant
-            const response = await this.addMessageAndRun(threadId, assistantMessage);
-
-            return response || 'Desculpe, não consegui processar sua mensagem. Por favor, tente novamente.';
-
-        } catch (error) {
-            logger.error('ErrorProcessingMessage', { 
-                customerId, 
-                error: error.message,
-                stack: error.stack
-            });
-            return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
         }
     }
 
