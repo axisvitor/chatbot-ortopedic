@@ -212,31 +212,29 @@ app.use(limiter); // Aplica rate limiting
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Healthcheck endpoint
-app.get('/', async (req, res) => {
-    try {
-        // Verifica conexão com Redis
-        await redisStore.ping();
-        
-        res.status(200).json({
-            status: 'healthy',
-            timestamp: new Date().toISOString(),
-            services: {
-                redis: 'connected'
-            }
-        });
-    } catch (error) {
-        console.error('Healthcheck falhou:', error);
-        res.status(503).json({
-            status: 'unhealthy',
-            timestamp: new Date().toISOString(),
-            error: error.message
-        });
-    }
+// Healthcheck endpoint para Railway
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
+
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        services: {
+            redis: redisStore.isConnected(),
+            whatsapp: whatsappService?.isConnected() || false
+        },
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
 });
 
 // Rota de healthcheck
-app.get('/health', (req, res) => {
+app.get('/healthcheck', (req, res) => {
     const status = isReady ? 'ok' : 'initializing';
     const error = initError?.message;
     
