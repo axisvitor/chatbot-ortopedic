@@ -528,236 +528,72 @@ class OrderValidationService {
     /**
      * Formata mensagem de rastreamento
      * @param {string} trackingNumber - Código de rastreio
-     * @returns {string} Mensagem formatada
+     * @returns {Promise<string>} Mensagem formatada
      */
-    formatTrackingMessage(trackingNumber) {
+    async formatTrackingMessage(trackingNumber) {
         if (!trackingNumber) return null;
 
-        return `🚚 *Rastreamento do Pedido*\n\n` +
-            `📦 Código de Rastreio: ${trackingNumber}\n\n` +
-            `🔍 Acompanhe seu pedido em:\n` +
-            `https://t.17track.net/pt-br#nums=${trackingNumber}\n\n` +
-            `_Clique no link acima para ver o status atualizado da entrega_`;
-    }
-
-    /**
-     * Formata mensagem de pedido para WhatsApp
-     * @param {Object} orderInfo - Informações seguras do pedido
-     * @param {string} userPhone - Telefone do usuário
-     * @returns {string} Mensagem formatada
-     */
-    async formatOrderMessage(orderInfo, userPhone = null) {
         try {
-            // Log das informações que serão formatadas
-            console.log('📋 Formatando mensagem:', {
-                numero: orderInfo.numero_pedido,
-                cliente: orderInfo.cliente,
-                status: orderInfo.status,
-                rastreio: orderInfo.rastreamento?.codigo,
-                produtos: orderInfo.produtos?.length,
-                timestamp: new Date().toISOString()
-            });
-
-            // Formata a data corretamente
-            const orderDate = orderInfo.data ? 
-                moment(orderInfo.data).format('DD/MM/YYYY HH:mm') : 
-                'Data não disponível';
-
-            // Formata o valor total com segurança
-            const totalValue = typeof orderInfo.valor_total === 'number' ? 
-                orderInfo.valor_total.toFixed(2) : 
-                String(orderInfo.valor_total || '0.00').replace(/[^\d.,]/g, '');
-
-            // Template base do pedido conforme prompt
-            let message = `🛍 Detalhes do Pedido #${orderInfo.numero_pedido}\n\n`;
-            message += `👤 Cliente: ${orderInfo.cliente}\n`;
-            message += `📅 Data: ${orderDate}\n`;
-            message += `📦 Status: ${orderInfo.status}\n`;
-            message += `💰 Valor Total: R$ ${totalValue}\n`;
+            // Busca o status atual do rastreio
+            const trackingStatus = await this._trackingService().getTrackingStatus(trackingNumber);
             
-            // Adiciona informações de pagamento
-            if (orderInfo.pagamento) {
-                message += `💳 Pagamento: ${orderInfo.pagamento.metodo}\n`;
-                message += `📊 Status Pagamento: ${orderInfo.pagamento.status}\n`;
-            }
-            
-            message += '\n';
-            
-            // Lista de produtos com formato do prompt
-            if (Array.isArray(orderInfo.produtos) && orderInfo.produtos.length > 0) {
-                message += `*Produtos:*\n`;
-                orderInfo.produtos.forEach(produto => {
-                    // Formata o preço com segurança
-                    const price = typeof produto.preco === 'number' ? 
-                        produto.preco.toFixed(2) : 
-                        String(produto.preco || '0.00').replace(/[^\d.,]/g, '');
-                    
-                    // Inclui variações se existirem
-                    const variacoes = produto.variacoes ? ` (${produto.variacoes})` : '';
-                    message += `▫ ${produto.quantidade}x ${produto.nome}${variacoes} - R$ ${price}\n`;
-                });
+            // Define o emoji baseado no status
+            let statusEmoji = '📦';
+            let statusMessage = trackingStatus.status;
+            let alertMessage = '';
+
+            switch(trackingStatus.status.toLowerCase()) {
+                case 'delivered':
+                    statusEmoji = '✅';
+                    statusMessage = 'Entregue';
+                    break;
+                case 'intransit':
+                    statusEmoji = '🚚';
+                    statusMessage = 'Em trânsito';
+                    break;
+                case 'pickup':
+                    statusEmoji = '📬';
+                    statusMessage = 'Coletado/Postado';
+                    break;
+                case 'exception':
+                    statusEmoji = '⚠️';
+                    statusMessage = 'Problema na entrega';
+                    break;
+                case 'customshold':
+                    statusEmoji = '💰';
+                    statusMessage = 'Retido na alfândega';
+                    alertMessage = '\n⚠️ *Atenção:* Seu pedido está retido para pagamento de impostos. Aguarde instruções adicionais.';
+                    break;
             }
 
-            // Apenas inclui informações básicas de rastreio se disponível
-            if (orderInfo.rastreamento?.codigo && orderInfo.rastreamento.codigo !== 'Não disponível') {
-                message += `\n📦 *Status do Rastreamento*\n\n`;
-                message += `*Código:* ${orderInfo.rastreamento.codigo}\n`;
-                
-                // Determina o emoji do status
-                let statusEmoji = '📦'; // Padrão: Em Processamento
-                if (orderInfo.status_envio) {
-                    const status = orderInfo.status_envio.toLowerCase();
-                    if (status.includes('trânsito')) statusEmoji = '📫';
-                    else if (status.includes('entregue')) statusEmoji = '✅';
-                    else if (status.includes('coletado') || status.includes('postado')) statusEmoji = '🚚';
-                    else if (status.includes('tributação') || status.includes('taxa')) statusEmoji = '💰';
-                }
-                
-                message += `*Status:* ${statusEmoji} ${orderInfo.status_envio || 'Em processamento'}\n`;
-                
-                if (orderInfo.rastreamento.ultima_atualizacao) {
-                    message += `*Última Atualização:* ${moment(orderInfo.rastreamento.ultima_atualizacao).format('DD/MM/YYYY HH:mm')}\n`;
-                }
+            // Formata a mensagem no mesmo padrão da function check_tracking
+            let message = `📦 Status do Rastreamento ${statusEmoji}\n\n` +
+                `🔍 Status: ${statusMessage}\n` +
+                `📝 Detalhes: ${trackingStatus.sub_status || 'N/A'}\n` +
+                `📅 Última Atualização: ${trackingStatus.last_event?.time ? 
+                    formatTimeAgo(new Date(trackingStatus.last_event.time)) : 'N/A'}`;
 
-                // Adiciona as últimas 3 atualizações se disponíveis
-                if (Array.isArray(orderInfo.rastreamento.eventos) && orderInfo.rastreamento.eventos.length > 0) {
-                    message += `\n📝 *Últimas Atualizações:*\n`;
-                    
-                    // Pega os 3 eventos mais recentes
-                    const lastEvents = orderInfo.rastreamento.eventos.slice(0, 3);
-                    lastEvents.forEach((evento, index) => {
-                        const eventDate = moment(evento.data).format('DD/MM/YYYY HH:mm');
-                        message += `${index + 1}. ${eventDate}\n   ${evento.descricao}\n`;
-                    });
-
-                    // Adiciona tempo em trânsito se disponível
-                    if (orderInfo.rastreamento.dias_transito) {
-                        message += `\n_Tempo em trânsito: ${orderInfo.rastreamento.dias_transito} dias_`;
-                    }
-                } else {
-                    message += `\n_Use a função check_tracking para ver o status atualizado da entrega_`;
-                }
+            // Adiciona informações do último evento se disponível
+            if (trackingStatus.last_event?.stage) {
+                message += `\n📍 Local: ${trackingStatus.last_event.stage}`;
             }
+
+            // Adiciona alerta se houver
+            if (alertMessage) {
+                message += alertMessage;
+            }
+
+            // Adiciona mensagem sobre notificações futuras
+            message += '\n\n_Você receberá notificações automáticas sobre atualizações importantes no seu pedido._';
 
             return message;
 
         } catch (error) {
-            console.error('❌ Erro ao formatar mensagem do pedido:', error);
-            return 'Desculpe, ocorreu um erro ao formatar as informações do pedido. Por favor, tente novamente em alguns instantes.';
+            console.error('Erro ao buscar status do rastreio:', error);
+            return `📦 Status do Rastreamento\n\n` +
+                `❌ Não foi possível obter o status atual.\n` +
+                `_Você receberá uma notificação assim que houver atualizações._`;
         }
-    }
-
-    /**
-     * Busca informações do pedido
-     * @param {string} input Texto ou URL da imagem contendo número do pedido
-     * @returns {Promise<Object|null>} Informações do pedido ou null se não encontrado
-     */
-    async findOrder(input) {
-        try {
-            const { orderNumber } = await this.extractOrderNumber(input);
-            if (!orderNumber) {
-                return null;
-            }
-
-            return await this.nuvemshopService.findOrder(orderNumber);
-        } catch (error) {
-            console.error('[OrderValidation] Erro ao buscar pedido:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Valida número do pedido
-     * @param {string} orderNumber - Número do pedido
-     * @returns {Promise<Object|null>} Pedido ou null se não encontrado
-     */
-    async validateOrderNumber(orderNumber) {
-        try {
-            // Remove caracteres especiais e espaços
-            const cleanNumber = String(orderNumber).replace(/[^0-9]/g, '');
-            
-            // Valida o formato do número
-            if (!this.isValidOrderNumber(cleanNumber)) {
-                console.log('❌ Número de pedido inválido:', {
-                    numero: cleanNumber,
-                    numeroOriginal: orderNumber,
-                    timestamp: new Date().toISOString()
-                });
-                return null;
-            }
-            
-            console.log('🔍 Validando pedido:', {
-                numero: cleanNumber,
-                numeroOriginal: orderNumber,
-                timestamp: new Date().toISOString()
-            });
-
-            // Busca o pedido
-            const order = await this.orderApi.getOrderByNumber(cleanNumber);
-            
-            if (!order) {
-                console.log('❌ Pedido não encontrado:', {
-                    numero: cleanNumber,
-                    timestamp: new Date().toISOString()
-                });
-                return null;
-            }
-
-            // Se tem código de rastreio, busca informações atualizadas
-            let trackingDetails = null;
-            if (order.shipping_tracking_number) {
-                try {
-                    console.log('🔍 Buscando rastreamento:', {
-                        codigo: order.shipping_tracking_number,
-                        timestamp: new Date().toISOString()
-                    });
-                    
-                    trackingDetails = await this._trackingService.getTrackingInfo(order.shipping_tracking_number);
-                    
-                    if (trackingDetails?.success) {
-                        console.log('✅ Rastreamento encontrado:', {
-                            codigo: order.shipping_tracking_number,
-                            status: trackingDetails.status,
-                            ultima_atualizacao: trackingDetails.lastEvent?.time,
-                            timestamp: new Date().toISOString()
-                        });
-                    }
-                } catch (error) {
-                    console.error('⚠️ Erro ao buscar rastreamento:', {
-                        codigo: order.shipping_tracking_number,
-                        erro: error.message,
-                        timestamp: new Date().toISOString()
-                    });
-                    // Não falha se o rastreamento der erro
-                }
-            }
-
-            // Formata as informações com os detalhes de rastreamento
-            return this.formatSafeOrderInfo(order, trackingDetails);
-        } catch (error) {
-            console.error('❌ Erro ao validar pedido:', {
-                erro: error.message,
-                numero: orderNumber,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
-            return null;
-        }
-    }
-
-    /**
-     * Formata mensagem de rastreamento
-     * @param {string} trackingNumber - Código de rastreio
-     * @returns {string} Mensagem formatada
-     */
-    formatTrackingMessage(trackingNumber) {
-        if (!trackingNumber) return null;
-
-        return `🚚 *Rastreamento do Pedido*\n\n` +
-            `📦 Código de Rastreio: ${trackingNumber}\n\n` +
-            `🔍 Acompanhe seu pedido em:\n` +
-            `https://t.17track.net/pt-br#nums=${trackingNumber}\n\n` +
-            `_Clique no link acima para ver o status atualizado da entrega_`;
     }
 
     /**
