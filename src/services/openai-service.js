@@ -799,10 +799,14 @@ class OpenAIService {
                 const currentThreadId = await this.redisStore.get(currentThreadKey);
                 
                 if (currentThreadId) {
+                    // Chama handleCommand com o threadId do OpenAI
                     await this.handleCommand(currentThreadId, '#resetid');
+                } else {
+                    // Se não tem thread, apenas limpa os dados do usuário
+                    await this.redisStore.deleteUserData(customerId);
                 }
                 
-                // Força criação de nova thread
+                // Força criação de nova thread na próxima mensagem
                 await this.redisStore.del(currentThreadKey);
                 
                 return '🔄 Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.';
@@ -814,41 +818,34 @@ class OpenAIService {
                 throw new Error('Não foi possível criar/recuperar thread');
             }
 
-            // 2. Verifica se já tem um run ativo
-            if (await this.hasActiveRun(threadId)) {
-                this.queueMessage(threadId, message);
-                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
-            }
-
-            // 3. Adiciona a mensagem e executa o assistant
+            // 2. Atualiza metadados da thread
             try {
-                const response = await this.addMessageAndRun(threadId, message);
-                
-                // 4. Atualiza contexto se necessário
-                if (response && await this._shouldUpdateContext(threadId)) {
-                    await this._saveContextToRedis(threadId);
+                const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                if (metadata) {
+                    const parsedMetadata = JSON.parse(metadata);
+                    parsedMetadata.lastActivity = new Date().toISOString();
+                    parsedMetadata.messageCount++;
+                    await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify(parsedMetadata), 30 * 24 * 60 * 60);
                 }
-
-                // 5. Atualiza metadados da thread
-                try {
-                    const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
-                    if (metadata) {
-                        const parsed = JSON.parse(metadata);
-                        parsed.lastActivity = new Date().toISOString();
-                        parsed.messageCount = (parsed.messageCount || 0) + 1;
-                        await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify(parsed), 30 * 24 * 60 * 60);
-                    }
-                } catch (error) {
-                    logger.error('ErrorUpdatingMetadata', { threadId, error: error.message });
-                }
-
-                return response;
             } catch (error) {
-                logger.error('ErrorProcessingMessage', { threadId, error: error.message });
-                throw error;
+                logger.error('ErrorUpdatingMetadata', { threadId, error: error.message });
             }
+
+            // 3. Processa a mensagem
+            const content = Array.isArray(message.text) ? message.text.join('\n') : message.text;
+            const messageObj = {
+                role: 'user',
+                content: content
+            };
+
+            // 4. Adiciona à fila e processa
+            await this.queueMessage(threadId, messageObj);
+            const response = await this.processQueuedMessages(threadId);
+            
+            return response;
+
         } catch (error) {
-            logger.error('ErrorInProcessCustomerMessage', { customerId, error: error.message });
+            logger.error('ErrorProcessingMessage', { customerId, error: error.message });
             throw error;
         }
     }
