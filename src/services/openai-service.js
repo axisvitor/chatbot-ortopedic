@@ -166,7 +166,7 @@ class OpenAIService {
      */
     async hasActiveRun(threadId) {
         try {
-            const activeRunData = await this.redisStore.get(`openai:active_run:${threadId}`);
+            const activeRunData = await this.redisStore.getActiveRun(threadId);
             if (!activeRunData) return false;
 
             try {
@@ -175,13 +175,13 @@ class OpenAIService {
                 
                 // Se o run está ativo há mais de 2 minutos, considera inativo
                 if (now - data.timestamp > 2 * 60 * 1000) {
-                    await this.redisStore.del(`openai:active_run:${threadId}`);
+                    await this.redisStore.removeActiveRun(threadId);
                     return false;
                 }
                 
                 return true;
             } catch (error) {
-                await this.redisStore.del(`openai:active_run:${threadId}`);
+                await this.redisStore.removeActiveRun(threadId);
                 return false;
             }
         } catch (error) {
@@ -201,7 +201,7 @@ class OpenAIService {
                 runId,
                 timestamp: new Date().getTime()
             };
-            await this.redisStore.set(`openai:active_run:${threadId}`, JSON.stringify(data), 5 * 60); // 5 minutos TTL
+            await this.redisStore.setActiveRun(threadId, JSON.stringify(data), 5 * 60); // 5 minutos TTL
         } catch (error) {
             logger.error('ErrorRegisteringActiveRun', { threadId, runId, error });
         }
@@ -213,7 +213,7 @@ class OpenAIService {
      */
     async removeActiveRun(threadId) {
         try {
-            await this.redisStore.del(`openai:active_run:${threadId}`);
+            await this.redisStore.removeActiveRun(threadId);
             await this.processQueuedMessages(threadId);
         } catch (error) {
             logger.error('ErrorRemovingActiveRun', { threadId, error });
@@ -654,7 +654,7 @@ class OpenAIService {
      */
     async cancelActiveRun(threadId) {
         try {
-            const activeRun = await this.redisStore.get(`openai:active_run:${threadId}`);
+            const activeRun = await this.redisStore.getActiveRun(threadId);
             if (!activeRun) return;
 
             try {
@@ -770,7 +770,7 @@ class OpenAIService {
         try {
             // Busca thread existente usando o prefixo correto
             const threadKey = `openai:customer_threads:${customerId}`;
-            let threadId = await this.redisStore.get(threadKey);
+            let threadId = await this.redisStore.getThreadForCustomer(customerId);
             let shouldCreateNewThread = false;
 
             logger.info('CheckingExistingThread', { 
@@ -832,7 +832,7 @@ class OpenAIService {
                         reason: 'Thread inválida ou resetada'
                     });
                     // Remove o mapeamento antigo
-                    await this.redisStore.del(threadKey);
+                    await this.redisStore.del(`openai:customer_threads:${customerId}`);
                     threadId = null;
                 }
             }
@@ -854,7 +854,7 @@ class OpenAIService {
                 });
 
                 // Salva mapeamento cliente -> thread
-                await this.redisStore.set(threadKey, threadId, 30 * 24 * 60 * 60); // 30 dias
+                await this.redisStore.setThreadForCustomer(customerId, threadId);
 
                 // Inicializa metadados da thread
                 const metadata = {
@@ -868,7 +868,7 @@ class OpenAIService {
                 await this.redisStore.set(
                     `openai:thread_meta:${threadId}`, 
                     JSON.stringify(metadata), 
-                    30 * 24 * 60 * 60
+                    30 * 24 * 60 * 60 // 30 dias TTL
                 );
 
                 logger.info('ThreadMetadataSaved', {
@@ -886,13 +886,12 @@ class OpenAIService {
                 error: error.message,
                 stack: error.stack 
             });
-            throw error;
+            return null;
         }
     }
 
     async processCustomerMessage(customerId, message) {
         try {
-            // Extrai o texto da mensagem de forma segura
             let messageText = '';
             
             // Log da mensagem original para debug
@@ -908,14 +907,11 @@ class OpenAIService {
                 messageText = message.message.conversation;
             } else if (message?.text) {
                 messageText = message.text;
-            } else if (message?.type === 'text' && message?.body?.message?.extendedTextMessage?.text) {
-                messageText = message.body.message.extendedTextMessage.text;
             }
 
             // Validação e limpeza do texto
             messageText = messageText ? messageText.trim() : '';
 
-            // Log do texto extraído
             logger.info('ProcessingCustomerMessage', { 
                 customerId, 
                 messageText,
@@ -940,45 +936,58 @@ class OpenAIService {
 
             logger.info('ThreadObtained', { customerId, threadId });
 
-            // Adiciona mensagem à thread
-            await this.client.beta.threads.messages.create(threadId, {
+            // 2. Adiciona mensagem à thread
+            const threadMessage = await this.client.beta.threads.messages.create(threadId, {
                 role: 'user',
-                content: messageText,
-                model: OPENAI_CONFIG.models.chat
+                content: messageText
             });
 
-            // Executa o assistente
-            const assistant = await this.client.beta.threads.runs.create(threadId, {
-                assistant_id: this.assistantId,
-                model: OPENAI_CONFIG.models.chat
+            logger.info('MessageAdded', { 
+                customerId, 
+                threadId, 
+                messageId: threadMessage.id 
             });
+
+            // 3. Executa o assistente
+            const run = await this.client.beta.threads.runs.create(threadId, {
+                assistant_id: this.assistantId
+            });
+
+            // Registra o run ativo no Redis
+            await this.redisStore.setActiveRun(threadId, run.id);
 
             logger.info('AssistantStarted', { 
                 customerId, 
                 threadId, 
-                runId: assistant.id,
-                model: OPENAI_CONFIG.models.chat
+                runId: run.id
             });
 
-            const response = await this.waitForResponse(threadId, assistant.id);
+            // 4. Aguarda e retorna a resposta
+            const response = await this.waitForResponse(threadId, run.id);
+
+            // Remove o run ativo do Redis
+            await this.redisStore.removeActiveRun(threadId);
+
+            // Atualiza timestamp de última atividade
+            const metadata = {
+                lastActivity: new Date().toISOString()
+            };
+            await this.redisStore.set(`openai:thread_meta:${threadId}`, JSON.stringify(metadata));
 
             logger.info('AssistantResponse', {
                 customerId,
                 threadId,
-                runId: assistant.id,
+                runId: run.id,
                 responseLength: response?.length || 0
             });
 
             return response || 'Desculpe, não consegui processar sua mensagem. Por favor, tente novamente.';
+
         } catch (error) {
             logger.error('ErrorProcessingMessage', { 
                 customerId, 
-                error: {
-                    message: error.message,
-                    stack: error.stack,
-                    name: error.name,
-                    code: error.code
-                }
+                error: error.message,
+                stack: error.stack
             });
             return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
         }
