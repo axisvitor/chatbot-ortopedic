@@ -729,10 +729,17 @@ class OpenAIService {
             let threadId = await this.redisStore.get(threadKey);
 
             if (threadId) {
-                // Verifica se a thread ainda existe na OpenAI
+                // Verifica se a thread ainda existe na OpenAI e se não foi resetada
                 try {
                     await this.client.beta.threads.retrieve(threadId);
-                    return threadId;
+                    
+                    // Verifica se a thread foi resetada
+                    const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                    if (!metadata) {
+                        logger.info('ThreadWasReset', { customerId, threadId });
+                        await this.redisStore.del(threadKey);
+                        threadId = null;
+                    }
                 } catch (error) {
                     logger.warn('ThreadNotFound', { customerId, threadId });
                     await this.redisStore.del(threadKey);
@@ -740,22 +747,25 @@ class OpenAIService {
                 }
             }
 
-            // Cria nova thread
-            const thread = await this.client.beta.threads.create();
-            threadId = thread.id;
+            if (!threadId) {
+                // Cria nova thread
+                const thread = await this.client.beta.threads.create();
+                threadId = thread.id;
 
-            // Salva mapeamento cliente -> thread
-            await this.redisStore.set(threadKey, threadId, 30 * 24 * 60 * 60); // 30 dias
+                // Salva mapeamento cliente -> thread
+                await this.redisStore.set(threadKey, threadId, 30 * 24 * 60 * 60); // 30 dias
 
-            // Inicializa metadados da thread
-            await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify({
-                customerId,
-                createdAt: new Date().toISOString(),
-                lastActivity: new Date().toISOString(),
-                messageCount: 0
-            }), 30 * 24 * 60 * 60);
+                // Inicializa metadados da thread
+                await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify({
+                    customerId,
+                    createdAt: new Date().toISOString(),
+                    lastActivity: new Date().toISOString(),
+                    messageCount: 0
+                }), 30 * 24 * 60 * 60);
 
-            logger.info('ThreadCreated', { customerId, threadId });
+                logger.info('ThreadCreated', { customerId, threadId });
+            }
+
             return threadId;
 
         } catch (error) {
