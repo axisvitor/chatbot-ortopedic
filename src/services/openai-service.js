@@ -165,7 +165,7 @@ class OpenAIService {
      */
     async hasActiveRun(threadId) {
         try {
-            const activeRunData = await this.redisStore.get(`active_run:${threadId}`);
+            const activeRunData = await this.redisStore.get(`openai:active_run:${threadId}`);
             if (!activeRunData) return false;
 
             try {
@@ -174,13 +174,13 @@ class OpenAIService {
                 
                 // Se o run está ativo há mais de 2 minutos, considera inativo
                 if (now - data.timestamp > 2 * 60 * 1000) {
-                    await this.redisStore.del(`active_run:${threadId}`);
+                    await this.redisStore.del(`openai:active_run:${threadId}`);
                     return false;
                 }
                 
                 return true;
             } catch (error) {
-                await this.redisStore.del(`active_run:${threadId}`);
+                await this.redisStore.del(`openai:active_run:${threadId}`);
                 return false;
             }
         } catch (error) {
@@ -200,7 +200,7 @@ class OpenAIService {
                 runId,
                 timestamp: new Date().getTime()
             };
-            await this.redisStore.set(`active_run:${threadId}`, JSON.stringify(data), 5 * 60); // 5 minutos TTL
+            await this.redisStore.set(`openai:active_run:${threadId}`, JSON.stringify(data), 5 * 60); // 5 minutos TTL
         } catch (error) {
             logger.error('ErrorRegisteringActiveRun', { threadId, runId, error });
         }
@@ -212,7 +212,7 @@ class OpenAIService {
      */
     async removeActiveRun(threadId) {
         try {
-            await this.redisStore.del(`active_run:${threadId}`);
+            await this.redisStore.del(`openai:active_run:${threadId}`);
             await this.processQueuedMessages(threadId);
         } catch (error) {
             logger.error('ErrorRemovingActiveRun', { threadId, error });
@@ -544,8 +544,8 @@ class OpenAIService {
                     case 'request_payment_proof':
                         switch (parsedArgs.action) {
                             case 'request':
-                                await this.redisStore.set(`waiting_order:${threadId}`, 'payment_proof');
-                                await this.redisStore.set(`pending_order:${threadId}`, parsedArgs.order_number);
+                                await this.redisStore.set(`openai:waiting_order:${threadId}`, 'payment_proof');
+                                await this.redisStore.set(`openai:pending_order:${threadId}`, parsedArgs.order_number);
                                 output = { status: 'waiting', message: 'Aguardando comprovante' };
                                 break;
                             
@@ -561,8 +561,8 @@ class OpenAIService {
                                 break;
 
                             case 'cancel':
-                                await this.redisStore.del(`waiting_order:${threadId}`);
-                                await this.redisStore.del(`pending_order:${threadId}`);
+                                await this.redisStore.del(`openai:waiting_order:${threadId}`);
+                                await this.redisStore.del(`openai:pending_order:${threadId}`);
                                 output = { status: 'cancelled', message: 'Solicitação cancelada' };
                                 break;
 
@@ -627,7 +627,7 @@ class OpenAIService {
      */
     async cancelActiveRun(threadId) {
         try {
-            const activeRun = await this.redisStore.get(`active_run:${threadId}`);
+            const activeRun = await this.redisStore.get(`openai:active_run:${threadId}`);
             if (!activeRun) return;
 
             try {
@@ -667,7 +667,7 @@ class OpenAIService {
             // 3. Busca customerId antes de limpar os dados
             let customerId;
             try {
-                const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
                 if (metadata) {
                     const parsed = JSON.parse(metadata);
                     customerId = parsed.customerId;
@@ -679,26 +679,26 @@ class OpenAIService {
             // 4. Limpa dados do Redis
             try {
                 const cleanupTasks = [
-                    this.redisStore.del(`active_run:${threadId}`),
-                    this.redisStore.del(`context:${threadId}`),
-                    this.redisStore.del(`thread_metadata:${threadId}`),
+                    this.redisStore.del(`openai:active_run:${threadId}`),
+                    this.redisStore.del(`openai:context:${threadId}`),
+                    this.redisStore.del(`openai:thread_meta:${threadId}`),
                     this.redisStore.deleteUserContext(threadId),
-                    this.redisStore.delPattern(`tracking:${threadId}:*`),
-                    this.redisStore.delPattern(`order:${threadId}:*`),
-                    this.redisStore.delPattern(`payment:${threadId}:*`),
-                    this.redisStore.delPattern(`waiting_order:${threadId}`),
-                    this.redisStore.delPattern(`pending_order:${threadId}`)
+                    this.redisStore.delPattern(`openai:tracking:${threadId}:*`),
+                    this.redisStore.delPattern(`openai:order:${threadId}:*`),
+                    this.redisStore.delPattern(`openai:payment:${threadId}:*`),
+                    this.redisStore.delPattern(`openai:waiting_order:${threadId}`),
+                    this.redisStore.delPattern(`openai:pending_order:${threadId}`)
                 ];
 
                 // Se encontrou o customerId, remove também o mapeamento customer -> thread
                 if (customerId) {
-                    cleanupTasks.push(this.redisStore.del(`customer_thread:${customerId}`));
+                    cleanupTasks.push(this.redisStore.del(`openai:customer_threads:${customerId}`));
                 }
 
                 await Promise.all(cleanupTasks);
                 logger.info('RedisDataCleared', { threadId, customerId });
             } catch (error) {
-                logger.error('ErrorClearingRedisData', { threadId, error: error.message });
+                logger.error('ErrorClearingRedisData', { threadId, error });
             }
 
             // 5. Deleta thread na OpenAI
@@ -710,7 +710,7 @@ class OpenAIService {
             } catch (error) {
                 // Ignora erro se a thread não existir
                 if (!error.message.includes('No thread found')) {
-                    logger.error('ErrorDeletingOpenAIThread', { threadId, error: error.message });
+                    logger.error('ErrorDeletingOpenAIThread', { threadId, error });
                 }
             }
 
@@ -725,7 +725,7 @@ class OpenAIService {
     async getOrCreateThreadForCustomer(customerId) {
         try {
             // Busca thread existente
-            const threadKey = `customer_thread:${customerId}`;
+            const threadKey = `openai:customer_threads:${customerId}`;
             let threadId = await this.redisStore.get(threadKey);
             let shouldCreateNewThread = false;
 
@@ -736,7 +736,7 @@ class OpenAIService {
                     await this.client.beta.threads.retrieve(threadId);
                     
                     // Verifica se a thread foi resetada ou deletada
-                    const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                    const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
                     if (!metadata) {
                         logger.info('ThreadWasReset', { customerId, threadId });
                         shouldCreateNewThread = true;
@@ -749,7 +749,7 @@ class OpenAIService {
                         shouldCreateNewThread = true;
                     }
                 } catch (error) {
-                    logger.warn('ThreadNotFound', { customerId, threadId, error: error.message });
+                    logger.warn('ThreadNotFound', { customerId, threadId, error });
                     shouldCreateNewThread = true;
                 }
 
@@ -769,7 +769,7 @@ class OpenAIService {
                 await this.redisStore.set(threadKey, threadId, 30 * 24 * 60 * 60); // 30 dias
 
                 // Inicializa metadados da thread
-                await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify({
+                await this.redisStore.set(`openai:thread_meta:${threadId}`, JSON.stringify({
                     customerId,
                     createdAt: new Date().toISOString(),
                     lastActivity: new Date().toISOString(),
@@ -783,7 +783,7 @@ class OpenAIService {
             return threadId;
 
         } catch (error) {
-            logger.error('ErrorCreatingThread', { customerId, error: error.message });
+            logger.error('ErrorCreatingThread', { customerId, error });
             throw error;
         }
     }
@@ -795,7 +795,7 @@ class OpenAIService {
             // Se for comando #resetid, trata separadamente
             if (message.text === '#resetid') {
                 // Primeiro obtém o threadId atual
-                const currentThreadKey = `customer_thread:${customerId}`;
+                const currentThreadKey = `openai:customer_threads:${customerId}`;
                 const currentThreadId = await this.redisStore.get(currentThreadKey);
                 
                 logger.info('ProcessingResetCommand', { customerId, currentThreadId });
@@ -824,15 +824,15 @@ class OpenAIService {
 
             // 2. Atualiza metadados da thread
             try {
-                const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
                 if (metadata) {
                     const parsedMetadata = JSON.parse(metadata);
                     parsedMetadata.lastActivity = new Date().toISOString();
                     parsedMetadata.messageCount++;
-                    await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify(parsedMetadata), 30 * 24 * 60 * 60);
+                    await this.redisStore.set(`openai:thread_meta:${threadId}`, JSON.stringify(parsedMetadata), 30 * 24 * 60 * 60);
                 }
             } catch (error) {
-                logger.error('ErrorUpdatingMetadata', { threadId, error: error.message });
+                logger.error('ErrorUpdatingMetadata', { threadId, error });
             }
 
             // 3. Processa a mensagem
@@ -859,7 +859,7 @@ class OpenAIService {
             return response;
 
         } catch (error) {
-            logger.error('ErrorProcessingMessage', { customerId, error: error.message });
+            logger.error('ErrorProcessingMessage', { customerId, error });
             return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
         }
     }
@@ -873,7 +873,7 @@ class OpenAIService {
             });
 
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
-            const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
+            const waiting = await this.redisStore.get(`openai:waiting_order:${threadId}`);
 
             if (waiting === 'payment_proof') {
                 logger.info('WaitingForPaymentProof', { threadId });
@@ -884,7 +884,7 @@ class OpenAIService {
 
                 let orderNumber = message ? 
                     await this.orderValidationService.extractOrderNumber(message) :
-                    await this.redisStore.get(`pending_order:${threadId}`);
+                    await this.redisStore.get(`openai:pending_order:${threadId}`);
 
                 return await this.processPaymentProof(threadId, images[0], orderNumber);
             }
@@ -964,13 +964,13 @@ class OpenAIService {
                 // 3. Recupera o customerId antes de limpar tudo
                 let customerId;
                 try {
-                    const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                    const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
                     if (metadata) {
                         const parsedMetadata = JSON.parse(metadata);
                         customerId = parsedMetadata.customerId;
                     }
                 } catch (error) {
-                    logger.error('ErrorGettingCustomerId', { threadId, error: error.message });
+                    logger.error('ErrorGettingCustomerId', { threadId, error });
                 }
 
                 // 4. Deleta thread OpenAI
@@ -982,7 +982,7 @@ class OpenAIService {
                     }
                 } catch (error) {
                     // Log error but continue with reset
-                    logger.error('ErrorDeletingOpenAIThread', { threadId, error: error.message });
+                    logger.error('ErrorDeletingOpenAIThread', { threadId, error });
                 }
 
                 // 5. Limpa dados Redis
@@ -991,7 +991,7 @@ class OpenAIService {
                     if (customerId) {
                         await this.redisStore.deleteUserData(customerId);
                         // Força criação de nova thread removendo o mapeamento customer -> thread
-                        await this.redisStore.del(`customer_thread:${customerId}`);
+                        await this.redisStore.del(`openai:customer_threads:${customerId}`);
                         logger.info('CustomerDataDeleted', { customerId });
                     }
                     await this.redisStore.deleteThreadData(threadId);
@@ -999,20 +999,20 @@ class OpenAIService {
                     
                     // Limpa chaves específicas que podem não ter sido pegas pelos métodos acima
                     const specificKeys = [
-                        `active_run:${threadId}`,
-                        `context:thread:${threadId}`,
-                        `context:update:${threadId}`,
-                        `pending_order:${threadId}`,
-                        `tracking:${threadId}`,
-                        `waiting_order:${threadId}`,
-                        `tool_calls:${threadId}`,
-                        `thread_metadata:${threadId}`
+                        `openai:active_run:${threadId}`,
+                        `openai:context:thread:${threadId}`,
+                        `openai:context:update:${threadId}`,
+                        `openai:pending_order:${threadId}`,
+                        `openai:tracking:${threadId}`,
+                        `openai:waiting_order:${threadId}`,
+                        `openai:tool_calls:${threadId}`,
+                        `openai:thread_meta:${threadId}`
                     ];
 
                     await Promise.all(specificKeys.map(key => this.redisStore.del(key)));
                     logger.info('RedisDataCleared', { threadId, customerId });
                 } catch (error) {
-                    logger.error('ErrorClearingRedisData', { threadId, error: error.message });
+                    logger.error('ErrorClearingRedisData', { threadId, error });
                 }
 
                 // 6. Verifica se tudo foi limpo
@@ -1033,7 +1033,7 @@ class OpenAIService {
             }
             return false;
         } catch (error) {
-            logger.error('ErrorHandlingCommand', { threadId, command, error: error.message });
+            logger.error('ErrorHandlingCommand', { threadId, command, error });
             throw error;
         }
     }
@@ -1203,8 +1203,8 @@ class OpenAIService {
             });
 
             // Validar se há solicitação pendente
-            const waiting = await this.redisStore.get(`waiting_order:${threadId}`);
-            const pendingOrder = await this.redisStore.get(`pending_order:${threadId}`);
+            const waiting = await this.redisStore.get(`openai:waiting_order:${threadId}`);
+            const pendingOrder = await this.redisStore.get(`openai:pending_order:${threadId}`);
             
             if (!waiting || waiting !== 'payment_proof') {
                 return 'Não há solicitação de comprovante pendente. Por favor, primeiro me informe o número do pedido.';
@@ -1234,7 +1234,7 @@ class OpenAIService {
             });
 
             // Limpar o comprovante pendente após processamento
-            await this.redisStore.del(`pending_proof:${threadId}`);
+            await this.redisStore.del(`openai:pending_proof:${threadId}`);
 
             return ' Comprovante recebido! Nosso time financeiro irá analisar e confirmar o pagamento em breve.';
         } catch (error) {
@@ -1249,16 +1249,16 @@ class OpenAIService {
      */
     async _saveContextToRedis(threadId, context) {
         try {
-            const contextKey = `context:thread:${threadId}`;
-            const lastUpdateKey = `context:update:${threadId}`;
+            const contextKey = `openai:context:thread:${threadId}`;
+            const lastUpdateKey = `openai:context:update:${threadId}`;
             const contextData = {
                 lastMessage: context,
                 timestamp: Date.now(),
                 metadata: {
-                    lastOrderNumber: await this.redisStore.get(`pending_order:${threadId}`),
-                    lastTrackingCode: await this.redisStore.get(`tracking:${threadId}`),
-                    waitingFor: await this.redisStore.get(`waiting_order:${threadId}`),
-                    lastToolCalls: await this.redisStore.get(`tool_calls:${threadId}`)
+                    lastOrderNumber: await this.redisStore.get(`openai:pending_order:${threadId}`),
+                    lastTrackingCode: await this.redisStore.get(`openai:tracking:${threadId}`),
+                    waitingFor: await this.redisStore.get(`openai:waiting_order:${threadId}`),
+                    lastToolCalls: await this.redisStore.get(`openai:tool_calls:${threadId}`)
                 }
             };
 
@@ -1279,7 +1279,7 @@ class OpenAIService {
      */
     async _getContextFromRedis(threadId) {
         try {
-            const contextKey = `context:thread:${threadId}`;
+            const contextKey = `openai:context:thread:${threadId}`;
             const contextData = await this.redisStore.get(contextKey);
             
             if (!contextData) {
@@ -1307,7 +1307,7 @@ class OpenAIService {
      */
     async _shouldUpdateContext(threadId) {
         try {
-            const lastUpdateKey = `context:update:${threadId}`;
+            const lastUpdateKey = `openai:context:update:${threadId}`;
             const lastUpdate = await this.redisStore.get(lastUpdateKey);
             
             if (!lastUpdate) {
