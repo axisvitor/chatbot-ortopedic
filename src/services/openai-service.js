@@ -254,14 +254,38 @@ class OpenAIService {
             const queue = this.messageQueue.get(threadId) || [];
             if (queue.length === 0) return;
 
-            // Processa apenas a primeira mensagem da fila
-            const message = queue.shift();
-            this.messageQueue.set(threadId, queue);
+            logger.info('ProcessingQueuedMessages', { 
+                threadId,
+                queueLength: queue.length
+            });
 
-            // Processa a mensagem
-            await this.addMessageAndRun(threadId, message);
+            // Limpa a fila atual
+            this.messageQueue.set(threadId, []);
+
+            // Processa todas as mensagens em sequência
+            for (const message of queue) {
+                try {
+                    await this.addMessageAndRun(threadId, message);
+                } catch (error) {
+                    logger.error('ErrorProcessingQueuedMessage', { 
+                        threadId, 
+                        error: error.message,
+                        stack: error.stack
+                    });
+                }
+            }
+
+            logger.info('QueueProcessingComplete', { 
+                threadId,
+                processedCount: queue.length
+            });
+
         } catch (error) {
-            logger.error('ErrorProcessingQueuedMessages', { threadId, error });
+            logger.error('ErrorProcessingQueuedMessages', { 
+                threadId, 
+                error: error.message,
+                stack: error.stack
+            });
         }
     }
 
@@ -942,51 +966,37 @@ class OpenAIService {
 
             logger.info('ThreadObtained', { customerId, threadId });
 
-            // 2. Adiciona mensagem à thread
-            const threadMessage = await this.client.beta.threads.messages.create(threadId, {
+            // 2. Prepara a mensagem para o Assistant
+            const assistantMessage = {
                 role: 'user',
                 content: messageText
-            });
+            };
 
-            logger.info('MessageAddedToThread', { 
+            // 3. Verifica se há um run ativo
+            const hasActiveRun = await this.hasActiveRun(threadId);
+            
+            if (hasActiveRun) {
+                // Se houver run ativo, adiciona à fila e retorna
+                logger.info('QueueingMessage', { 
+                    customerId, 
+                    threadId,
+                    messageText,
+                    queueLength: (this.messageQueue.get(threadId) || []).length + 1
+                });
+                
+                this.queueMessage(threadId, assistantMessage);
+                return null; // Retorna null para não enviar resposta intermediária
+            }
+
+            // 4. Se não houver run ativo, processa a mensagem
+            logger.info('ProcessingMessageDirectly', { 
                 customerId, 
-                threadId, 
-                messageId: threadMessage.id,
+                threadId,
                 messageText
             });
 
-            // 3. Executa o assistente
-            const run = await this.client.beta.threads.runs.create(threadId, {
-                assistant_id: this.assistantId
-            });
-
-            // Registra o run ativo no Redis
-            await this.redisStore.setActiveRun(threadId, run.id);
-
-            logger.info('AssistantStarted', { 
-                customerId, 
-                threadId, 
-                runId: run.id
-            });
-
-            // 4. Aguarda e retorna a resposta
-            const response = await this.waitForResponse(threadId, run.id);
-
-            // Remove o run ativo do Redis
-            await this.redisStore.removeActiveRun(threadId);
-
-            // Atualiza timestamp de última atividade
-            const metadata = {
-                lastActivity: new Date().toISOString()
-            };
-            await this.redisStore.set(`openai:thread_meta:${threadId}`, JSON.stringify(metadata));
-
-            logger.info('AssistantResponse', {
-                customerId,
-                threadId,
-                runId: run.id,
-                responseLength: response?.length || 0
-            });
+            // Adiciona a mensagem e executa o assistant
+            const response = await this.addMessageAndRun(threadId, assistantMessage);
 
             return response || 'Desculpe, não consegui processar sua mensagem. Por favor, tente novamente.';
 

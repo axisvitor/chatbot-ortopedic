@@ -133,6 +133,12 @@ class AIServices {
 
                     console.log('[AIServices] Resposta do OpenAI:', { response });
 
+                    // Se a resposta for null, significa que a mensagem foi enfileirada
+                    if (response === null) {
+                        // Não envia resposta, apenas aguarda o processamento em lote
+                        return { type: 'text', response: null, from: message.from };
+                    }
+
                     if (response) {
                         await this.whatsAppService.sendText(message.from, response);
                     }
