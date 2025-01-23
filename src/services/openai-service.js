@@ -816,14 +816,26 @@ class OpenAIService {
 
     async processCustomerMessage(customerId, message) {
         try {
+            // Extrai o texto da mensagem de forma segura
+            const messageText = message?.text || 
+                              message?.message?.extendedTextMessage?.text || 
+                              message?.message?.conversation ||
+                              '';
+
             logger.info('ProcessingCustomerMessage', { 
                 customerId, 
-                messageText: message.text,
-                messageType: typeof message.text
+                messageText,
+                messageType: typeof messageText,
+                originalMessage: JSON.stringify(message)
             });
 
+            if (!messageText.trim()) {
+                logger.warn('EmptyMessage', { customerId });
+                return 'Desculpe, não consegui entender sua mensagem. Pode tentar novamente?';
+            }
+
             // Se for comando #resetid, trata separadamente
-            if (message.text === '#resetid') {
+            if (messageText === '#resetid') {
                 const currentThreadKey = `openai:customer_threads:${customerId}`;
                 const currentThreadId = await this.redisStore.get(currentThreadKey);
                 
@@ -861,12 +873,9 @@ class OpenAIService {
             }
 
             // 3. Processa a mensagem
-            const messageContent = message.text || '';
-            
-            // Removida a validação que estava causando o erro
             const messageObj = {
                 role: 'user',
-                content: messageContent
+                content: messageText
             };
 
             logger.info('ProcessingMessage', { threadId, messageObj });
