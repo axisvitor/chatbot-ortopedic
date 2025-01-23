@@ -903,24 +903,15 @@ class OpenAIService {
                 rawMessage: JSON.stringify(message, null, 2)
             });
 
-            // Se a mensagem for uma string, tenta fazer parse
-            if (typeof message === 'string') {
-                try {
-                    message = JSON.parse(message);
-                } catch (e) {
-                    messageText = message;
-                }
-            }
-
             // Extrai o texto da mensagem usando a estrutura correta do WhatsApp
-            if (message?.content?.[0]?.text) {
-                messageText = message.content[0].text;
-            } else if (message?.text) {
-                messageText = message.text;
+            if (typeof message === 'string') {
+                messageText = message;
             } else if (message?.message?.extendedTextMessage?.text) {
                 messageText = message.message.extendedTextMessage.text;
             } else if (message?.message?.conversation) {
                 messageText = message.message.conversation;
+            } else if (message?.text) {
+                messageText = message.text;
             }
 
             // Validação e limpeza do texto

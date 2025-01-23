@@ -122,7 +122,14 @@ class AIServices {
                 }
 
                 try {
-                    const response = await this.openAIService.processCustomerMessage(message.from, messageText);
+                    // Envia a mensagem no formato esperado
+                    const response = await this.openAIService.processCustomerMessage(message.from, {
+                        message: {
+                            extendedTextMessage: {
+                                text: messageText
+                            }
+                        }
+                    });
 
                     console.log('[AIServices] Resposta do OpenAI:', { response });
 
