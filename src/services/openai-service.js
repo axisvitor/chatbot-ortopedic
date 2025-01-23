@@ -935,27 +935,29 @@ class OpenAIService {
                         }
                     }
 
-                    const keysToDelete = [
+                    // Limpa todos os dados do usuário e da thread
+                    if (customerId) {
+                        await this.redisStore.deleteUserData(customerId);
+                    }
+                    await this.redisStore.deleteThreadData(threadId);
+                    await this.redisStore.deleteUserContext(threadId);
+                    
+                    // Limpa chaves específicas que podem não ter sido pegas pelos métodos acima
+                    const specificKeys = [
                         `active_run:${threadId}`,
-                        `context:${threadId}`,
                         `context:thread:${threadId}`,
                         `context:update:${threadId}`,
                         `pending_order:${threadId}`,
                         `tracking:${threadId}`,
                         `waiting_order:${threadId}`,
-                        `tool_calls:${threadId}`,
-                        `thread_metadata:${threadId}`
+                        `tool_calls:${threadId}`
                     ];
 
-                    // Adiciona a chave customer_thread se tiver o customerId
                     if (customerId) {
-                        keysToDelete.push(`customer_thread:${customerId}`);
+                        specificKeys.push(`customer_thread:${customerId}`);
                     }
 
-                    await Promise.all([
-                        ...keysToDelete.map(key => this.redisStore.del(key)),
-                        this.redisStore.deleteUserContext(threadId)
-                    ]);
+                    await Promise.all(specificKeys.map(key => this.redisStore.del(key)));
                     
                     logger.info('RedisDataCleared', { threadId, customerId });
                 } catch (error) {
@@ -1021,8 +1023,7 @@ class OpenAIService {
             console.log('[OpenAI] Adicionando mensagem:', {
                 threadId,
                 role: message.role,
-                contentType: Array.isArray(message.content) ? 'array' : typeof message.content,
-                contentLength: Array.isArray(message.content) ? 
+                contentType: Array.isArray(message.content) ? 
                     JSON.stringify(message.content).length : 
                     message.content?.length
             });
