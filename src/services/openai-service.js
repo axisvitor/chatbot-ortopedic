@@ -673,7 +673,7 @@ class OpenAIService {
                     customerId = parsed.customerId;
                 }
             } catch (error) {
-                logger.warn('ErrorGettingThreadMetadata', { threadId, error: error.message });
+                logger.warn('ErrorGettingThreadMetadata', { threadId, error });
             }
 
             // 4. Limpa dados do Redis
@@ -724,7 +724,7 @@ class OpenAIService {
 
     async getOrCreateThreadForCustomer(customerId) {
         try {
-            // Busca thread existente
+            // Busca thread existente usando o prefixo correto
             const threadKey = `openai:customer_threads:${customerId}`;
             let threadId = await this.redisStore.get(threadKey);
             let shouldCreateNewThread = false;
