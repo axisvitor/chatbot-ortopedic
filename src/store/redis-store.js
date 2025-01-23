@@ -132,7 +132,16 @@ class RedisStore {
                 `history:${userId}*`,
                 `context:${userId}*`,
                 `state:${userId}*`,
-                `queue:${userId}*`
+                `queue:${userId}*`,
+                `tracking:${userId}*`,
+                `tracking:order:${userId}*`, // Adiciona chave do sistema de rastreamento
+                `orders:${userId}*`,
+                `tracking_codes:${userId}*`,
+                `order:${userId}*`,
+                `pending_order:${userId}*`,
+                `waiting_order:${userId}*`,
+                `customer_thread:${userId}*`,
+                `thread_metadata:${userId}*`
             ];
 
             console.log('[Redis] Deletando dados do usuário:', {
@@ -160,7 +169,17 @@ class RedisStore {
                 `thread:${threadId}*`,
                 `messages:${threadId}*`,
                 `state:${threadId}*`,
-                `queue:${threadId}*`
+                `queue:${threadId}*`,
+                `active_run:${threadId}*`,
+                `context:${threadId}*`,
+                `context:thread:${threadId}*`,
+                `context:update:${threadId}*`,
+                `pending_order:${threadId}*`,
+                `tracking:${threadId}*`,
+                `tracking:order:${threadId}*`, 
+                `waiting_order:${threadId}*`,
+                `tool_calls:${threadId}*`,
+                `thread_metadata:${threadId}*`
             ];
 
             console.log('[Redis] Deletando dados da thread:', {
