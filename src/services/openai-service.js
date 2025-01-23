@@ -8,6 +8,7 @@ const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { FinancialService } = require('./financial-service');
+const { WhatsappService } = require('./whatsapp-service'); // Import the WhatsappService
 
 class OpenAIService {
     /**
@@ -43,6 +44,7 @@ class OpenAIService {
         this.businessHoursService = businessHoursService || new BusinessHoursService();
         this.orderValidationService = orderValidationService || new OrderValidationService();
         this.financialService = financialService; // Recebe o FinancialService do container
+        this.whatsappService = new WhatsappService(); // Initialize the WhatsappService
 
         // Inicializa limpeza periódica
         setInterval(() => this._cleanupCache(), this.THREAD_CACHE_TTL);
@@ -502,11 +504,26 @@ class OpenAIService {
 
             // Adiciona à fila e agenda processamento
             await this.queueMessage(threadId, { text: messageText });
+            
+            // Processa imediatamente se não houver timer
             if (!this.processingTimers.has(threadId)) {
-                const timer = setTimeout(
-                    () => this.processQueuedMessages(threadId),
-                    this.MESSAGE_DELAY
-                );
+                const timer = setTimeout(async () => {
+                    try {
+                        const response = await this.processQueuedMessages(threadId);
+                        if (response) {
+                            await this.sendResponse(customerId, response);
+                        }
+                    } catch (error) {
+                        logger.error('ErrorProcessingTimer', {
+                            threadId,
+                            error: error.message
+                        });
+                        await this.sendResponse(
+                            customerId,
+                            'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
+                        );
+                    }
+                }, this.MESSAGE_DELAY);
                 this.processingTimers.set(threadId, timer);
             }
 
@@ -519,6 +536,30 @@ class OpenAIService {
                 stack: error.stack
             });
             return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
+        }
+    }
+
+    /**
+     * Envia resposta ao cliente
+     * @param {string} customerId ID do cliente
+     * @param {string} response Resposta a ser enviada
+     */
+    async sendResponse(customerId, response) {
+        try {
+            if (!response) return;
+            
+            // Envia via WhatsApp
+            await this.whatsappService.sendMessage(customerId, response);
+            
+            logger.info('ResponseSent', {
+                customerId,
+                responseLength: response.length
+            });
+        } catch (error) {
+            logger.error('ErrorSendingResponse', {
+                customerId,
+                error: error.message
+            });
         }
     }
 
