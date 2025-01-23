@@ -938,6 +938,8 @@ class OpenAIService {
                     // Limpa todos os dados do usuário e da thread
                     if (customerId) {
                         await this.redisStore.deleteUserData(customerId);
+                        // Força criação de nova thread removendo o mapeamento customer -> thread
+                        await this.redisStore.del(`customer_thread:${customerId}`);
                     }
                     await this.redisStore.deleteThreadData(threadId);
                     await this.redisStore.deleteUserContext(threadId);
@@ -950,7 +952,8 @@ class OpenAIService {
                         `pending_order:${threadId}`,
                         `tracking:${threadId}`,
                         `waiting_order:${threadId}`,
-                        `tool_calls:${threadId}`
+                        `tool_calls:${threadId}`,
+                        `thread_metadata:${threadId}` // Adiciona thread_metadata para garantir
                     ];
 
                     if (customerId) {
