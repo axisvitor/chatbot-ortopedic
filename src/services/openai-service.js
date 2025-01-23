@@ -507,12 +507,7 @@ class OpenAIService {
                             const formattedTracking = `📦 Status do Rastreamento ${statusEmoji}\n\n` +
                                 `🔍 Status: ${trackingInfo.status}\n` +
                                 `📝 Detalhes: ${trackingInfo.sub_status || 'N/A'}\n` +
-                                `📅 Última Atualização: ${trackingInfo.last_event?.time || 'N/A'}\n` +
-                                `🚚 Transportadora: ${trackingInfo.carrier?.name || 'N/A'}\n\n` +
-                                `📋 Últimos Eventos:\n${trackingInfo.events?.slice(0, 3).map(e => 
-                                    `▫️ ${e.time} - ${e.description}`
-                                ).join('\n') || 'Nenhum evento disponível'}\n\n` +
-                                `ℹ️ Código de Rastreio: ${cleanTrackingCode}`;
+                                `📅 Última Atualização: ${trackingInfo.last_event?.time || 'N/A'}`;
                             
                             output = {
                                 ...trackingInfo,
