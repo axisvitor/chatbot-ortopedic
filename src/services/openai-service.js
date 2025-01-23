@@ -19,7 +19,8 @@ class OpenAIService {
      */
     constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService, financialService) {
         this.client = new OpenAI({
-            apiKey: OPENAI_CONFIG.apiKey
+            apiKey: OPENAI_CONFIG.apiKey,
+            baseURL: OPENAI_CONFIG.baseUrl
         });
         this.assistantId = OPENAI_CONFIG.assistantId;
         this.redisStore = new RedisStore(); // Redis para controlar runs ativos
@@ -454,6 +455,198 @@ class OpenAIService {
         }
     }
 
+    async handleToolCalls(run, threadId) {
+        if (!run?.required_action?.submit_tool_outputs?.tool_calls) {
+            logger.warn('NoToolCalls', { threadId });
+            return [];
+        }
+
+        const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+        logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
+        
+        const toolOutputs = [];
+        const context = {};
+
+        for (const toolCall of toolCalls) {
+            const { name, arguments: args } = toolCall.function;
+            logger.info('ExecutingTool', { threadId, tool: name, args });
+            
+            let parsedArgs;
+            try {
+                parsedArgs = JSON.parse(args);
+            } catch (error) {
+                logger.error('ErrorParsingToolArguments', { threadId, tool: name, error });
+                continue;
+            }
+
+            let output;
+            try {
+                switch (name) {
+                    case 'check_order':
+                        output = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
+                        if (!output) {
+                            output = { error: true, message: 'Pedido não encontrado' };
+                        } else {
+                            // Salva informações do pedido no contexto
+                            context.order = output;
+                            // Adiciona tracking_code ao output para facilitar o check_tracking
+                            output.tracking_code = output.shipping_tracking_number;
+                            
+                            // Formata a saída usando o template de pedido
+                            const formattedOutput = `🛍️ Detalhes do Pedido #${output.number}\n\n` +
+                                `📦 Status: ${output.status}\n` +
+                                `💰 Status Pagamento: ${output.payment_status}\n` +
+                                `📬 Status Envio: ${output.shipping_status}\n\n` +
+                                `Produtos:\n${output.products.map(p => 
+                                    `▫️ ${p.quantity}x ${p.name} - R$ ${p.price}`
+                                ).join('\n')}`;
+                            
+                            output = {
+                                ...output,
+                                shipping_tracking_number: output.shipping_tracking_number,
+                                formatted: formattedOutput,
+                                message: formattedOutput // Para compatibilidade
+                            };
+                        }
+                        break;
+
+                    case 'check_tracking':
+                        // Verifica se é um placeholder
+                        if (parsedArgs.tracking_code.includes('[código de rastreio')) {
+                            // Tenta usar o código do pedido do contexto
+                            if (context.order?.shipping_tracking_number) {
+                                parsedArgs.tracking_code = context.order.shipping_tracking_number;
+                            } else {
+                                output = { error: true, message: 'Código de rastreio inválido' };
+                                break;
+                            }
+                        }
+                        
+                        // Remove caracteres especiais e espaços
+                        const cleanTrackingCode = parsedArgs.tracking_code.trim().replace(/[^a-zA-Z0-9]/g, '');
+                        
+                        try {
+                            // Força atualização do rastreamento
+                            const trackingInfo = await this.trackingService.getTrackingInfo(cleanTrackingCode, true);
+                            
+                            // Formata a saída usando o template de rastreamento
+                            const statusEmoji = this.trackingService.STATUS_EMOJIS[trackingInfo.status] || '📦';
+                            const formattedTracking = `📦 Status do Rastreamento ${statusEmoji}\n\n` +
+                                `🔍 Status: ${trackingInfo.status}\n` +
+                                `📝 Detalhes: ${trackingInfo.sub_status || 'N/A'}\n` +
+                                `📅 Última Atualização: ${trackingInfo.last_event?.time || 'N/A'}`;
+                            
+                            output = {
+                                ...trackingInfo,
+                                tracking_code: cleanTrackingCode,
+                                status_emoji: statusEmoji,
+                                formatted: formattedTracking,
+                                message: formattedTracking // Para compatibilidade
+                            };
+                            
+                        } catch (error) {
+                            console.error('[OpenAI] Erro ao consultar rastreamento:', error);
+                            output = { 
+                                error: true, 
+                                message: 'Erro ao consultar rastreamento',
+                                details: error.message
+                            };
+                        }
+                        break;
+
+                    case 'get_business_hours':
+                        output = parsedArgs.type === 'full' ? 
+                            await this.businessHoursService.getAllHours() :
+                            await this.businessHoursService.getCurrentStatus();
+                        break;
+
+                    case 'extract_order_number':
+                        const orderNumber = await this.orderValidationService.extractOrderNumber(
+                            parsedArgs.text,
+                            parsedArgs.strict || false
+                        );
+                        output = { order_number: orderNumber };
+                        break;
+
+                    case 'request_payment_proof':
+                        switch (parsedArgs.action) {
+                            case 'request':
+                                await this.redisStore.set(`openai:waiting_order:${threadId}`, 'payment_proof');
+                                await this.redisStore.set(`openai:pending_order:${threadId}`, parsedArgs.order_number);
+                                output = { status: 'waiting', message: 'Aguardando comprovante' };
+                                break;
+                            
+                            case 'validate':
+                                const orderStatus = await this.nuvemshopService.getOrderPaymentStatus(parsedArgs.order_number);
+                                output = {
+                                    valid: orderStatus === 'paid',
+                                    status: orderStatus,
+                                    message: orderStatus === 'paid' ? 
+                                        'Pagamento confirmado' : 
+                                        'Pagamento pendente'
+                                };
+                                break;
+
+                            case 'cancel':
+                                await this.redisStore.del(`openai:waiting_order:${threadId}`);
+                                await this.redisStore.del(`openai:pending_order:${threadId}`);
+                                output = { status: 'cancelled', message: 'Solicitação cancelada' };
+                                break;
+
+                            default:
+                                throw new Error(`Ação inválida: ${parsedArgs.action}`);
+                        }
+                        break;
+
+                    case 'forward_to_financial':
+                        const caseData = {
+                            type: parsedArgs.case_type,
+                            orderNumber: parsedArgs.order_number,
+                            priority: parsedArgs.priority || 'medium',
+                            details: parsedArgs.details
+                        };
+                        
+                        await this.financialService.createCase(caseData);
+                        output = { 
+                            status: 'forwarded',
+                            message: 'Caso encaminhado para análise',
+                            priority: caseData.priority
+                        };
+                        break;
+
+                    default:
+                        throw new Error(`Função desconhecida: ${name}`);
+                }
+
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: JSON.stringify({
+                        ...output,
+                        // Garante que a formatação seja incluída na resposta
+                        formatted_response: output.formatted || output.message
+                    })
+                });
+
+            } catch (error) {
+                logger.error('ErrorExecutingTool', { 
+                    threadId, 
+                    tool: name, 
+                    error: error.message 
+                });
+
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: JSON.stringify({ 
+                        error: true, 
+                        message: 'Erro ao processar solicitação'
+                    })
+                });
+            }
+        }
+
+        return toolOutputs;
+    }
+
     /**
      * Cancela um run ativo
      * @param {string} threadId - ID do thread
@@ -720,20 +913,14 @@ class OpenAIService {
             }
 
             // Validação e limpeza do texto
-            messageText = messageText.trim();
+            messageText = messageText ? messageText.trim() : '';
 
             // Log do texto extraído
             logger.info('ProcessingCustomerMessage', { 
                 customerId, 
                 messageText,
                 messageType: typeof messageText,
-                messageLength: messageText.length,
-                originalMessage: JSON.stringify({
-                    type: message?.type,
-                    text: message?.text,
-                    extendedText: message?.message?.extendedTextMessage?.text,
-                    conversation: message?.message?.conversation
-                })
+                messageLength: messageText.length
             });
 
             if (!messageText) {
@@ -751,32 +938,34 @@ class OpenAIService {
                 return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
             }
 
-            // 2. Formata a mensagem para o assistente
-            const assistantMessage = {
-                role: 'user',
-                content: messageText
-            };
+            logger.info('ThreadObtained', { customerId, threadId });
 
-            logger.info('SendingMessageToAssistant', {
-                customerId,
-                threadId,
-                message: assistantMessage
+            // Adiciona mensagem à thread
+            await this.client.beta.threads.messages.create(threadId, {
+                role: 'user',
+                content: messageText,
+                model: OPENAI_CONFIG.models.chat
             });
 
-            // 3. Adiciona a mensagem à thread e executa o assistente
-            const run = await this.addMessageAndRun(threadId, assistantMessage);
-            if (!run) {
-                logger.error('FailedToRunAssistant', { customerId, threadId });
-                return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
-            }
+            // Executa o assistente
+            const assistant = await this.client.beta.threads.runs.create(threadId, {
+                assistant_id: this.assistantId,
+                model: OPENAI_CONFIG.models.chat
+            });
 
-            // 4. Aguarda e retorna a resposta
-            const response = await this.waitForResponse(threadId, run.id);
-            
+            logger.info('AssistantStarted', { 
+                customerId, 
+                threadId, 
+                runId: assistant.id,
+                model: OPENAI_CONFIG.models.chat
+            });
+
+            const response = await this.waitForResponse(threadId, assistant.id);
+
             logger.info('AssistantResponse', {
                 customerId,
                 threadId,
-                runId: run.id,
+                runId: assistant.id,
                 responseLength: response?.length || 0
             });
 
@@ -1106,7 +1295,8 @@ class OpenAIService {
                         description: f.description,
                         parameters: f.parameters
                     }
-                }))
+                })),
+                model: OPENAI_CONFIG.models.chat
             });
 
             return run;
