@@ -357,23 +357,24 @@ class OpenAIService {
      * @param {string} threadId - ID da thread
      * @param {Object} message - Mensagem a ser adicionada
      */
-    queueMessage(threadId, message) {
-        if (!this.messageQueue.has(threadId)) {
-            this.messageQueue.set(threadId, []);
-        }
-        this.messageQueue.get(threadId).push(message);
-
-        // Cancela o timer anterior se existir
-        if (this.processingTimers.has(threadId)) {
-            clearTimeout(this.processingTimers.get(threadId));
+    async queueMessage(threadId, message) {
+        // Valida mensagem antes de enfileirar
+        if (!message || (!message.text && !message.content)) {
+            throw new Error('Mensagem inválida para enfileiramento');
         }
 
-        // Agenda novo processamento
-        const timer = setTimeout(() => {
-            this.processQueuedMessages(threadId);
-        }, this.MESSAGE_DELAY);
+        const queue = this.messageQueue.get(threadId) || [];
+        queue.push({
+            text: message.text || message.content,
+            timestamp: Date.now()
+        });
+        this.messageQueue.set(threadId, queue);
 
-        this.processingTimers.set(threadId, timer);
+        logger.info('MessageQueued', {
+            threadId,
+            queueLength: queue.length,
+            messageText: message.text || message.content
+        });
     }
 
     /**
@@ -392,14 +393,28 @@ class OpenAIService {
             });
 
             // Limpa fila e timer
-            this.messageQueue.set(threadId, []);
+            this.messageQueue.delete(threadId);
             this.processingTimers.delete(threadId);
 
             // Obtém thread do cache/Redis
             const thread = await this._getThread(threadId);
             
             // Cria mensagem consolidada com todas as entradas da fila
-            const consolidatedMessage = queue.map(m => m.text).join('\n');
+            const messages = queue.map(m => m.text).filter(Boolean);
+            if (messages.length === 0) {
+                throw new Error('Nenhuma mensagem válida na fila');
+            }
+            
+            const consolidatedMessage = messages.join('\n');
+            if (!consolidatedMessage.trim()) {
+                throw new Error('Mensagem consolidada está vazia');
+            }
+
+            logger.info('ConsolidatedMessage', {
+                threadId,
+                messageCount: messages.length,
+                consolidatedLength: consolidatedMessage.length
+            });
             
             // Adiciona mensagem à thread
             const message = await this.addMessage(threadId, {
@@ -411,7 +426,6 @@ class OpenAIService {
             if (thread) {
                 thread.messages = thread.messages || [];
                 thread.messages.push(message);
-                // Mantém apenas as últimas mensagens
                 if (thread.messages.length > this.MAX_THREAD_MESSAGES) {
                     thread.messages = thread.messages.slice(-this.MAX_THREAD_MESSAGES);
                 }
@@ -420,14 +434,8 @@ class OpenAIService {
 
             // Executa o assistant
             const run = await this.runAssistant(threadId);
-            
-            // Registra run ativo
             await this.registerActiveRun(threadId, run.id);
-            
-            // Aguarda resposta
             const response = await this.waitForResponse(threadId, run.id);
-            
-            // Remove run ativo
             await this.removeActiveRun(threadId);
             
             return response;
@@ -456,30 +464,44 @@ class OpenAIService {
      */
     async processCustomerMessage(customerId, message) {
         try {
+            // Extrai texto da mensagem
+            let messageText = '';
+            if (typeof message === 'string') {
+                messageText = message;
+            } else if (message?.message?.extendedTextMessage?.text) {
+                messageText = message.message.extendedTextMessage.text;
+            } else if (message?.message?.conversation) {
+                messageText = message.message.conversation;
+            } else if (message?.text) {
+                messageText = message.text;
+            }
+
+            // Valida e limpa texto
+            messageText = messageText ? messageText.trim() : '';
+            if (!messageText) {
+                logger.warn('EmptyMessageText', { customerId });
+                return 'Desculpe, não consegui entender sua mensagem. Pode tentar novamente?';
+            }
+
             // Obtém ou cria thread
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             
-            // Verifica se há run ativo
+            // Verifica run ativo
             const hasActiveRun = await this.hasActiveRun(threadId);
             if (hasActiveRun) {
-                // Adiciona à fila e retorna null (será processado depois)
-                await this.queueMessage(threadId, message);
+                await this.queueMessage(threadId, { text: messageText });
                 return null;
             }
 
             // Obtém thread do cache/Redis
             const thread = await this._getThread(threadId);
-            
-            // Se thread existe e tem muitas mensagens, mantém apenas as últimas
-            if (thread && thread.messages && thread.messages.length > this.MAX_THREAD_MESSAGES) {
+            if (thread?.messages?.length > this.MAX_THREAD_MESSAGES) {
                 thread.messages = thread.messages.slice(-this.MAX_THREAD_MESSAGES);
                 this.threadCache.set(threadId, thread);
             }
 
-            // Adiciona mensagem à fila
-            await this.queueMessage(threadId, message);
-            
-            // Agenda processamento
+            // Adiciona à fila e agenda processamento
+            await this.queueMessage(threadId, { text: messageText });
             if (!this.processingTimers.has(threadId)) {
                 const timer = setTimeout(
                     () => this.processQueuedMessages(threadId),
@@ -488,7 +510,6 @@ class OpenAIService {
                 this.processingTimers.set(threadId, timer);
             }
 
-            // Retorna null indicando que mensagem foi enfileirada
             return null;
 
         } catch (error) {
@@ -497,7 +518,7 @@ class OpenAIService {
                 error: error.message,
                 stack: error.stack
             });
-            throw error;
+            return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
         }
     }
 
@@ -1240,7 +1261,7 @@ class OpenAIService {
                 // 2. Limpa fila de mensagens
                 this.messageQueue.delete(threadId);
 
-                // 3. Recupera o customerId antes de limpar tudo
+                // 3. Recupera o customerId antes de limpar os dados
                 let customerId;
                 try {
                     const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
