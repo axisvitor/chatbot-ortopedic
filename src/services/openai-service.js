@@ -926,6 +926,12 @@ class OpenAIService {
                     await Promise.all([
                         this.redisStore.del(`active_run:${threadId}`),
                         this.redisStore.del(`context:${threadId}`),
+                        this.redisStore.del(`context:thread:${threadId}`),
+                        this.redisStore.del(`context:update:${threadId}`),
+                        this.redisStore.del(`pending_order:${threadId}`),
+                        this.redisStore.del(`tracking:${threadId}`),
+                        this.redisStore.del(`waiting_order:${threadId}`),
+                        this.redisStore.del(`tool_calls:${threadId}`),
                         this.redisStore.deleteUserContext(threadId)
                     ]);
                     logger.info('RedisDataCleared', { threadId });
