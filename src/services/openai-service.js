@@ -279,7 +279,7 @@ class OpenAIService {
             return thread;
         } catch (error) {
             logger.error('ErrorCreatingThread', { error });
-            console.error(' Erro ao criar thread:', error);
+            console.error('[OpenAI] Erro ao criar thread:', error);
             throw error;
         }
     }
@@ -727,7 +727,7 @@ class OpenAIService {
                 logger.error('ErrorClearingRedisData', { threadId, error });
             }
 
-            // 5. Deleta thread na OpenAI
+            // 5. Deleta thread OpenAI
             try {
                 const existingThread = await this.client.beta.threads.retrieve(threadId);
                 if (existingThread) {
@@ -817,10 +817,17 @@ class OpenAIService {
     async processCustomerMessage(customerId, message) {
         try {
             // Extrai o texto da mensagem de forma segura
-            const messageText = message?.text || 
-                              message?.message?.extendedTextMessage?.text || 
-                              message?.message?.conversation ||
-                              '';
+            let messageText = '';
+            
+            // Tenta extrair do formato do WhatsApp
+            if (message?.type === 'text' && message?.text) {
+                messageText = message.text;
+            } else {
+                messageText = message?.message?.extendedTextMessage?.text || 
+                            message?.message?.conversation ||
+                            message?.text ||
+                            '';
+            }
 
             logger.info('ProcessingCustomerMessage', { 
                 customerId, 
