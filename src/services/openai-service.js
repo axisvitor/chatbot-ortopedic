@@ -895,34 +895,49 @@ class OpenAIService {
             let messageText = '';
             
             // Log da mensagem original para debug
-            logger.debug('RawMessage', { 
+            logger.debug('ProcessingRawMessage', { 
                 customerId, 
-                message: JSON.stringify(message, null, 2)
+                messageType: typeof message,
+                hasMessage: !!message,
+                messageKeys: message ? Object.keys(message) : [],
+                rawMessage: JSON.stringify(message, null, 2)
             });
 
+            // Se a mensagem for uma string, tenta fazer parse
+            if (typeof message === 'string') {
+                try {
+                    message = JSON.parse(message);
+                } catch (e) {
+                    messageText = message;
+                }
+            }
+
             // Extrai o texto da mensagem usando a estrutura correta do WhatsApp
-            if (message?.message?.extendedTextMessage?.text) {
+            if (message?.content?.[0]?.text) {
+                messageText = message.content[0].text;
+            } else if (message?.text) {
+                messageText = message.text;
+            } else if (message?.message?.extendedTextMessage?.text) {
                 messageText = message.message.extendedTextMessage.text;
             } else if (message?.message?.conversation) {
                 messageText = message.message.conversation;
-            } else if (message?.text) {
-                messageText = message.text;
             }
 
             // Validação e limpeza do texto
             messageText = messageText ? messageText.trim() : '';
 
-            logger.info('ProcessingCustomerMessage', { 
+            logger.info('ExtractedMessageText', { 
                 customerId, 
                 messageText,
                 messageType: typeof messageText,
-                messageLength: messageText.length
+                messageLength: messageText.length,
+                extractionPath: messageText ? 'Sucesso' : 'Falha'
             });
 
             if (!messageText) {
-                logger.warn('EmptyMessage', { 
+                logger.warn('EmptyMessageText', { 
                     customerId,
-                    originalMessage: JSON.stringify(message)
+                    originalMessage: JSON.stringify(message, null, 2)
                 });
                 return 'Desculpe, não consegui entender sua mensagem. Pode tentar novamente?';
             }
@@ -942,10 +957,11 @@ class OpenAIService {
                 content: messageText
             });
 
-            logger.info('MessageAdded', { 
+            logger.info('MessageAddedToThread', { 
                 customerId, 
                 threadId, 
-                messageId: threadMessage.id 
+                messageId: threadMessage.id,
+                messageText
             });
 
             // 3. Executa o assistente

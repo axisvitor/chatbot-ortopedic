@@ -122,15 +122,7 @@ class AIServices {
                 }
 
                 try {
-                    const response = await this.openAIService.processCustomerMessage(message.from, {
-                        role: 'user',
-                        content: [
-                            {
-                                type: 'text',
-                                text: messageText
-                            }
-                        ]
-                    });
+                    const response = await this.openAIService.processCustomerMessage(message.from, messageText);
 
                     console.log('[AIServices] Resposta do OpenAI:', { response });
 
