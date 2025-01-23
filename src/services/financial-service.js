@@ -1,5 +1,6 @@
 const { RedisStore } = require('../store/redis-store');
 const { FINANCIAL_CONFIG } = require('../config/settings');
+const { WHATSAPP_CONFIG } = require('../config/settings');
 
 class FinancialService {
     constructor(whatsAppService = null) {
@@ -92,6 +93,91 @@ class FinancialService {
             return true;
         } catch (error) {
             console.error('❌ Erro ao encaminhar caso:', {
+                dados: data,
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            return false;
+        }
+    }
+
+    /**
+     * Cria um caso para análise de outro departamento
+     * @param {Object} data Dados do caso
+     * @param {string} data.department Departamento destino
+     * @param {string} data.order_number Número do pedido (opcional)
+     * @param {string} data.reason Motivo do encaminhamento
+     * @param {string} data.priority Prioridade do caso
+     * @param {string} data.details Detalhes adicionais
+     * @returns {Promise<boolean>} Sucesso da criação
+     */
+    async createCase(data) {
+        try {
+            // Valida dados obrigatórios
+            if (!data.department || !data.reason) {
+                throw new Error('Departamento e motivo são obrigatórios');
+            }
+
+            // Gera ID único para o caso
+            const caseId = `CASE${Date.now()}`;
+            const caseKey = `department_case:${caseId}`;
+
+            // Traduz o departamento para português
+            const departmentMap = {
+                support: 'Suporte',
+                technical: 'Técnico',
+                logistics: 'Logística',
+                commercial: 'Comercial'
+            };
+
+            // Traduz a prioridade para português
+            const priorityMap = {
+                urgent: '🔴 Urgente',
+                high: '🟠 Alta',
+                medium: '🟡 Média',
+                low: '🟢 Baixa'
+            };
+
+            // Monta mensagem para o departamento
+            const message = `*📋 Novo Caso - ${caseId}*\n\n` +
+                          `*Departamento:* ${departmentMap[data.department]}\n` +
+                          `*Prioridade:* ${priorityMap[data.priority] || '🟡 Média'}\n` +
+                          `*Motivo:* ${data.reason}\n` +
+                          (data.order_number ? `*Pedido:* #${data.order_number}\n` : '') +
+                          (data.tracking_code ? `*Rastreio:* ${data.tracking_code}\n` : '') +
+                          `\n*📱 Detalhes do Caso:*\n${data.details || 'Não informado'}\n`;
+
+            // Salva caso no Redis
+            const caseData = {
+                ...data,
+                id: caseId,
+                created_at: new Date().toISOString(),
+                status: 'pending'
+            };
+            
+            await this.redisStore.set(caseKey, JSON.stringify(caseData));
+
+            // Envia notificação via WhatsApp
+            const whatsapp = this._whatsAppService;
+            await whatsapp.forwardToDepartment({ 
+                body: message,
+                from: 'SISTEMA',
+                department: data.department
+            }, data.order_number, WHATSAPP_CONFIG.departments.financial.number); // Usa mesmo número do financeiro
+
+            console.log('✅ Caso criado:', {
+                id: caseId,
+                department: data.department,
+                reason: data.reason,
+                order: data.order_number,
+                priority: data.priority,
+                timestamp: new Date().toISOString()
+            });
+
+            return true;
+        } catch (error) {
+            console.error('❌ Erro ao criar caso:', {
                 dados: data,
                 erro: error.message,
                 stack: error.stack,

@@ -109,7 +109,55 @@ class OpenAIService {
                         },
                         reason: {
                             type: "string",
-                            enum: ["payment", "refund", "taxation", "customs", "payment_proof", "other"],
+                            enum: [
+                                "payment_issue",      // Problema com pagamento
+                                "payment_proof",      // Comprovante de pagamento
+                                "refund_request",     // Solicitação de reembolso
+                                "duplicate_charge",   // Cobrança duplicada
+                                "taxation",           // Questões de impostos
+                                "customs",            // Retenção na alfândega
+                                "other"               // Outros motivos
+                            ],
+                            description: "Motivo específico do encaminhamento"
+                        },
+                        customer_message: {
+                            type: "string",
+                            description: "Mensagem original do cliente"
+                        },
+                        priority: {
+                            type: "string",
+                            enum: ["urgent", "high", "medium", "low"],
+                            description: "Nível de urgência (urgent: erros de cobrança, high: reembolsos, medium: impostos, low: dúvidas gerais)"
+                        },
+                        additional_info: {
+                            type: "string",
+                            description: "Informações adicionais relevantes"
+                        }
+                    }
+                }
+            },
+            {
+                name: "forward_to_department",
+                description: "Encaminha casos para outros departamentos da Loja Ortopedic",
+                parameters: {
+                    type: "object",
+                    required: ["department", "reason", "customer_message", "priority"],
+                    properties: {
+                        department: {
+                            type: "string",
+                            enum: ["support", "technical", "logistics", "commercial"],
+                            description: "Departamento para encaminhamento"
+                        },
+                        order_number: {
+                            type: "string",
+                            description: "Número do pedido (se disponível)"
+                        },
+                        tracking_code: {
+                            type: "string",
+                            description: "Código de rastreio (se disponível)"
+                        },
+                        reason: {
+                            type: "string",
                             description: "Motivo do encaminhamento"
                         },
                         customer_message: {
@@ -118,8 +166,8 @@ class OpenAIService {
                         },
                         priority: {
                             type: "string",
-                            enum: ["high", "medium", "low"],
-                            description: "Nível de urgência"
+                            enum: ["urgent", "high", "medium", "low"],
+                            description: "Nível de urgência do caso"
                         },
                         additional_info: {
                             type: "string",
@@ -635,6 +683,23 @@ class OpenAIService {
                             status: 'forwarded',
                             message: 'Caso encaminhado para análise',
                             priority: caseData.priority
+                        };
+                        break;
+
+                    case 'forward_to_department':
+                        const departmentData = {
+                            department: parsedArgs.department,
+                            orderNumber: parsedArgs.order_number,
+                            reason: parsedArgs.reason,
+                            priority: parsedArgs.priority || 'medium',
+                            details: parsedArgs.details
+                        };
+                        
+                        await this.financialService.createCase(departmentData);
+                        output = { 
+                            status: 'forwarded',
+                            message: 'Caso encaminhado para análise',
+                            priority: departmentData.priority
                         };
                         break;
 

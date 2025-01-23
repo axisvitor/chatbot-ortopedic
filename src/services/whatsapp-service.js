@@ -1056,6 +1056,47 @@ class WhatsAppService {
             throw error;
         }
     }
+
+    /**
+     * Encaminha uma mensagem para um departamento
+     * @param {Object} message Mensagem a ser encaminhada
+     * @param {string} orderNumber Número do pedido (opcional)
+     * @param {string} departmentNumber Número do departamento
+     * @returns {Promise<boolean>} Sucesso do encaminhamento
+     */
+    async forwardToDepartment(message, orderNumber = null, departmentNumber) {
+        try {
+            if (!departmentNumber) {
+                throw new Error('Número do departamento é obrigatório');
+            }
+
+            // Formata o número do pedido se existir
+            const formattedOrder = orderNumber ? `#${orderNumber}` : '';
+
+            // Envia a mensagem
+            await this.sendText({
+                to: departmentNumber,
+                content: message.body,
+                delay: WHATSAPP_CONFIG.messageDelay
+            });
+
+            console.log('✅ Mensagem encaminhada:', {
+                department: message.department,
+                order: formattedOrder,
+                from: message.from,
+                timestamp: new Date().toISOString()
+            });
+
+            return true;
+        } catch (error) {
+            console.error('❌ Erro ao encaminhar mensagem:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            return false;
+        }
+    }
 }
 
 module.exports = { WhatsAppService };
