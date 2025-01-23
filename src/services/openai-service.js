@@ -778,6 +778,22 @@ class OpenAIService {
         try {
             logger.info('ProcessingCustomerMessage', { customerId });
 
+            // Se for comando #resetid, trata separadamente
+            if (message.text === '#resetid') {
+                // Primeiro obtém o threadId atual
+                const currentThreadKey = `customer_thread:${customerId}`;
+                const currentThreadId = await this.redisStore.get(currentThreadKey);
+                
+                if (currentThreadId) {
+                    await this.handleCommand(currentThreadId, '#resetid');
+                }
+                
+                // Força criação de nova thread
+                await this.redisStore.del(currentThreadKey);
+                
+                return '🔄 Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.';
+            }
+
             // 1. Obtém ou cria thread para o cliente
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             if (!threadId) {
@@ -809,16 +825,16 @@ class OpenAIService {
                         await this.redisStore.set(`thread_metadata:${threadId}`, JSON.stringify(parsed), 30 * 24 * 60 * 60);
                     }
                 } catch (error) {
-                    logger.warn('ErrorUpdatingThreadMetadata', { threadId, error: error.message });
+                    logger.error('ErrorUpdatingMetadata', { threadId, error: error.message });
                 }
 
                 return response;
             } catch (error) {
-                logger.error('ErrorProcessingMessage', { customerId, threadId, error });
+                logger.error('ErrorProcessingMessage', { threadId, error: error.message });
                 throw error;
             }
         } catch (error) {
-            logger.error('ErrorProcessingCustomerMessage', { customerId, error });
+            logger.error('ErrorInProcessCustomerMessage', { customerId, error: error.message });
             throw error;
         }
     }
@@ -921,30 +937,29 @@ class OpenAIService {
                 // 2. Limpa fila de mensagens
                 this.messageQueue.delete(threadId);
 
-                // 3. Deleta thread OpenAI
+                // 3. Recupera o customerId antes de limpar tudo
+                let customerId;
+                try {
+                    const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                    if (metadata) {
+                        const parsedMetadata = JSON.parse(metadata);
+                        customerId = parsedMetadata.customerId;
+                    }
+                } catch (error) {
+                    logger.error('ErrorGettingCustomerId', { threadId, error: error.message });
+                }
+
+                // 4. Deleta thread OpenAI
                 try {
                     await this.client.beta.threads.del(threadId);
                     logger.info('OldThreadDeleted', { threadId });
                 } catch (error) {
                     // Log error but continue with reset
                     logger.error('ErrorDeletingOldThread', { threadId, error: error.message });
-                    console.error('[OpenAI] Erro ao deletar thread antiga:', error);
                 }
 
-                // 4. Limpa dados Redis
+                // 5. Limpa dados Redis
                 try {
-                    // Recupera o customerId antes de limpar tudo
-                    const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
-                    let customerId;
-                    if (metadata) {
-                        try {
-                            const parsedMetadata = JSON.parse(metadata);
-                            customerId = parsedMetadata.customerId;
-                        } catch (e) {
-                            logger.error('ErrorParsingMetadata', { threadId, error: e.message });
-                        }
-                    }
-
                     // Limpa todos os dados do usuário e da thread
                     if (customerId) {
                         await this.redisStore.deleteUserData(customerId);
@@ -963,7 +978,7 @@ class OpenAIService {
                         `tracking:${threadId}`,
                         `waiting_order:${threadId}`,
                         `tool_calls:${threadId}`,
-                        `thread_metadata:${threadId}` // Adiciona thread_metadata para garantir
+                        `thread_metadata:${threadId}`
                     ];
 
                     if (customerId) {
@@ -975,7 +990,6 @@ class OpenAIService {
                     logger.info('RedisDataCleared', { threadId, customerId });
                 } catch (error) {
                     logger.error('ErrorClearingRedisData', { threadId, error: error.message });
-                    console.error('[OpenAI] Erro ao limpar dados do Redis:', error);
                 }
 
                 logger.info('ThreadResetComplete', { threadId });
@@ -983,7 +997,7 @@ class OpenAIService {
             }
             return false;
         } catch (error) {
-            logger.error('ErrorHandlingCommand', { threadId, command, error });
+            logger.error('ErrorHandlingCommand', { threadId, command, error: error.message });
             throw error;
         }
     }
