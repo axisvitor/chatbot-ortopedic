@@ -128,20 +128,44 @@ class RedisStore {
     async deleteUserData(userId) {
         try {
             const patterns = [
+                // Chaves do chat e contexto
                 `chat:${userId}*`,
                 `history:${userId}*`,
                 `context:${userId}*`,
                 `state:${userId}*`,
                 `queue:${userId}*`,
+                
+                // Chaves de rastreamento
                 `tracking:${userId}*`,
-                `tracking:order:${userId}*`, // Adiciona chave do sistema de rastreamento
-                `orders:${userId}*`,
+                `tracking:order:${userId}*`,
                 `tracking_codes:${userId}*`,
+                `last_track17_sync:${userId}*`,
+                `last_nuvemshop_sync:${userId}*`,
+                `last_17track_push_request:${userId}*`,
+                
+                // Chaves de pedidos
+                `orders:${userId}*`,
                 `order:${userId}*`,
                 `pending_order:${userId}*`,
                 `waiting_order:${userId}*`,
+                
+                // Chaves de thread e metadados
                 `customer_thread:${userId}*`,
-                `thread_metadata:${userId}*`
+                `thread_metadata:${userId}*`,
+                
+                // Cache do Nuvemshop
+                `nuvemshop:cache:${userId}*`,
+                `nuvemshop:order:${userId}*`,
+                `nuvemshop:product:${userId}*`,
+                
+                // Cache de mídia e financeiro
+                `media:cache:${userId}*`,
+                `financial:case:${userId}*`,
+                
+                // Cache de validação de pedidos
+                `order_validation:${userId}*`,
+                `order_validation:attempts:${userId}*`,
+                `order_validation:proof:${userId}*`
             ];
 
             console.log('[Redis] Deletando dados do usuário:', {
@@ -165,21 +189,36 @@ class RedisStore {
     async deleteThreadData(threadId) {
         try {
             const patterns = [
+                // Chaves da thread OpenAI
                 `run:${threadId}*`,
                 `thread:${threadId}*`,
                 `messages:${threadId}*`,
+                `active_run:${threadId}*`,
+                
+                // Chaves de estado e contexto
                 `state:${threadId}*`,
                 `queue:${threadId}*`,
-                `active_run:${threadId}*`,
                 `context:${threadId}*`,
                 `context:thread:${threadId}*`,
                 `context:update:${threadId}*`,
+                
+                // Chaves de pedidos e rastreamento
                 `pending_order:${threadId}*`,
                 `tracking:${threadId}*`,
-                `tracking:order:${threadId}*`, 
+                `tracking:order:${threadId}*`,
                 `waiting_order:${threadId}*`,
+                
+                // Chaves de ferramentas e metadados
                 `tool_calls:${threadId}*`,
-                `thread_metadata:${threadId}*`
+                `thread_metadata:${threadId}*`,
+                
+                // Cache temporário
+                `temp:${threadId}*`,
+                `cache:${threadId}*`,
+                
+                // Chaves de validação
+                `validation:${threadId}*`,
+                `proof:${threadId}*`
             ];
 
             console.log('[Redis] Deletando dados da thread:', {
