@@ -695,8 +695,8 @@ class OpenAIService {
             try {
                 const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
                 if (metadata) {
-                    const parsed = JSON.parse(metadata);
-                    customerId = parsed.customerId;
+                    const parsedMetadata = JSON.parse(metadata);
+                    customerId = parsedMetadata.customerId;
                 }
             } catch (error) {
                 logger.warn('ErrorGettingThreadMetadata', { threadId, error });
@@ -755,14 +755,31 @@ class OpenAIService {
             let threadId = await this.redisStore.get(threadKey);
             let shouldCreateNewThread = false;
 
+            logger.info('CheckingExistingThread', { 
+                customerId, 
+                threadId, 
+                hasExistingThread: !!threadId 
+            });
+
             if (threadId) {
                 // Verifica se a thread ainda existe na OpenAI e se não foi resetada
                 try {
                     // Tenta recuperar a thread na OpenAI
-                    await this.client.beta.threads.retrieve(threadId);
+                    const openaiThread = await this.client.beta.threads.retrieve(threadId);
+                    logger.info('OpenAIThreadFound', { 
+                        customerId, 
+                        threadId,
+                        openaiThreadId: openaiThread.id
+                    });
                     
                     // Verifica se a thread foi resetada ou deletada
                     const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
+                    logger.info('ThreadMetadataCheck', {
+                        customerId,
+                        threadId,
+                        hasMetadata: !!metadata
+                    });
+
                     if (!metadata) {
                         logger.info('ThreadWasReset', { customerId, threadId });
                         shouldCreateNewThread = true;
@@ -770,16 +787,32 @@ class OpenAIService {
 
                     // Verifica se há mensagens na thread
                     const messages = await this.client.beta.threads.messages.list(threadId);
+                    logger.info('ThreadMessagesCheck', {
+                        customerId,
+                        threadId,
+                        messageCount: messages?.data?.length || 0
+                    });
+
                     if (!messages || messages.data.length === 0) {
                         logger.info('ThreadIsEmpty', { customerId, threadId });
                         shouldCreateNewThread = true;
                     }
                 } catch (error) {
-                    logger.warn('ThreadNotFound', { customerId, threadId, error });
+                    logger.warn('ThreadNotFound', { 
+                        customerId, 
+                        threadId, 
+                        error: error.message,
+                        stack: error.stack
+                    });
                     shouldCreateNewThread = true;
                 }
 
                 if (shouldCreateNewThread) {
+                    logger.info('CleaningOldThread', { 
+                        customerId, 
+                        threadId,
+                        reason: 'Thread inválida ou resetada'
+                    });
                     // Remove o mapeamento antigo
                     await this.redisStore.del(threadKey);
                     threadId = null;
@@ -787,33 +820,64 @@ class OpenAIService {
             }
 
             if (!threadId || shouldCreateNewThread) {
+                logger.info('CreatingNewThread', { 
+                    customerId,
+                    reason: !threadId ? 'Sem thread existente' : 'Thread antiga inválida'
+                });
+
                 // Cria nova thread
                 const thread = await this.client.beta.threads.create();
                 threadId = thread.id;
+
+                logger.info('NewThreadCreated', {
+                    customerId,
+                    threadId,
+                    openaiThreadId: thread.id
+                });
 
                 // Salva mapeamento cliente -> thread
                 await this.redisStore.set(threadKey, threadId, 30 * 24 * 60 * 60); // 30 dias
 
                 // Inicializa metadados da thread
-                await this.redisStore.set(`openai:thread_meta:${threadId}`, JSON.stringify({
+                const metadata = {
                     customerId,
                     createdAt: new Date().toISOString(),
                     lastActivity: new Date().toISOString(),
                     messageCount: 0,
                     isNew: true
-                }), 30 * 24 * 60 * 60);
+                };
 
-                logger.info('ThreadCreated', { customerId, threadId });
+                await this.redisStore.set(
+                    `openai:thread_meta:${threadId}`, 
+                    JSON.stringify(metadata), 
+                    30 * 24 * 60 * 60
+                );
+
+                logger.info('ThreadMetadataSaved', {
+                    customerId,
+                    threadId,
+                    metadata
+                });
             }
 
             return threadId;
 
         } catch (error) {
-            logger.error('ErrorCreatingThread', { customerId, error });
+            logger.error('ErrorCreatingThread', { 
+                customerId, 
+                error: error.message,
+                stack: error.stack 
+            });
             throw error;
         }
     }
 
+    /**
+     * Processa a mensagem de um cliente
+     * @param {string} customerId - ID do cliente
+     * @param {Object} message - Mensagem do cliente
+     * @returns {Promise<string>} Resposta do assistente
+     */
     async processCustomerMessage(customerId, message) {
         try {
             // Extrai o texto da mensagem de forma segura
