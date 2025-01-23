@@ -923,18 +923,41 @@ class OpenAIService {
 
                 // 4. Limpa dados Redis
                 try {
+                    // Recupera o customerId antes de limpar tudo
+                    const metadata = await this.redisStore.get(`thread_metadata:${threadId}`);
+                    let customerId;
+                    if (metadata) {
+                        try {
+                            const parsedMetadata = JSON.parse(metadata);
+                            customerId = parsedMetadata.customerId;
+                        } catch (e) {
+                            logger.error('ErrorParsingMetadata', { threadId, error: e.message });
+                        }
+                    }
+
+                    const keysToDelete = [
+                        `active_run:${threadId}`,
+                        `context:${threadId}`,
+                        `context:thread:${threadId}`,
+                        `context:update:${threadId}`,
+                        `pending_order:${threadId}`,
+                        `tracking:${threadId}`,
+                        `waiting_order:${threadId}`,
+                        `tool_calls:${threadId}`,
+                        `thread_metadata:${threadId}`
+                    ];
+
+                    // Adiciona a chave customer_thread se tiver o customerId
+                    if (customerId) {
+                        keysToDelete.push(`customer_thread:${customerId}`);
+                    }
+
                     await Promise.all([
-                        this.redisStore.del(`active_run:${threadId}`),
-                        this.redisStore.del(`context:${threadId}`),
-                        this.redisStore.del(`context:thread:${threadId}`),
-                        this.redisStore.del(`context:update:${threadId}`),
-                        this.redisStore.del(`pending_order:${threadId}`),
-                        this.redisStore.del(`tracking:${threadId}`),
-                        this.redisStore.del(`waiting_order:${threadId}`),
-                        this.redisStore.del(`tool_calls:${threadId}`),
+                        ...keysToDelete.map(key => this.redisStore.del(key)),
                         this.redisStore.deleteUserContext(threadId)
                     ]);
-                    logger.info('RedisDataCleared', { threadId });
+                    
+                    logger.info('RedisDataCleared', { threadId, customerId });
                 } catch (error) {
                     logger.error('ErrorClearingRedisData', { threadId, error: error.message });
                     console.error('[OpenAI] Erro ao limpar dados do Redis:', error);
