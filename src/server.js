@@ -20,9 +20,6 @@ const {
     OpenAIVisionService
 } = require('./services');
 
-// Importação dos novos serviços
-const { OpenAIVisionService } = require('./services/openai-vision-service');
-
 // Configurações
 const { 
     RATE_LIMIT_CONFIG,
@@ -156,7 +153,7 @@ async function initializeServices() {
                 businessHoursService,
                 orderValidationService,
                 null, // financialService será injetado depois
-                null  // whatsappService será injetado depois para evitar dependência circular
+                null  // whatsappService será injetado depois
             );
             console.log('✅ OpenAIService inicializado');
 
@@ -180,11 +177,11 @@ async function initializeServices() {
             whatsappImageService = new WhatsAppImageService(whatsappService);
             console.log('✅ WhatsAppImageService inicializado');
 
-            // OpenAI Vision precisa ser inicializado antes do AIServices
+            // OpenAI Vision é independente
             openAIVisionService = new OpenAIVisionService();
             console.log('✅ OpenAIVisionService inicializado');
 
-            // AIServices precisa de vários serviços
+            // AIServices precisa de todos os serviços anteriores
             aiServices = new AIServices(
                 whatsappService,
                 whatsappImageService,
@@ -194,36 +191,26 @@ async function initializeServices() {
             );
             console.log('✅ AIServices inicializado');
 
-            // Inicializa apenas os serviços que têm método initialize
-            await Promise.all([
-                whatsappService.initialize && whatsappService.initialize(),
-                trackingService.initialize && trackingService.initialize(),
-                orderValidationService.initialize && orderValidationService.initialize(),
-                nuvemshopService.initialize && nuvemshopService.initialize(),
-                groqServices.initialize && groqServices.initialize(),
-                audioService.initialize && audioService.initialize(),
-                imageService.initialize && imageService.initialize(),
-                mediaManagerService.initialize && mediaManagerService.initialize(),
-                aiServices.initialize && aiServices.initialize()
-            ].filter(Boolean));
-
-            // Inicializa serviços que dependem de outros
+            // Webhook precisa do WhatsApp e AI
             webhookService = new WebhookService(whatsappService, aiServices);
             console.log('✅ WebhookService inicializado');
 
-            // Atualiza referência do OpenAIService no WhatsAppService
+            // Atualiza referências circulares
             whatsappService.setOpenAIService(openAIService);
-            
-            // Atualiza referências circulares do OpenAIService
             openAIService.setWhatsAppService(whatsappService);
             openAIService.setFinancialService(financialService);
-            
             console.log('✅ Dependências circulares resolvidas');
 
             clearTimeout(timeout);
+            servicesReady = true;
+            isInitializing = false;
+            console.log('✅ Todos os serviços inicializados com sucesso');
             resolve();
+
         } catch (error) {
             clearTimeout(timeout);
+            isInitializing = false;
+            lastError = error;
             console.error('❌ Erro ao inicializar serviços:', error);
             reject(error);
         }

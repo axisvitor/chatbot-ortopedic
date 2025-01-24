@@ -6,6 +6,12 @@ class AIServices {
         this.openAIVisionService = openAIVisionService;
         this.audioService = audioService;
 
+        if (!whatsAppService) throw new Error('WhatsAppService é obrigatório');
+        if (!whatsAppImageService) throw new Error('WhatsAppImageService é obrigatório');
+        if (!openAIService) throw new Error('OpenAIService é obrigatório');
+        if (!openAIVisionService) throw new Error('OpenAIVisionService é obrigatório');
+        if (!audioService) throw new Error('AudioService é obrigatório');
+
         console.log('[AIServices] Serviço inicializado com:', {
             hasWhatsApp: !!whatsAppService,
             hasWhatsAppImage: !!whatsAppImageService,
