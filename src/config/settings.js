@@ -113,6 +113,10 @@ const WHATSAPP_CONFIG = {
         media: {
             path: 'media/upload',
             method: 'POST'
+        },
+        connection: {
+            path: 'instance/info',
+            method: 'GET'
         }
     },
     departments: {

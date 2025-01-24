@@ -1062,8 +1062,7 @@ class WhatsAppService {
             // Tenta fazer uma requisição simples para verificar conexão
             const response = await this._retryWithExponentialBackoff(async () => {
                 console.log('[WhatsApp] Verificando conexão...');
-                // Em vez de enviar mensagem, vamos apenas verificar se a API responde
-                const result = await this.client.get('');
+                const result = await this.client.get(WHATSAPP_CONFIG.endpoints.connection.path);
                 console.log('[WhatsApp] Status da conexão:', result?.data);
                 return result;
             });
