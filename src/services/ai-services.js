@@ -39,7 +39,7 @@ class AIServices {
             `;
 
             // Gera resposta personalizada via Assistant
-            const response = await this.openAIService.handleCustomerMessage(from, {
+            const response = await this.openAIService.processCustomerMessage(from, {
                 role: 'user',
                 content: context
             });
@@ -75,7 +75,7 @@ class AIServices {
                 const transcription = message.text;
                 
                 // Processa direto com o OpenAI Assistant
-                const response = await this.openAIService.handleCustomerMessage(message.from, {
+                const response = await this.openAIService.processCustomerMessage(message.from, {
                     role: 'user',
                     content: transcription
                 });
@@ -123,7 +123,7 @@ class AIServices {
 
                 try {
                     // Envia a mensagem no formato esperado
-                    const response = await this.openAIService.handleCustomerMessage(message.from, {
+                    const response = await this.openAIService.processCustomerMessage(message.from, {
                         message: {
                             extendedTextMessage: {
                                 text: messageText
@@ -181,7 +181,7 @@ class AIServices {
 
             try {
                 // Tenta gerar uma mensagem personalizada via Assistant
-                const errorResponse = await this.openAIService.handleCustomerMessage(to, {
+                const errorResponse = await this.openAIService.processCustomerMessage(to, {
                     role: 'user',
                     content: errorContext
                 });
