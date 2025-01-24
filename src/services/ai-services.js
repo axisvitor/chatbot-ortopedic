@@ -94,22 +94,11 @@ class AIServices {
                 });
 
                 try {
-                    // Baixa o áudio usando o WhatsAppService
-                    const audioData = await this.whatsAppService.downloadMediaMessage(message);
-                    if (!audioData) {
-                        throw new Error('Falha ao baixar áudio');
-                    }
-
-                    console.log('[AIServices] Áudio baixado, transcrevendo...');
+                    // Processa o áudio usando o AudioService
+                    const transcription = await this.audioService.processWhatsAppAudio(message);
                     
-                    // Transcreve o áudio usando o AudioService
-                    const transcription = await this.audioService.transcribeAudio({
-                        buffer: audioData,
-                        mimetype: message?.message?.audioMessage?.mimetype || 'audio/ogg'
-                    });
-
-                    if (!transcription) {
-                        throw new Error('Falha ao transcrever áudio');
+                    if (!transcription || transcription.error) {
+                        throw new Error(transcription?.message || 'Falha ao transcrever áudio');
                     }
 
                     console.log('[AIServices] Áudio transcrito:', { transcription });
