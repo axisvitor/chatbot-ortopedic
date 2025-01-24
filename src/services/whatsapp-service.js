@@ -100,10 +100,10 @@ class WhatsAppService {
             const client = axios.create({
                 baseURL: WHATSAPP_CONFIG.apiUrl,
                 headers: {
-                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
-                    'X-Connection-Key': WHATSAPP_CONFIG.connectionKey
+                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
+                    'Connection-Key': this.connectionKey
                 },
                 timeout: WHATSAPP_CONFIG.connectionTimeout || 30000
             });
@@ -168,7 +168,7 @@ class WhatsAppService {
                         // Tenta a requisição novamente
                         const config = error.config;
                         config.headers['Authorization'] = `Bearer ${WHATSAPP_CONFIG.token}`;
-                        config.headers['X-Connection-Key'] = WHATSAPP_CONFIG.connectionKey;
+                        config.headers['Connection-Key'] = WHATSAPP_CONFIG.connectionKey;
                         return this.client(config);
                     } catch (retryError) {
                         console.error('[WhatsApp] Erro na tentativa de reconexão:', retryError);
@@ -263,13 +263,12 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            const config = WHATSAPP_CONFIG.endpoints.text;
-            const endpoint = `${config.path}?connectionKey=${this.connectionKey}`;
+            const endpoint = `${WHATSAPP_CONFIG.endpoints.text.path}?connectionKey=${this.connectionKey}`;
 
             const payload = {
-                [config.params.to]: phoneNumber,
-                [config.params.content]: messageText,
-                [config.params.delay]: WHATSAPP_CONFIG.messageDelay / 1000 // Convertendo ms para segundos
+                phoneNumber: phoneNumber,
+                text: messageText,
+                delayMessage: Math.floor(WHATSAPP_CONFIG.messageDelay / 1000)
             };
 
             const response = await this._retryWithExponentialBackoff(async () => {
@@ -1072,11 +1071,10 @@ class WhatsAppService {
             // Tenta fazer uma requisição simples para verificar conexão
             const response = await this._retryWithExponentialBackoff(async () => {
                 console.log('[WhatsApp] Verificando conexão...');
-                const result = await this.client.post('message/send-text', {
-                    to: WHATSAPP_CONFIG.whatsappNumber,
-                    content: 'Teste de conexão',
-                    delay: WHATSAPP_CONFIG.messageDelay,
-                    key: this.connectionKey
+                const result = await this.client.post(`${WHATSAPP_CONFIG.endpoints.text.path}?connectionKey=${this.connectionKey}`, {
+                    phoneNumber: WHATSAPP_CONFIG.whatsappNumber,
+                    text: 'Teste de conexão',
+                    delayMessage: Math.floor(WHATSAPP_CONFIG.messageDelay / 1000)
                 });
                 console.log('[WhatsApp] Status da conexão:', result?.data);
                 return result;
