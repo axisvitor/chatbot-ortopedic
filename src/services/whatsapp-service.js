@@ -1053,27 +1053,23 @@ class WhatsAppService {
                 return false;
             }
 
+            // Verifica se as credenciais estão configuradas
+            if (!WHATSAPP_CONFIG.token || !WHATSAPP_CONFIG.connectionKey || !WHATSAPP_CONFIG.apiUrl) {
+                console.error('[WhatsApp] Credenciais não configuradas');
+                return false;
+            }
+
             // Tenta fazer uma requisição simples para verificar conexão
             const response = await this._retryWithExponentialBackoff(async () => {
                 console.log('[WhatsApp] Verificando conexão...');
-                const result = await this.client.post(`${WHATSAPP_CONFIG.endpoints.text.path}`, {
-                    phoneNumber: WHATSAPP_CONFIG.whatsappNumber,
-                    text: 'Teste de conexão',
-                    delayMessage: Math.floor(WHATSAPP_CONFIG.messageDelay / 1000)
-                });
+                // Em vez de enviar mensagem, vamos apenas verificar se a API responde
+                const result = await this.client.get('');
                 console.log('[WhatsApp] Status da conexão:', result?.data);
                 return result;
             });
 
-            // Verifica se a conexão foi bem sucedida
-            const status = response?.data?.status?.toLowerCase();
-            const connected = status === 'success' || status === 'ok';
-            
-            if (!connected) {
-                console.error('[WhatsApp] Falha ao conectar:', response?.data);
-            }
-
-            return connected;
+            // Se chegou até aqui sem erros, está conectado
+            return true;
         } catch (error) {
             console.error('[WhatsApp] Erro ao verificar conexão:', {
                 erro: error.message,
