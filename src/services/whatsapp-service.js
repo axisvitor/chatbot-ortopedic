@@ -1097,6 +1097,22 @@ class WhatsAppService {
             return false;
         }
     }
+
+    /**
+     * Define o serviço OpenAI após inicialização
+     * @param {Object} service Instância do OpenAIService
+     */
+    setOpenAIService(service) {
+        this.openAIService = service;
+    }
+
+    /**
+     * Verifica se o serviço está conectado
+     * @returns {boolean}
+     */
+    isConnected() {
+        return this.client !== null && this.connectionKey !== null;
+    }
 }
 
 module.exports = { WhatsAppService };

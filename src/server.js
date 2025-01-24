@@ -111,9 +111,7 @@ async function initializeServices() {
     return new Promise(async (resolve, reject) => {
         // Timeout de 30 segundos para inicialização
         const timeout = setTimeout(() => {
-            const error = new Error('Timeout ao inicializar serviços');
-            console.error('❌ ', error);
-            reject(error);
+            reject(new Error('Timeout ao inicializar serviços'));
         }, 30000);
 
         try {
@@ -126,73 +124,59 @@ async function initializeServices() {
                 }
             }
 
-            // Inicializa serviços base
-            console.log('✅ RedisStore inicializado');
+            // Inicializa serviços base primeiro
+            redisStore = new RedisStore();
+            await redisStore.connect();
+            console.log('✅ RedisStore conectado');
 
-            cacheService = new CacheService(redisStore);
-            console.log('✅ CacheService inicializado');
-            
-            // Inicialização dos serviços
-            const whatsAppService = new WhatsAppService();
-            console.log('✅ WhatsAppService criado');
-
-            const whatsAppImageService = new WhatsAppImageService();
-            console.log('✅ WhatsAppImageService criado');
-
-            const openAIService = new OpenAIService();
-            console.log('✅ OpenAIService criado');
-
-            const openAIVisionService = new OpenAIVisionService();
-            console.log('✅ OpenAIVisionService criado');
-
-            const trackingService = new TrackingService(whatsAppService);
-            console.log('✅ TrackingService criado');
-
-            const orderValidationService = new OrderValidationService(null, whatsAppService);
-            console.log('✅ OrderValidationService criado');
-
-            // Inicializa o WhatsApp e aguarda conexão
-            await whatsAppService.init();
-            console.log('✅ WhatsAppService inicializado');
-
-            // Verifica se o cliente está conectado
-            const client = await whatsAppService.getClient();
-            if (!client) {
-                throw new Error('WhatsAppService não inicializou corretamente');
-            }
-
-            // Inicializa outros serviços
-            groqServices = new GroqServices();
-            console.log('✅ GroqServices inicializado');
-
-            audioService = new AudioService(groqServices, whatsAppService);
-            console.log('✅ AudioService inicializado');
-
-            // Inicializa os serviços de IA
-            const aiServices = new AIServices(
-                whatsAppService,
-                whatsAppImageService,
-                openAIVisionService,
-                openAIService,
-                audioService,
-                trackingService,
-                orderValidationService
-            );
-            console.log('✅ AIServices inicializado');
-
-            imageService = new ImageService(whatsAppService);
-            console.log('✅ ImageService inicializado');
-
-            mediaManagerService = new MediaManagerService(audioService, imageService);
-            console.log('✅ MediaManagerService inicializado');
-
+            // Serviços independentes
             businessHoursService = new BusinessHoursService();
             console.log('✅ BusinessHoursService inicializado');
 
-            nuvemshopService = new NuvemshopService(cacheService);
+            trackingService = new TrackingService();
+            console.log('✅ TrackingService inicializado');
+
+            orderValidationService = new OrderValidationService();
+            console.log('✅ OrderValidationService inicializado');
+
+            nuvemshopService = new NuvemshopService();
             console.log('✅ NuvemshopService inicializado');
 
-            webhookService = new WebhookService(whatsAppService, aiServices, audioService);
+            groqServices = new GroqServices();
+            console.log('✅ GroqServices inicializado');
+
+            audioService = new AudioService();
+            console.log('✅ AudioService inicializado');
+
+            imageService = new ImageService();
+            console.log('✅ ImageService inicializado');
+
+            mediaManagerService = new MediaManagerService();
+            console.log('✅ MediaManagerService inicializado');
+
+            // Inicializa serviços com dependências
+            whatsappService = new WhatsAppService(orderValidationService);
+            console.log('✅ WhatsAppService inicializado');
+
+            openAIService = new OpenAIService(
+                nuvemshopService,
+                trackingService,
+                businessHoursService,
+                orderValidationService,
+                null,
+                whatsappService // Injeta WhatsAppService
+            );
+            console.log('✅ OpenAIService inicializado');
+
+            // Atualiza referência do OpenAIService no WhatsAppService
+            whatsappService.setOpenAIService(openAIService);
+            console.log('✅ Dependências circulares resolvidas');
+
+            // Inicializa serviços que dependem de outros
+            aiServices = new AIServices(openAIService);
+            console.log('✅ AIServices inicializado');
+
+            webhookService = new WebhookService(whatsappService, aiServices);
             console.log('✅ WebhookService inicializado');
 
             clearTimeout(timeout);

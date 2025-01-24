@@ -8,7 +8,6 @@ const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { FinancialService } = require('./financial-service');
-const { WhatsappService } = require('./whatsapp-service'); // Import the WhatsappService
 
 class OpenAIService {
     /**
@@ -17,8 +16,9 @@ class OpenAIService {
      * @param {BusinessHoursService} businessHoursService - Serviço de horário de atendimento
      * @param {OrderValidationService} orderValidationService - Serviço de validação de pedidos
      * @param {FinancialService} financialService - Serviço financeiro
+     * @param {Object} whatsappService - Serviço de WhatsApp (injetado para evitar dependência circular)
      */
-    constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService, financialService) {
+    constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService, financialService, whatsappService) {
         this.client = new OpenAI({
             apiKey: OPENAI_CONFIG.apiKey,
             baseURL: OPENAI_CONFIG.baseUrl
@@ -44,7 +44,7 @@ class OpenAIService {
         this.businessHoursService = businessHoursService || new BusinessHoursService();
         this.orderValidationService = orderValidationService || new OrderValidationService();
         this.financialService = financialService; // Recebe o FinancialService do container
-        this.whatsappService = new WhatsappService(); // Initialize the WhatsappService
+        this.whatsappService = whatsappService; // Injetado para evitar dependência circular
 
         // Inicializa limpeza periódica
         setInterval(() => this._cleanupCache(), this.THREAD_CACHE_TTL);
