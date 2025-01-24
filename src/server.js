@@ -158,10 +158,31 @@ async function initializeServices() {
             mediaManagerService = new MediaManagerService(audioService, imageService);
             console.log('✅ MediaManagerService inicializado');
 
-            // Inicializa serviços com dependências
-            whatsappService = new WhatsAppService(orderValidationService);
-            await whatsappService.init();
-            console.log('✅ WhatsAppService inicializado');
+            // Inicializa serviços
+            await Promise.all([
+                whatsappService.initialize(),
+                trackingService.initialize(),
+                orderValidationService.initialize(),
+                nuvemshopService.initialize(),
+                groqServices.initialize(),
+                audioService.initialize(),
+                imageService.initialize(),
+                mediaManagerService.initialize()
+            ]);
+
+            // Inicializa o AIServices com os serviços já inicializados
+            aiServices = new AIServices(
+                whatsappService,
+                imageService,
+                openAIService,
+                openAIService,
+                audioService
+            );
+            console.log('✅ AIServices inicializado');
+
+            // Inicializa serviços que dependem de outros
+            webhookService = new WebhookService(whatsappService, aiServices);
+            console.log('✅ WebhookService inicializado');
 
             openAIService = new OpenAIService(
                 nuvemshopService,
@@ -176,19 +197,6 @@ async function initializeServices() {
             // Atualiza referência do OpenAIService no WhatsAppService
             whatsappService.setOpenAIService(openAIService);
             console.log('✅ Dependências circulares resolvidas');
-
-            // Inicializa serviços que dependem de outros
-            aiServices = new AIServices(
-                whatsappService,
-                imageService,
-                openAIService,
-                openAIService,
-                audioService
-            );
-            console.log('✅ AIServices inicializado');
-
-            webhookService = new WebhookService(whatsappService, aiServices);
-            console.log('✅ WebhookService inicializado');
 
             clearTimeout(timeout);
             resolve();
@@ -389,6 +397,43 @@ app.post('/webhook/msg_recebidas', async (req, res) => {
         res.status(500).json({
             error: 'Erro interno',
             message: error.message
+        });
+    }
+});
+
+// Rota de teste para simular mensagens
+app.post('/test/message', async (req, res) => {
+    try {
+        const { phoneNumber, text, type = 'text', mediaUrl } = req.body;
+
+        if (!phoneNumber || !text) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'phoneNumber e text são obrigatórios'
+            });
+        }
+
+        // Simula o formato de mensagem do WhatsApp
+        const mockMessage = {
+            from: phoneNumber,
+            type,
+            text,
+            media: mediaUrl ? { url: mediaUrl } : undefined
+        };
+
+        // Processa a mensagem
+        if (!webhookService) {
+            throw new Error('WebhookService não inicializado');
+        }
+
+        await webhookService.handleWhatsAppMessage(mockMessage);
+        res.status(200).json({ status: 'success', message: 'Mensagem processada' });
+    } catch (error) {
+        console.error('❌ Erro ao processar mensagem de teste:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Erro ao processar mensagem',
+            error: error.message
         });
     }
 });

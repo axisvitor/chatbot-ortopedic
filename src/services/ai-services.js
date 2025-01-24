@@ -1,3 +1,10 @@
+const { WhatsAppService } = require('./whatsapp-service');
+const { WhatsAppImageService } = require('./whatsapp-image-service');
+const { OpenAIService } = require('./openai-service');
+const { OpenAIVisionService } = require('./openai-vision-service');
+const { AudioService } = require('./audio-service');
+const { ForwardingService } = require('./forwarding-service');
+
 class AIServices {
     constructor(whatsAppService, whatsAppImageService, openAIVisionService, openAIService, audioService) {
         this.whatsAppService = whatsAppService;
@@ -5,6 +12,7 @@ class AIServices {
         this.openAIVisionService = openAIVisionService;
         this.openAIService = openAIService;
         this.audioService = audioService;
+        this.forwardingService = new ForwardingService();
     }
 
     async handleImageMessage(message) {
@@ -198,6 +206,71 @@ class AIServices {
                 erro: sendError.message,
                 destinatario: to
             });
+        }
+    }
+
+    async forward_to_financial({ order_number, reason, customer_message, priority }) {
+        try {
+            const customerId = this.openAIService.getCurrentCustomerId();
+            if (!customerId) {
+                throw new Error('Cliente não identificado');
+            }
+
+            const result = await this.forwardingService.forwardToFinancial({
+                customerId,
+                orderNumber: order_number,
+                reason,
+                priority,
+                message: customer_message
+            });
+
+            // Envia mensagem de confirmação para o cliente
+            await this.whatsAppService.sendText(
+                customerId,
+                'Sua solicitação foi encaminhada para nossa equipe financeira. Em breve entraremos em contato.'
+            );
+
+            return {
+                success: true,
+                message: result.message,
+                caseId: result.caseId
+            };
+        } catch (error) {
+            console.error('❌ [AIServices] Erro ao encaminhar para financeiro:', error);
+            throw error;
+        }
+    }
+
+    async forward_to_department({ department, order_number, reason, customer_message, priority }) {
+        try {
+            const customerId = this.openAIService.getCurrentCustomerId();
+            if (!customerId) {
+                throw new Error('Cliente não identificado');
+            }
+
+            const result = await this.forwardingService.forwardToDepartment({
+                department,
+                customerId,
+                orderNumber: order_number,
+                reason,
+                priority,
+                message: customer_message
+            });
+
+            // Envia mensagem de confirmação para o cliente
+            await this.whatsAppService.sendText(
+                customerId,
+                `Sua solicitação foi encaminhada para nossa equipe de ${department}. Em breve entraremos em contato.`
+            );
+
+            return {
+                success: true,
+                message: result.message,
+                caseId: result.caseId
+            };
+        } catch (error) {
+            console.error('❌ [AIServices] Erro ao encaminhar para departamento:', error);
+            throw error;
         }
     }
 }

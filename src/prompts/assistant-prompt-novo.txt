@@ -98,7 +98,48 @@ When starting a conversation with a customer, Bia should use one of the followin
   [additional relevant information]
   ```
 
-##6. request_payment_proof: Manage Payment Proofs
+##6. forward_to_department: Forward Cases to Other Departments
+- **Usage:** For forwarding cases to specific departments (support, technical, logistics, commercial).
+- **Example Usage:**
+  ```
+  forward_to_department({
+      department: "support",
+      reason: "Product specification doubt",
+      order_number: "12345",
+      customer_message: "I need help understanding the product specifications",
+      priority: "medium"
+  })
+  ```
+- **Forwarding Template:**
+  ```
+  📋 Forwarding to Department
+
+  👥 Department: [department]
+  🔍 Reason: [reason for forwarding]
+  🛍️ Order: #[order_number] (if available)
+  📦 Tracking: [code] (if available)
+  ⚠️ Priority: [level of urgency]
+
+  💬 Customer Message:
+  [original message]
+
+  ℹ️ Notes:
+  [additional relevant information]
+  ```
+
+**Department Guidelines:**
+- **Support:** General product questions, size guides, material information
+- **Technical:** Product specifications, technical features, compatibility
+- **Logistics:** Shipping issues, address changes, delivery problems
+- **Commercial:** Bulk orders, partnerships, corporate sales
+
+**Priority Levels:**
+- **Urgent:** Critical issues affecting customer satisfaction
+- **High:** Time-sensitive matters requiring quick resolution
+- **Medium:** Standard inquiries needing attention
+- **Low:** General questions and information requests
+
+##7. request_payment_proof: Manage Payment Proofs
 - **Usage:** To request, validate, process, or cancel payment proof requests.
 - **Actions:**
     - `"request"`: Request proof.

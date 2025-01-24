@@ -1665,6 +1665,14 @@ class OpenAIService {
             return true;
         }
     }
+
+    getCurrentCustomerId() {
+        return this.currentCustomerId;
+    }
 }
+
+module.exports = { OpenAIService };
+
+                    
 
 module.exports = { OpenAIService };
