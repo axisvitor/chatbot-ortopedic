@@ -13,8 +13,8 @@ const OPENAI_CONFIG = {
     assistantId: validateEnvVar('ASSISTANT_ID'),
     baseUrl: 'https://api.openai.com/v1',
     models: {
-        chat: 'gpt-4-turbo-preview',
-        vision: 'gpt-4-vision-preview'
+        chat: 'gpt-4o',
+        vision: 'gpt-4o'
     },
     visionConfig: {
         max_tokens: 1024,

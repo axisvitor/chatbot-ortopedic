@@ -87,24 +87,55 @@ class AIServices {
 
             // Se for mensagem de áudio
             if (message.type === 'audio' || message.type === 'ptt') {
-                const transcription = message.text;
-                
-                // Processa direto com o OpenAI Assistant
-                const response = await this.openAIService.processCustomerMessage(message.from, {
-                    role: 'user',
-                    content: transcription
+                console.log('[AIServices] Processando mensagem de áudio:', {
+                    from: message.from,
+                    seconds: message?.message?.audioMessage?.seconds,
+                    mimetype: message?.message?.audioMessage?.mimetype
                 });
 
-                if (response) {
-                    await this.whatsAppService.sendText(message.from, response);
-                }
+                try {
+                    // Baixa o áudio usando o WhatsAppService
+                    const audioData = await this.whatsAppService.downloadMediaMessage(message);
+                    if (!audioData) {
+                        throw new Error('Falha ao baixar áudio');
+                    }
 
-                return {
-                    type: 'audio',
-                    transcription,
-                    response,
-                    from: message.from
-                };
+                    console.log('[AIServices] Áudio baixado, transcrevendo...');
+                    
+                    // Transcreve o áudio usando o AudioService
+                    const transcription = await this.audioService.transcribeAudio({
+                        buffer: audioData,
+                        mimetype: message?.message?.audioMessage?.mimetype || 'audio/ogg'
+                    });
+
+                    if (!transcription) {
+                        throw new Error('Falha ao transcrever áudio');
+                    }
+
+                    console.log('[AIServices] Áudio transcrito:', { transcription });
+                    
+                    // Processa com o OpenAI Assistant
+                    const response = await this.openAIService.processCustomerMessage(message.from, {
+                        role: 'user',
+                        content: transcription
+                    });
+
+                    if (response) {
+                        await this.whatsAppService.sendText(message.from, response);
+                    }
+
+                    return {
+                        type: 'audio',
+                        transcription,
+                        response,
+                        from: message.from
+                    };
+                } catch (error) {
+                    console.error('[AIServices] Erro ao processar áudio:', error);
+                    const errorMsg = 'Desculpe, não consegui processar seu áudio. Por favor, tente enviar novamente ou envie como mensagem de texto.';
+                    await this.whatsAppService.sendText(message.from, errorMsg);
+                    throw error;
+                }
             }
 
             // Se for mensagem de texto
