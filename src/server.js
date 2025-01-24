@@ -147,6 +147,9 @@ async function initializeServices() {
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
+            openAIService = new OpenAIService();
+            console.log('✅ OpenAIService inicializado');
+
             // Serviços de mídia na ordem correta
             audioService = new AudioService(groqServices);
             console.log('✅ AudioService inicializado');
@@ -158,41 +161,39 @@ async function initializeServices() {
             mediaManagerService = new MediaManagerService(audioService, imageService);
             console.log('✅ MediaManagerService inicializado');
 
-            // Inicializa serviços
-            await Promise.all([
-                whatsappService.initialize(),
-                trackingService.initialize(),
-                orderValidationService.initialize(),
-                nuvemshopService.initialize(),
-                groqServices.initialize(),
-                audioService.initialize(),
-                imageService.initialize(),
-                mediaManagerService.initialize()
-            ]);
+            // WhatsApp precisa do MediaManager
+            whatsappService = new WhatsAppService(mediaManagerService);
+            console.log('✅ WhatsAppService inicializado');
 
-            // Inicializa o AIServices com os serviços já inicializados
+            // WhatsAppImage precisa do WhatsApp
+            whatsappImageService = new WhatsAppImageService(whatsappService);
+            console.log('✅ WhatsAppImageService inicializado');
+
+            // AIServices precisa de vários serviços
             aiServices = new AIServices(
                 whatsappService,
-                imageService,
-                openAIService,
+                whatsappImageService,
                 openAIService,
                 audioService
             );
             console.log('✅ AIServices inicializado');
 
+            // Inicializa apenas os serviços que têm método initialize
+            await Promise.all([
+                whatsappService.initialize && whatsappService.initialize(),
+                trackingService.initialize && trackingService.initialize(),
+                orderValidationService.initialize && orderValidationService.initialize(),
+                nuvemshopService.initialize && nuvemshopService.initialize(),
+                groqServices.initialize && groqServices.initialize(),
+                audioService.initialize && audioService.initialize(),
+                imageService.initialize && imageService.initialize(),
+                mediaManagerService.initialize && mediaManagerService.initialize(),
+                aiServices.initialize && aiServices.initialize()
+            ].filter(Boolean));
+
             // Inicializa serviços que dependem de outros
             webhookService = new WebhookService(whatsappService, aiServices);
             console.log('✅ WebhookService inicializado');
-
-            openAIService = new OpenAIService(
-                nuvemshopService,
-                trackingService,
-                businessHoursService,
-                orderValidationService,
-                financialService,
-                whatsappService // Injeta WhatsAppService
-            );
-            console.log('✅ OpenAIService inicializado');
 
             // Atualiza referência do OpenAIService no WhatsAppService
             whatsappService.setOpenAIService(openAIService);
