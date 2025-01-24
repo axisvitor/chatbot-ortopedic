@@ -141,6 +141,32 @@ class WhatsAppService {
     }
 
     /**
+     * Inicializa o serviço do WhatsApp
+     * @returns {Promise<boolean>} true se inicializado com sucesso
+     * @throws {Error} Se houver erro na inicialização
+     */
+    async initialize() {
+        try {
+            // Debug das configurações
+            console.log('[WhatsAppService] Iniciando serviço...');
+
+            // Verifica se as configurações necessárias estão presentes
+            if (!WHATSAPP_CONFIG.apiUrl || !WHATSAPP_CONFIG.token) {
+                throw new Error('Configurações do WhatsApp não definidas');
+            }
+
+            // Inicializa o cliente e verifica conexão
+            await this.init();
+            
+            console.log('[WhatsAppService] Serviço inicializado com sucesso');
+            return true;
+        } catch (error) {
+            console.error('[WhatsAppService] Erro ao inicializar:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Verifica se o serviço está conectado
      * @returns {Promise<boolean>}
      */
