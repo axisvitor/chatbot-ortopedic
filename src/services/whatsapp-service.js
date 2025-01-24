@@ -73,7 +73,12 @@ class WhatsAppService {
      */
     async init() {
         try {
-            console.log(' Inicializando WhatsApp Service...');
+            console.log('[WhatsApp] Inicializando WhatsApp Service...', {
+                apiUrl: WHATSAPP_CONFIG.apiUrl,
+                hasToken: !!WHATSAPP_CONFIG.token,
+                hasConnectionKey: !!WHATSAPP_CONFIG.connectionKey,
+                connectionTimeout: WHATSAPP_CONFIG.connectionTimeout || 30000
+            });
             
             if (!WHATSAPP_CONFIG.token) {
                 throw new Error('Token não configurado');
@@ -83,60 +88,62 @@ class WhatsAppService {
                 throw new Error('Connection Key não configurada');
             }
 
+            if (!WHATSAPP_CONFIG.apiUrl) {
+                throw new Error('API URL não configurada');
+            }
+
             // Reseta contadores
             this.retryCount = 0;
             this.connectionKey = WHATSAPP_CONFIG.connectionKey;
 
             // Inicializa cliente HTTP
-            this.client = axios.create({
+            const client = axios.create({
                 baseURL: WHATSAPP_CONFIG.apiUrl,
                 headers: {
                     'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
+                    'Accept': 'application/json',
+                    'X-Connection-Key': WHATSAPP_CONFIG.connectionKey
+                },
+                timeout: WHATSAPP_CONFIG.connectionTimeout || 30000
             });
+
+            // Atribui o cliente à instância
+            this.client = client;
 
             // Adiciona interceptors
             this.addInterceptor();
 
-            console.log(' WhatsApp Service inicializado:', {
-                baseUrl: WHATSAPP_CONFIG.apiUrl,
-                chaveConexao: this.connectionKey,
-                timestamp: new Date().toISOString()
-            });
+            // Verifica se está realmente conectado
+            console.log('[WhatsApp] Verificando conexão inicial...');
+            const isConnected = await this.isConnected();
+            if (!isConnected) {
+                throw new Error('Não foi possível conectar ao WhatsApp');
+            }
 
+            console.log('[WhatsApp] Serviço inicializado com sucesso');
             return this.client;
         } catch (error) {
-            console.error(' Erro ao inicializar WhatsApp Service:', {
+            console.error('[WhatsApp] Erro ao inicializar serviço:', {
                 erro: error.message,
                 stack: error.stack,
                 timestamp: new Date().toISOString()
             });
+            this.client = null;
             throw error;
         }
     }
 
-    async getClient() {
-        if (!this.client) {
-            await this.init();
-        }
-        return this.client;
-    }
-
-    async createClient() {
-        return axios.create({
-            baseURL: WHATSAPP_CONFIG.apiUrl,
-            headers: {
-                'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            timeout: 10000
-        });
-    }
-
+    /**
+     * Adiciona interceptors ao cliente HTTP
+     * @private
+     */
     addInterceptor() {
+        if (!this.client) {
+            console.error('[WhatsApp] Cliente não inicializado ao adicionar interceptor');
+            return;
+        }
+
         this.client.interceptors.response.use(
             response => response,
             async error => {
@@ -161,6 +168,7 @@ class WhatsAppService {
                         // Tenta a requisição novamente
                         const config = error.config;
                         config.headers['Authorization'] = `Bearer ${WHATSAPP_CONFIG.token}`;
+                        config.headers['X-Connection-Key'] = WHATSAPP_CONFIG.connectionKey;
                         return this.client(config);
                     } catch (retryError) {
                         console.error('[WhatsApp] Erro na tentativa de reconexão:', retryError);
@@ -173,6 +181,25 @@ class WhatsAppService {
                 return Promise.reject(error);
             }
         );
+    }
+
+    async getClient() {
+        if (!this.client) {
+            await this.init();
+        }
+        return this.client;
+    }
+
+    async createClient() {
+        return axios.create({
+            baseURL: WHATSAPP_CONFIG.apiUrl,
+            headers: {
+                'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            timeout: 10000
+        });
     }
 
     /**
@@ -1038,16 +1065,29 @@ class WhatsAppService {
     async isConnected() {
         try {
             if (!this.client || !this.connectionKey) {
+                console.error('[WhatsApp] Cliente não inicializado');
                 return false;
             }
 
             // Tenta fazer uma requisição simples para verificar conexão
             const response = await this._retryWithExponentialBackoff(async () => {
-                const result = await this.client.get(`/instance/info?connectionKey=${this.connectionKey}`);
+                console.log('[WhatsApp] Verificando conexão...');
+                const result = await this.client.post('/instance/connect', {
+                    key: this.connectionKey
+                });
+                console.log('[WhatsApp] Status da conexão:', result?.data);
                 return result;
             });
 
-            return response?.data?.status === 'connected';
+            // Verifica se a conexão foi bem sucedida
+            const status = response?.data?.status?.toLowerCase();
+            const connected = status === 'connected' || status === 'authenticated';
+            
+            if (!connected) {
+                console.error('[WhatsApp] Falha ao conectar:', response?.data);
+            }
+
+            return connected;
         } catch (error) {
             console.error('[WhatsApp] Erro ao verificar conexão:', {
                 erro: error.message,

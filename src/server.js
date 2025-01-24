@@ -160,6 +160,7 @@ async function initializeServices() {
 
             // Inicializa serviços com dependências
             whatsappService = new WhatsAppService(orderValidationService);
+            await whatsappService.init();
             console.log('✅ WhatsAppService inicializado');
 
             openAIService = new OpenAIService(
