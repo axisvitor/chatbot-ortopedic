@@ -6,9 +6,7 @@ const { OpenAIService } = require('./openai-service');
 
 class WhatsAppService {
     constructor(orderValidationService = null) {
-        this.isTest = process.env.NODE_ENV === 'test';
         this.client = null;
-        this.initialized = false;
         this.connectionKey = null;
         this.retryCount = 0;
         this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
@@ -68,13 +66,12 @@ class WhatsAppService {
         return new OpenAIService();
     }
 
-    async initialize() {
-        if (this.isTest) {
-            console.log('[WhatsApp] Inicializando em modo de teste');
-            this.initialized = true;
-            return;
-        }
-
+    /**
+     * Inicializa o serviço WhatsApp
+     * @returns {Promise<Object>} Cliente HTTP inicializado
+     * @throws {Error} Se falhar a inicialização
+     */
+    async init() {
         try {
             // Obtém a connection key
             this.connectionKey = WHATSAPP_CONFIG.connectionKey;
@@ -110,7 +107,7 @@ class WhatsAppService {
             }
 
             console.log('[WhatsApp] Serviço inicializado com sucesso');
-            this.initialized = true;
+            return this.client;
         } catch (error) {
             console.error('[WhatsApp] Erro ao inicializar serviço:', {
                 erro: error.message,
@@ -151,7 +148,7 @@ class WhatsAppService {
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         
                         // Reinicializa o cliente
-                        await this.initialize();
+                        await this.init();
                         
                         // Tenta a requisição novamente
                         const config = error.config;
@@ -173,7 +170,7 @@ class WhatsAppService {
 
     async getClient() {
         if (!this.client) {
-            await this.initialize();
+            await this.init();
         }
         return this.client;
     }
@@ -236,22 +233,6 @@ class WhatsAppService {
 
     async sendText(to, text) {
         try {
-            if (!text) {
-                console.log('Mensagem vazia:', {
-                    para: to,
-                    timestamp: new Date().toISOString()
-                });
-                return;
-            }
-
-            if (this.isTest) {
-                console.log('[WhatsApp] Mensagem enviada (TESTE):', {
-                    para: to,
-                    texto: text
-                });
-                return true;
-            }
-
             const client = await this.getClient();
             if (!client) {
                 throw new Error('Cliente HTTP não inicializado');
@@ -279,7 +260,7 @@ class WhatsAppService {
                 const result = await client.post(endpoint, payload);
                 
                 if (result.data?.error && result.data?.message?.includes('conta')) {
-                    await this.initialize();
+                    await this.init();
                     throw new Error('Erro de conta, tentando novamente...');
                 }
                 
@@ -317,15 +298,6 @@ class WhatsAppService {
      */
     async sendImageByUrl(to, imageUrl, caption = '') {
         try {
-            if (this.isTest) {
-                console.log('[WhatsApp] Imagem enviada (TESTE):', {
-                    para: to,
-                    imagem: imageUrl,
-                    legenda: caption
-                });
-                return true;
-            }
-
             const phoneNumber = this._validatePhoneNumber(to);
             const config = WHATSAPP_CONFIG.endpoints.image;
             const endpoint = `${config.path}`;
@@ -373,14 +345,6 @@ class WhatsAppService {
 
     async sendAudio(to, audioUrl) {
         try {
-            if (this.isTest) {
-                console.log('[WhatsApp] Áudio enviado (TESTE):', {
-                    para: to,
-                    audio: audioUrl
-                });
-                return true;
-            }
-
             console.log(' Enviando áudio:', {
                 para: to,
                 url: audioUrl?.substring(0, 100),
@@ -1090,7 +1054,6 @@ class WhatsAppService {
             }
 
             // Verifica se as credenciais estão configuradas
-     
        if (!WHATSAPP_CONFIG.token || !WHATSAPP_CONFIG.connectionKey || !WHATSAPP_CONFIG.apiUrl) {
                 console.error('[WhatsApp] Credenciais não configuradas');
                 return false;
@@ -1113,6 +1076,26 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
             return false;
+        }
+    }
+
+    /**
+     * Inicializa o serviço do WhatsApp
+     */
+    async initialize() {
+        try {
+            if (this.isTest) {
+                console.log('[WhatsAppService] Executando em modo de teste');
+                return;
+            }
+
+            // Inicializa o cliente
+            this.client = await this._createClient();
+            this.initialized = true;
+            console.log('[WhatsAppService] Cliente inicializado com sucesso');
+        } catch (error) {
+            console.error('[WhatsAppService] Erro ao inicializar:', error);
+            throw error;
         }
     }
 }

@@ -147,6 +147,9 @@ async function initializeServices() {
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
+            openAIService = new OpenAIService();
+            console.log('✅ OpenAIService inicializado');
+
             // Serviços de mídia na ordem correta
             audioService = new AudioService(groqServices);
             console.log('✅ AudioService inicializado');
@@ -158,37 +161,44 @@ async function initializeServices() {
             mediaManagerService = new MediaManagerService(audioService, imageService);
             console.log('✅ MediaManagerService inicializado');
 
-            // Inicializa serviços com dependências
-            whatsappService = new WhatsAppService(orderValidationService);
-            await whatsappService.init();
+            // WhatsApp precisa do MediaManager
+            whatsappService = new WhatsAppService(mediaManagerService);
+            await whatsappService.initialize();  
             console.log('✅ WhatsAppService inicializado');
 
-            openAIService = new OpenAIService(
-                nuvemshopService,
-                trackingService,
-                businessHoursService,
-                orderValidationService,
-                financialService,
-                whatsappService // Injeta WhatsAppService
-            );
-            console.log('✅ OpenAIService inicializado');
+            // WhatsAppImage precisa do WhatsApp
+            whatsappImageService = new WhatsAppImageService(whatsappService);
+            console.log('✅ WhatsAppImageService inicializado');
 
-            // Atualiza referência do OpenAIService no WhatsAppService
-            whatsappService.setOpenAIService(openAIService);
-            console.log('✅ Dependências circulares resolvidas');
-
-            // Inicializa serviços que dependem de outros
+            // AIServices precisa de vários serviços
             aiServices = new AIServices(
                 whatsappService,
-                imageService,
-                openAIService,
+                whatsappImageService,
                 openAIService,
                 audioService
             );
             console.log('✅ AIServices inicializado');
 
+            // Inicializa apenas os serviços que têm método initialize
+            await Promise.all([
+                whatsappService.initialize && whatsappService.initialize(),
+                trackingService.initialize && trackingService.initialize(),
+                orderValidationService.initialize && orderValidationService.initialize(),
+                nuvemshopService.initialize && nuvemshopService.initialize(),
+                groqServices.initialize && groqServices.initialize(),
+                audioService.initialize && audioService.initialize(),
+                imageService.initialize && imageService.initialize(),
+                mediaManagerService.initialize && mediaManagerService.initialize(),
+                aiServices.initialize && aiServices.initialize()
+            ].filter(Boolean));
+
+            // Inicializa serviços que dependem de outros
             webhookService = new WebhookService(whatsappService, aiServices);
             console.log('✅ WebhookService inicializado');
+
+            // Atualiza referência do OpenAIService no WhatsAppService
+            whatsappService.setOpenAIService(openAIService);
+            console.log('✅ Dependências circulares resolvidas');
 
             clearTimeout(timeout);
             resolve();
@@ -206,7 +216,7 @@ app.use(limiter); // Aplica rate limiting
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Healthcheck endpoint para Railway
+// Healthcheck endpoint para Railwayz
 app.get('/', (req, res) => {
     if (isInitializing) {
         res.status(200).json({
