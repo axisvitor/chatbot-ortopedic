@@ -178,7 +178,13 @@ async function initializeServices() {
             console.log('✅ Dependências circulares resolvidas');
 
             // Inicializa serviços que dependem de outros
-            aiServices = new AIServices(openAIService, mediaManagerService);
+            aiServices = new AIServices(
+                whatsappService,
+                imageService,
+                openAIService,
+                openAIService,
+                audioService
+            );
             console.log('✅ AIServices inicializado');
 
             webhookService = new WebhookService(whatsappService, aiServices);
