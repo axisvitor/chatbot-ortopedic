@@ -26,6 +26,11 @@ class OpenAIService {
         this.assistantId = OPENAI_CONFIG.assistantId;
         this.redisStore = new RedisStore(); // Redis para controlar runs ativos
         
+        // Conecta ao Redis
+        this.redisStore.connect().catch(error => {
+            console.error('[OpenAI] Erro ao conectar ao Redis:', error);
+        });
+        
         // Cache de threads em memória
         this.threadCache = new Map(); // Armazena threads ativos
         this.threadLastAccess = new Map(); // Última vez que thread foi acessada
@@ -547,18 +552,15 @@ class OpenAIService {
     async sendResponse(customerId, response) {
         try {
             if (!response) return;
-            
-            // Envia via WhatsApp
-            await this.whatsappService.sendMessage(customerId, response);
-            
-            logger.info('ResponseSent', {
-                customerId,
-                responseLength: response.length
-            });
+
+            if (!this.whatsappService) {
+                throw new Error('WhatsAppService não inicializado');
+            }
+
+            await this.whatsappService.sendText(customerId, response);
         } catch (error) {
             logger.error('ErrorSendingResponse', {
-                customerId,
-                error: error.message
+                error: { customerId, error: error.message }
             });
         }
     }
