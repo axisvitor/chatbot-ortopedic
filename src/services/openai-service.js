@@ -1669,10 +1669,22 @@ class OpenAIService {
     getCurrentCustomerId() {
         return this.currentCustomerId;
     }
+
+    /**
+     * Define o serviço WhatsApp após inicialização
+     * @param {Object} whatsappService - Serviço de WhatsApp
+     */
+    setWhatsAppService(whatsappService) {
+        this.whatsappService = whatsappService;
+    }
+
+    /**
+     * Define o serviço Financeiro após inicialização
+     * @param {Object} financialService - Serviço Financeiro
+     */
+    setFinancialService(financialService) {
+        this.financialService = financialService;
+    }
 }
-
-module.exports = { OpenAIService };
-
-                    
 
 module.exports = { OpenAIService };

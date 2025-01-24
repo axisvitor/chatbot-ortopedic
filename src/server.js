@@ -147,7 +147,15 @@ async function initializeServices() {
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
-            openAIService = new OpenAIService();
+            // OpenAI precisa de vários serviços
+            openAIService = new OpenAIService(
+                nuvemshopService,
+                trackingService,
+                businessHoursService,
+                orderValidationService,
+                null, // financialService será injetado depois
+                null  // whatsappService será injetado depois para evitar dependência circular
+            );
             console.log('✅ OpenAIService inicializado');
 
             // Serviços de mídia na ordem correta
@@ -198,6 +206,11 @@ async function initializeServices() {
 
             // Atualiza referência do OpenAIService no WhatsAppService
             whatsappService.setOpenAIService(openAIService);
+            
+            // Atualiza referências circulares do OpenAIService
+            openAIService.setWhatsAppService(whatsappService);
+            openAIService.setFinancialService(financialService);
+            
             console.log('✅ Dependências circulares resolvidas');
 
             clearTimeout(timeout);
