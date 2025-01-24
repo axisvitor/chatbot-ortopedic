@@ -73,39 +73,24 @@ class WhatsAppService {
      */
     async init() {
         try {
-            console.log('[WhatsApp] Inicializando WhatsApp Service...', {
-                apiUrl: WHATSAPP_CONFIG.apiUrl,
-                hasToken: !!WHATSAPP_CONFIG.token,
-                hasConnectionKey: !!WHATSAPP_CONFIG.connectionKey,
-                connectionTimeout: WHATSAPP_CONFIG.connectionTimeout || 30000
-            });
-            
-            if (!WHATSAPP_CONFIG.token) {
-                throw new Error('Token não configurado');
-            }
-
-            if (!WHATSAPP_CONFIG.connectionKey) {
-                throw new Error('Connection Key não configurada');
-            }
-
-            if (!WHATSAPP_CONFIG.apiUrl) {
-                throw new Error('API URL não configurada');
-            }
-
-            // Reseta contadores
-            this.retryCount = 0;
+            // Obtém a connection key
             this.connectionKey = WHATSAPP_CONFIG.connectionKey;
+            if (!this.connectionKey) {
+                throw new Error('Connection key não configurada');
+            }
 
-            // Inicializa cliente HTTP
+            // Cria o cliente HTTP
             const client = axios.create({
-                baseURL: WHATSAPP_CONFIG.apiUrl,
+                baseURL: `${WHATSAPP_CONFIG.apiUrl}`,
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
-                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
-                    'Connection-Key': this.connectionKey
+                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`
                 },
-                timeout: WHATSAPP_CONFIG.connectionTimeout || 30000
+                timeout: WHATSAPP_CONFIG.connectionTimeout || 30000,
+                params: {
+                    connectionKey: this.connectionKey
+                }
             });
 
             // Atribui o cliente à instância
@@ -263,7 +248,7 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            const endpoint = `${WHATSAPP_CONFIG.endpoints.text.path}?connectionKey=${this.connectionKey}`;
+            const endpoint = `${WHATSAPP_CONFIG.endpoints.text.path}`;
 
             const payload = {
                 phoneNumber: phoneNumber,
@@ -315,7 +300,7 @@ class WhatsAppService {
         try {
             const phoneNumber = this._validatePhoneNumber(to);
             const config = WHATSAPP_CONFIG.endpoints.image;
-            const endpoint = `${config.path}?connectionKey=${this.connectionKey}`;
+            const endpoint = `${config.path}`;
             
             // Prepara o payload
             const payload = {
@@ -1071,7 +1056,7 @@ class WhatsAppService {
             // Tenta fazer uma requisição simples para verificar conexão
             const response = await this._retryWithExponentialBackoff(async () => {
                 console.log('[WhatsApp] Verificando conexão...');
-                const result = await this.client.post(`${WHATSAPP_CONFIG.endpoints.text.path}?connectionKey=${this.connectionKey}`, {
+                const result = await this.client.post(`${WHATSAPP_CONFIG.endpoints.text.path}`, {
                     phoneNumber: WHATSAPP_CONFIG.whatsappNumber,
                     text: 'Teste de conexão',
                     delayMessage: Math.floor(WHATSAPP_CONFIG.messageDelay / 1000)
