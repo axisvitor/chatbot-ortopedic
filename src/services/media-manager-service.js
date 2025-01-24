@@ -5,7 +5,6 @@ const { OpenAIVisionService } = require('./openai-vision-service');
 
 class MediaManagerService {
     constructor(audioService, imageService) {
-        if (!audioService) throw new Error('AudioService é obrigatório');
         if (!imageService) throw new Error('ImageService é obrigatório');
         
         this.audioService = audioService;
@@ -18,6 +17,12 @@ class MediaManagerService {
         this.MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
         this.ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png'];
         this.CACHE_TTL = 7 * 24 * 60 * 60; // 7 dias
+    }
+
+    setAudioService(audioService) {
+        if (!audioService) throw new Error('AudioService é obrigatório');
+        this.audioService = audioService;
+        console.log('[MediaManager] AudioService atualizado');
     }
 
     /**

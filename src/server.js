@@ -146,26 +146,11 @@ async function initializeServices() {
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
-            // OpenAI precisa de vários serviços
-            openAIService = new OpenAIService(
-                nuvemshopService,
-                trackingService,
-                businessHoursService,
-                orderValidationService,
-                null, // financialService será injetado depois
-                null  // whatsappService será injetado depois
-            );
-            console.log('✅ OpenAIService inicializado');
-
-            // Serviços de mídia na ordem correta
-            audioService = new AudioService(groqServices);
-            console.log('✅ AudioService inicializado');
-
             imageService = new ImageService();
             console.log('✅ ImageService inicializado');
 
-            // MediaManager precisa de Audio e Image
-            mediaManagerService = new MediaManagerService(audioService, imageService);
+            // MediaManager precisa do Image
+            mediaManagerService = new MediaManagerService(null, imageService);
             console.log('✅ MediaManagerService inicializado');
 
             // WhatsApp precisa do MediaManager
@@ -176,6 +161,25 @@ async function initializeServices() {
             // WhatsAppImage precisa do WhatsApp
             whatsappImageService = new WhatsAppImageService(whatsappService);
             console.log('✅ WhatsAppImageService inicializado');
+
+            // Audio precisa do WhatsApp e Groq
+            audioService = new AudioService(groqServices, whatsappService);
+            console.log('✅ AudioService inicializado');
+
+            // Atualiza MediaManager com AudioService
+            mediaManagerService.setAudioService(audioService);
+            console.log('✅ MediaManager atualizado com AudioService');
+
+            // OpenAI precisa de vários serviços
+            openAIService = new OpenAIService(
+                nuvemshopService,
+                trackingService,
+                businessHoursService,
+                orderValidationService,
+                null, // financialService será injetado depois
+                null  // whatsappService será injetado depois
+            );
+            console.log('✅ OpenAIService inicializado');
 
             // OpenAI Vision é independente
             openAIVisionService = new OpenAIVisionService();
