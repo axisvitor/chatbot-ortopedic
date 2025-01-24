@@ -9,6 +9,14 @@ class CacheService {
         this.operationCount = 0;
         this.lastResetTime = Date.now();
         this.MAX_OPS_PER_SECOND = 1000;
+
+        // Conecta ao Redis
+        this.redisStore.connect().catch(error => {
+            logger.error('RedisConnectionError', {
+                service: 'CacheService',
+                error: error.message
+            });
+        });
     }
 
     generateKey(prefix, ...parts) {
