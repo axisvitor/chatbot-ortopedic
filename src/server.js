@@ -86,9 +86,10 @@ const port = process.env.PORT || 8080;
 
 console.log(`📝 Porta configurada: ${port}`);
 
-// Variáveis de estado
-let isReady = false;
-let initError = null;
+// Variáveis globais de estado
+let isInitializing = true;
+let servicesReady = false;
+let lastError = null;
 
 // Declaração dos serviços
 let groqServices;
@@ -195,12 +196,10 @@ async function initializeServices() {
             console.log('✅ WebhookService inicializado');
 
             clearTimeout(timeout);
-            isReady = true;
             resolve();
         } catch (error) {
             clearTimeout(timeout);
             console.error('❌ Erro ao inicializar serviços:', error);
-            initError = error;
             reject(error);
         }
     });
@@ -214,29 +213,57 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Healthcheck endpoint para Railway
 app.get('/', (req, res) => {
-    res.status(200).json({
-        status: 'ok',
+    if (isInitializing) {
+        res.status(200).json({
+            status: 'initializing',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime()
+        });
+        return;
+    }
+
+    res.status(servicesReady ? 200 : 503).json({
+        status: servicesReady ? 'ok' : 'error',
         timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        error: lastError?.message
     });
 });
 
 app.get('/health', (req, res) => {
-    res.status(200).json({
-        status: 'ok',
+    // Durante inicialização, retorna 200 para dar tempo aos serviços
+    if (isInitializing) {
+        res.status(200).json({
+            status: 'initializing',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime()
+        });
+        return;
+    }
+
+    // Verifica estado dos serviços
+    const redisConnected = redisStore?.isConnected?.() || false;
+    const whatsappConnected = whatsappService?.isConnected?.() || false;
+
+    const allServicesConnected = redisConnected && whatsappConnected;
+    servicesReady = allServicesConnected;
+
+    res.status(allServicesConnected ? 200 : 503).json({
+        status: allServicesConnected ? 'ok' : 'error',
         services: {
-            redis: redisStore.isConnected(),
-            whatsapp: whatsappService?.isConnected() || false
+            redis: redisConnected,
+            whatsapp: whatsappConnected
         },
         timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        error: lastError?.message
     });
 });
 
 // Rota de healthcheck
 app.get('/healthcheck', (req, res) => {
-    const status = isReady ? 'ok' : 'initializing';
-    const error = initError?.message;
+    const status = servicesReady ? 'ok' : 'initializing';
+    const error = lastError?.message;
     
     res.json({
         status,
@@ -337,24 +364,41 @@ app.post('/webhook/msg_recebidas', async (req, res) => {
 // Função para iniciar o servidor
 async function startServer(maxRetries = 3) {
     let retries = 0;
+    isInitializing = true;
     
     while (retries < maxRetries) {
         try {
             await initializeServices();
+            servicesReady = true;
+            isInitializing = false;
+            lastError = null;
             
-            app.listen(port, () => {
+            const server = app.listen(port, () => {
                 console.log(`🚀 Servidor rodando na porta ${port}`);
                 console.log('✅ Todos os serviços inicializados com sucesso');
             });
+
+            // Graceful shutdown
+            process.on('SIGTERM', () => {
+                console.log('Recebido SIGTERM. Iniciando shutdown graceful...');
+                server.close(() => {
+                    console.log('Servidor HTTP fechado.');
+                    process.exit(0);
+                });
+            });
             
-            return;
+            return server;
         } catch (error) {
             retries++;
+            lastError = error;
             console.error(`❌ Tentativa ${retries}/${maxRetries} falhou:`, error);
             
             if (retries === maxRetries) {
-                console.error('❌ Número máximo de tentativas atingido. Encerrando...');
-                process.exit(1);
+                isInitializing = false;
+                servicesReady = false;
+                console.error('❌ Número máximo de tentativas atingido.');
+                // Não encerra o processo, deixa o healthcheck reportar o erro
+                return null;
             }
             
             // Espera 5 segundos antes da próxima tentativa

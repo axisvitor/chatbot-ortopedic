@@ -5,9 +5,9 @@ dockerfilePath = "Dockerfile"
 [deploy]
 startCommand = "npm start"
 healthcheckPath = "/health"
-healthcheckTimeout = 300
+healthcheckTimeout = 600
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 5
+restartPolicyMaxRetries = 10
 
 [service]
 name = "chatbot-ortopedic"
@@ -20,9 +20,10 @@ handlers = ["http"]
 force_https = true
 
 [services.healthcheck]
-interval = "30s"
-timeout = "10s"
-retries = 3
+interval = "45s"
+timeout = "30s"
+retries = 5
+start_period = "120s"
 
 [[services.environment]]
 key = "NODE_ENV"
