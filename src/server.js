@@ -16,7 +16,8 @@ const {
     WhatsAppImageService,
     OpenAIService,
     CacheService,
-    BusinessHoursService
+    BusinessHoursService,
+    OpenAIVisionService
 } = require('./services');
 
 // Importação dos novos serviços
@@ -50,6 +51,7 @@ let nuvemshopService;
 let openAIService;
 let financialService;
 let cacheService;
+let openAIVisionService;
 
 // Configuração do rate limiter
 const limiter = rateLimit({
@@ -177,6 +179,10 @@ async function initializeServices() {
             // WhatsAppImage precisa do WhatsApp
             whatsappImageService = new WhatsAppImageService(whatsappService);
             console.log('✅ WhatsAppImageService inicializado');
+
+            // OpenAI Vision precisa ser inicializado antes do AIServices
+            openAIVisionService = new OpenAIVisionService();
+            console.log('✅ OpenAIVisionService inicializado');
 
             // AIServices precisa de vários serviços
             aiServices = new AIServices(
