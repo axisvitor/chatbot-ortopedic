@@ -1,10 +1,19 @@
 class AIServices {
-    constructor(whatsAppService, whatsAppImageService, openAIVisionService, openAIService, audioService) {
+    constructor(whatsAppService, whatsAppImageService, openAIService, openAIVisionService, audioService) {
         this.whatsAppService = whatsAppService;
         this.whatsAppImageService = whatsAppImageService;
-        this.openAIVisionService = openAIVisionService;
         this.openAIService = openAIService;
+        this.openAIVisionService = openAIVisionService;
         this.audioService = audioService;
+
+        console.log('[AIServices] Serviço inicializado com:', {
+            hasWhatsApp: !!whatsAppService,
+            hasWhatsAppImage: !!whatsAppImageService,
+            hasOpenAI: !!openAIService,
+            hasOpenAIVision: !!openAIVisionService,
+            hasAudio: !!audioService,
+            timestamp: new Date().toISOString()
+        });
     }
 
     async handleImageMessage(message) {
@@ -124,11 +133,7 @@ class AIServices {
                 try {
                     // Envia a mensagem no formato esperado
                     const response = await this.openAIService.processCustomerMessage(message.from, {
-                        message: {
-                            extendedTextMessage: {
-                                text: messageText
-                            }
-                        }
+                        text: messageText
                     });
 
                     console.log('[AIServices] Resposta do OpenAI:', { response });

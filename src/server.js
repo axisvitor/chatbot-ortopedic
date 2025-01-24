@@ -183,6 +183,7 @@ async function initializeServices() {
                 whatsappService,
                 whatsappImageService,
                 openAIService,
+                openAIVisionService,
                 audioService
             );
             console.log('✅ AIServices inicializado');

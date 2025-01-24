@@ -44,18 +44,24 @@ class OpenAIService {
         this.CONTEXT_UPDATE_INTERVAL = 15 * 60 * 1000; // 15 minutos em ms
 
         // Serviços injetados
-        this.nuvemshopService = nuvemshopService || new NuvemshopService();
-        this.trackingService = trackingService || new TrackingService();
-        this.businessHoursService = businessHoursService || new BusinessHoursService();
-        this.orderValidationService = orderValidationService || new OrderValidationService();
-        this.financialService = financialService; // Recebe o FinancialService do container
-        this.whatsappService = whatsappService; // Injetado para evitar dependência circular
+        this.nuvemshopService = nuvemshopService;
+        this.trackingService = trackingService;
+        this.businessHoursService = businessHoursService;
+        this.orderValidationService = orderValidationService;
+        this.financialService = financialService;
+        this.whatsappService = whatsappService;
 
         // Inicializa limpeza periódica
         setInterval(() => this._cleanupCache(), this.THREAD_CACHE_TTL);
         
         // Define as funções disponíveis para o Assistant
         this.functions = this._getAssistantFunctions();
+
+        console.log('[OpenAI] Serviço inicializado:', {
+            assistantId: this.assistantId,
+            baseUrl: OPENAI_CONFIG.baseUrl,
+            timestamp: new Date().toISOString()
+        });
     }
 
     /**
@@ -490,12 +496,19 @@ class OpenAIService {
                 return 'Desculpe, não consegui entender sua mensagem. Pode tentar novamente?';
             }
 
+            console.log('[OpenAI] Processando mensagem:', {
+                customerId,
+                messageText,
+                timestamp: new Date().toISOString()
+            });
+
             // Obtém ou cria thread
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             
             // Verifica run ativo
             const hasActiveRun = await this.hasActiveRun(threadId);
             if (hasActiveRun) {
+                console.log('[OpenAI] Run ativo detectado, enfileirando mensagem');
                 await this.queueMessage(threadId, { text: messageText });
                 return null;
             }
@@ -512,6 +525,7 @@ class OpenAIService {
             
             // Processa imediatamente se não houver timer
             if (!this.processingTimers.has(threadId)) {
+                console.log('[OpenAI] Agendando processamento da mensagem');
                 const timer = setTimeout(async () => {
                     try {
                         const response = await this.processQueuedMessages(threadId);
@@ -1256,7 +1270,7 @@ class OpenAIService {
             // Verifica se já tem um run ativo
             if (await this.hasActiveRun(threadId)) {
                 this.queueMessage(threadId, { role: "user", content: messageContent });
-                return " Aguarde um momento enquanto processo sua mensagem anterior...";
+                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
             // Adiciona a mensagem e executa o assistant
