@@ -1,10 +1,3 @@
-const { WhatsAppService } = require('./whatsapp-service');
-const { WhatsAppImageService } = require('./whatsapp-image-service');
-const { OpenAIService } = require('./openai-service');
-const { OpenAIVisionService } = require('./openai-vision-service');
-const { AudioService } = require('./audio-service');
-const { ForwardingService } = require('./forwarding-service');
-
 class AIServices {
     constructor(whatsAppService, whatsAppImageService, openAIVisionService, openAIService, audioService) {
         this.whatsAppService = whatsAppService;
@@ -12,7 +5,6 @@ class AIServices {
         this.openAIVisionService = openAIVisionService;
         this.openAIService = openAIService;
         this.audioService = audioService;
-        this.forwardingService = new ForwardingService();
     }
 
     async handleImageMessage(message) {
@@ -47,7 +39,7 @@ class AIServices {
             `;
 
             // Gera resposta personalizada via Assistant
-            const response = await this.openAIService.processCustomerMessage(from, {
+            const response = await this.openAIService.handleCustomerMessage(from, {
                 role: 'user',
                 content: context
             });
@@ -83,7 +75,7 @@ class AIServices {
                 const transcription = message.text;
                 
                 // Processa direto com o OpenAI Assistant
-                const response = await this.openAIService.processCustomerMessage(message.from, {
+                const response = await this.openAIService.handleCustomerMessage(message.from, {
                     role: 'user',
                     content: transcription
                 });
@@ -131,7 +123,7 @@ class AIServices {
 
                 try {
                     // Envia a mensagem no formato esperado
-                    const response = await this.openAIService.processCustomerMessage(message.from, {
+                    const response = await this.openAIService.handleCustomerMessage(message.from, {
                         message: {
                             extendedTextMessage: {
                                 text: messageText
@@ -189,7 +181,7 @@ class AIServices {
 
             try {
                 // Tenta gerar uma mensagem personalizada via Assistant
-                const errorResponse = await this.openAIService.processCustomerMessage(to, {
+                const errorResponse = await this.openAIService.handleCustomerMessage(to, {
                     role: 'user',
                     content: errorContext
                 });
@@ -206,71 +198,6 @@ class AIServices {
                 erro: sendError.message,
                 destinatario: to
             });
-        }
-    }
-
-    async forward_to_financial({ order_number, reason, customer_message, priority }) {
-        try {
-            const customerId = this.openAIService.getCurrentCustomerId();
-            if (!customerId) {
-                throw new Error('Cliente não identificado');
-            }
-
-            const result = await this.forwardingService.forwardToFinancial({
-                customerId,
-                orderNumber: order_number,
-                reason,
-                priority,
-                message: customer_message
-            });
-
-            // Envia mensagem de confirmação para o cliente
-            await this.whatsAppService.sendText(
-                customerId,
-                'Sua solicitação foi encaminhada para nossa equipe financeira. Em breve entraremos em contato.'
-            );
-
-            return {
-                success: true,
-                message: result.message,
-                caseId: result.caseId
-            };
-        } catch (error) {
-            console.error('❌ [AIServices] Erro ao encaminhar para financeiro:', error);
-            throw error;
-        }
-    }
-
-    async forward_to_department({ department, order_number, reason, customer_message, priority }) {
-        try {
-            const customerId = this.openAIService.getCurrentCustomerId();
-            if (!customerId) {
-                throw new Error('Cliente não identificado');
-            }
-
-            const result = await this.forwardingService.forwardToDepartment({
-                department,
-                customerId,
-                orderNumber: order_number,
-                reason,
-                priority,
-                message: customer_message
-            });
-
-            // Envia mensagem de confirmação para o cliente
-            await this.whatsAppService.sendText(
-                customerId,
-                `Sua solicitação foi encaminhada para nossa equipe de ${department}. Em breve entraremos em contato.`
-            );
-
-            return {
-                success: true,
-                message: result.message,
-                caseId: result.caseId
-            };
-        } catch (error) {
-            console.error('❌ [AIServices] Erro ao encaminhar para departamento:', error);
-            throw error;
         }
     }
 }
