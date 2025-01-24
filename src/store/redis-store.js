@@ -36,9 +36,6 @@ class RedisStore {
         this.client.on('connect', () => {
             console.log('[Redis] Redis conectado com sucesso');
         });
-
-        // Conecta ao Redis
-        this.connect();
     }
 
     async connect() {
@@ -46,6 +43,8 @@ class RedisStore {
             if (!this.client.isOpen) {
                 await this.client.connect();
             }
+            // Verifica se realmente está conectado
+            await this.ping();
         } catch (error) {
             console.error('[Redis] Erro ao conectar ao Redis:', {
                 erro: error.message,
@@ -54,6 +53,31 @@ class RedisStore {
             });
             throw error;
         }
+    }
+
+    async disconnect() {
+        try {
+            if (this.client && this.client.isOpen) {
+                await this.client.quit();
+            }
+        } catch (error) {
+            console.error('[Redis] Erro ao desconectar do Redis:', error);
+            throw error;
+        }
+    }
+
+    async ping() {
+        try {
+            await this.client.ping();
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao fazer ping no Redis:', error);
+            return false;
+        }
+    }
+
+    isConnected() {
+        return this.client && this.client.isOpen;
     }
 
     async get(key) {
@@ -378,19 +402,6 @@ class RedisStore {
                 error: error.message
             });
             return false;
-        }
-    }
-
-    async ping() {
-        try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            const result = await this.client.ping();
-            return result === 'PONG';
-        } catch (error) {
-            console.error('[Redis] Erro ao fazer ping:', error);
-            throw error;
         }
     }
 

@@ -1042,12 +1042,17 @@ class WhatsAppService {
             }
 
             // Tenta fazer uma requisição simples para verificar conexão
-            const response = await this.client.get('/status');
-            return response.status === 200;
+            const response = await this._retryWithExponentialBackoff(async () => {
+                const result = await this.client.get(`/instance/info?connectionKey=${this.connectionKey}`);
+                return result;
+            });
+
+            return response?.data?.status === 'connected';
         } catch (error) {
             console.error('[WhatsApp] Erro ao verificar conexão:', {
                 erro: error.message,
-                stack: error.stack
+                stack: error.stack,
+                timestamp: new Date().toISOString()
             });
             return false;
         }

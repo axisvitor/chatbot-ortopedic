@@ -229,18 +229,37 @@ app.get('/health', async (req, res) => {
     }
 
     try {
+        // Timeout de 5 segundos para healthcheck
+        const timeout = setTimeout(() => {
+            throw new Error('Timeout ao verificar serviços');
+        }, 5000);
+
         // Verifica Redis
-        const redisConnected = redisStore?.isConnected?.() || false;
-        if (redisConnected) {
-            await redisStore.client.ping();
+        let redisConnected = false;
+        try {
+            redisConnected = redisStore?.isConnected?.() || false;
+            if (redisConnected) {
+                redisConnected = await redisStore.ping();
+            }
+        } catch (error) {
+            console.error('[Health] Erro ao verificar Redis:', error);
+            redisConnected = false;
         }
 
         // Verifica WhatsApp
-        const whatsappConnected = await whatsappService?.isConnected?.() || false;
+        let whatsappConnected = false;
+        try {
+            whatsappConnected = await whatsappService?.isConnected?.() || false;
+        } catch (error) {
+            console.error('[Health] Erro ao verificar WhatsApp:', error);
+            whatsappConnected = false;
+        }
 
         // Atualiza status geral
         const allServicesConnected = redisConnected && whatsappConnected;
         servicesReady = allServicesConnected;
+
+        clearTimeout(timeout);
 
         res.status(allServicesConnected ? 200 : 503).json({
             status: allServicesConnected ? 'ok' : 'error',
@@ -267,7 +286,6 @@ app.get('/health', async (req, res) => {
     }
 });
 
-// Rota de healthcheck
 app.get('/healthcheck', (req, res) => {
     const status = servicesReady ? 'ok' : 'initializing';
     const error = lastError?.message;
