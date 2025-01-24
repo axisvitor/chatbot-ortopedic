@@ -1054,7 +1054,7 @@ class WhatsAppService {
             }
 
             // Verifica se as credenciais estão configuradas
-       if (!WHATSAPP_CONFIG.token || !WHATSAPP_CONFIG.connectionKey || !WHATSAPP_CONFIG.apiUrl) {
+            if (!WHATSAPP_CONFIG.token || !WHATSAPP_CONFIG.connectionKey || !WHATSAPP_CONFIG.apiUrl) {
                 console.error('[WhatsApp] Credenciais não configuradas');
                 return false;
             }
@@ -1085,7 +1085,7 @@ class WhatsAppService {
     async initialize() {
         try {
             // Verifica se as configurações necessárias estão presentes
-            if (!WHATSAPP_CONFIG.apiUrl || !WHATSAPP_CONFIG.apiToken) {
+            if (!WHATSAPP_CONFIG.apiUrl || !WHATSAPP_CONFIG.token) {
                 throw new Error('Configurações do WhatsApp não definidas');
             }
 
