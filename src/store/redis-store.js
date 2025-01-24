@@ -5,10 +5,10 @@ class RedisStore {
     constructor() {
         this.client = createClient({
             socket: {
-                host: process.env.REDIS_HOST,
-                port: process.env.REDIS_PORT
+                host: REDIS_CONFIG.host,
+                port: REDIS_CONFIG.port
             },
-            password: process.env.REDIS_PASSWORD,
+            password: REDIS_CONFIG.password,
             retry_strategy: function(options) {
                 if (options.error && options.error.code === 'ECONNREFUSED') {
                     console.error('[Redis] Servidor recusou conexão');

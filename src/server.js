@@ -49,6 +49,7 @@ let orderValidationService;
 let nuvemshopService;
 let openAIService;
 let financialService;
+let cacheService;
 
 // Configuração do rate limiter
 const limiter = rateLimit({
@@ -125,6 +126,10 @@ async function initializeServices() {
             redisStore = new RedisStore();
             await redisStore.connect();
             console.log('✅ RedisStore conectado');
+
+            // Inicializa Cache Service que depende do Redis
+            cacheService = new CacheService();
+            console.log('✅ CacheService inicializado');
 
             // Serviços independentes
             businessHoursService = new BusinessHoursService();
@@ -213,8 +218,7 @@ app.get('/', (req, res) => {
     });
 });
 
-app.get('/health', (req, res) => {
-    // Durante inicialização, retorna 200 para dar tempo aos serviços
+app.get('/health', async (req, res) => {
     if (isInitializing) {
         res.status(200).json({
             status: 'initializing',
@@ -224,23 +228,43 @@ app.get('/health', (req, res) => {
         return;
     }
 
-    // Verifica estado dos serviços
-    const redisConnected = redisStore?.isConnected?.() || false;
-    const whatsappConnected = whatsappService?.isConnected?.() || false;
+    try {
+        // Verifica Redis
+        const redisConnected = redisStore?.isConnected?.() || false;
+        if (redisConnected) {
+            await redisStore.client.ping();
+        }
 
-    const allServicesConnected = redisConnected && whatsappConnected;
-    servicesReady = allServicesConnected;
+        // Verifica WhatsApp
+        const whatsappConnected = await whatsappService?.isConnected?.() || false;
 
-    res.status(allServicesConnected ? 200 : 503).json({
-        status: allServicesConnected ? 'ok' : 'error',
-        services: {
-            redis: redisConnected,
-            whatsapp: whatsappConnected
-        },
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        error: lastError?.message
-    });
+        // Atualiza status geral
+        const allServicesConnected = redisConnected && whatsappConnected;
+        servicesReady = allServicesConnected;
+
+        res.status(allServicesConnected ? 200 : 503).json({
+            status: allServicesConnected ? 'ok' : 'error',
+            services: {
+                redis: redisConnected,
+                whatsapp: whatsappConnected
+            },
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            error: lastError?.message
+        });
+    } catch (error) {
+        console.error('[Health] Erro ao verificar serviços:', error);
+        res.status(503).json({
+            status: 'error',
+            services: {
+                redis: false,
+                whatsapp: false
+            },
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            error: error.message
+        });
+    }
 });
 
 // Rota de healthcheck

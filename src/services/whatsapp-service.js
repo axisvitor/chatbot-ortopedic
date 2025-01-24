@@ -759,81 +759,6 @@ class WhatsAppService {
         }
     }
 
-    async handleMessage(message) {
-        try {
-            console.log('📩 [WhatsApp] Mensagem recebida:', {
-                messageId: message.key?.id,
-                from: message.key?.remoteJid,
-                type: message.type,
-                timestamp: message.messageTimestamp
-            });
-
-            // Extrai e valida o remetente
-            let from = message.key?.remoteJid || '';
-            const isGroup = from.endsWith('@g.us');
-            
-            // Remove sufixos conforme especificação da API
-            from = from.replace(/@s\.whatsapp\.net$/, '').replace(/@g\.us$/, '');
-            
-            if (!from) {
-                console.error('❌ [WhatsApp] Remetente inválido:', message.key);
-                return;
-            }
-
-            // Extrai a mensagem real
-            const realMessage = this._extractRealMessage(message);
-
-            // Verifica se é uma mensagem de texto e se é o comando #resetid
-            if ((message.type === 'text' || message.tipo === 'text') && 
-                (message.data?.toLowerCase() === '#resetid' || 
-                 message.texto?.toLowerCase() === '#resetid' ||
-                 message.message?.extendedTextMessage?.text?.toLowerCase() === '#resetid')) {
-                console.log('🔄 [WhatsApp] Executando comando #resetid');
-                await this.redisStore.deleteUserContext(from);
-                await this.openAIService.deleteThread(from);
-                return {
-                    type: 'text',
-                    message: '🔄 Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.'
-                };
-            }
-
-            // Processa a mensagem de acordo com o tipo
-            if (realMessage.imageMessage) {
-                await this.handleImageMessage({ ...message, message: realMessage });
-            } else if (realMessage.audioMessage) {
-                await this.handleAudioMessage({ ...message, message: realMessage });
-            } else if (realMessage.conversation || realMessage.extendedTextMessage) {
-                await this.handleTextMessage({ ...message, message: realMessage });
-            } else {
-                console.warn('⚠️ [WhatsApp] Tipo de mensagem não suportado:', {
-                    messageId: message.key?.id,
-                    tipos: Object.keys(realMessage).filter(key => key.endsWith('Message'))
-                });
-                
-                await this.sendText(
-                    from,
-                    'Por favor, envie apenas mensagens de texto, áudio ou imagens.'
-                );
-            }
-
-        } catch (error) {
-            console.error('❌ [WhatsApp] Erro ao processar mensagem:', {
-                erro: error.message,
-                stack: error.stack,
-                messageId: message.key?.id
-            });
-            
-            try {
-                await this.sendText(
-                    message.key.remoteJid,
-                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
-                );
-            } catch (sendError) {
-                console.error('❌ [WhatsApp] Erro ao enviar mensagem de erro:', sendError);
-            }
-        }
-    }
-
     /**
      * Executa uma função com retry e backoff exponencial
      * @private
@@ -1108,10 +1033,24 @@ class WhatsAppService {
 
     /**
      * Verifica se o serviço está conectado
-     * @returns {boolean}
+     * @returns {Promise<boolean>}
      */
-    isConnected() {
-        return this.client !== null && this.connectionKey !== null;
+    async isConnected() {
+        try {
+            if (!this.client || !this.connectionKey) {
+                return false;
+            }
+
+            // Tenta fazer uma requisição simples para verificar conexão
+            const response = await this.client.get('/status');
+            return response.status === 200;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao verificar conexão:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            return false;
+        }
     }
 }
 
