@@ -142,13 +142,15 @@ async function initializeServices() {
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
-            audioService = new AudioService();
+            // Serviços de mídia na ordem correta
+            audioService = new AudioService(groqServices);
             console.log('✅ AudioService inicializado');
 
             imageService = new ImageService();
             console.log('✅ ImageService inicializado');
 
-            mediaManagerService = new MediaManagerService();
+            // MediaManager precisa de Audio e Image
+            mediaManagerService = new MediaManagerService(audioService, imageService);
             console.log('✅ MediaManagerService inicializado');
 
             // Inicializa serviços com dependências
@@ -160,7 +162,7 @@ async function initializeServices() {
                 trackingService,
                 businessHoursService,
                 orderValidationService,
-                null,
+                financialService,
                 whatsappService // Injeta WhatsAppService
             );
             console.log('✅ OpenAIService inicializado');
@@ -170,7 +172,7 @@ async function initializeServices() {
             console.log('✅ Dependências circulares resolvidas');
 
             // Inicializa serviços que dependem de outros
-            aiServices = new AIServices(openAIService);
+            aiServices = new AIServices(openAIService, mediaManagerService);
             console.log('✅ AIServices inicializado');
 
             webhookService = new WebhookService(whatsappService, aiServices);
