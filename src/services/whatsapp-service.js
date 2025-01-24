@@ -1084,6 +1084,13 @@ class WhatsAppService {
      */
     async initialize() {
         try {
+            // Debug das configurações
+            console.log('[WhatsAppService] Configurações:', {
+                apiUrl: WHATSAPP_CONFIG.apiUrl,
+                hasToken: !!WHATSAPP_CONFIG.token,
+                hasConnectionKey: !!WHATSAPP_CONFIG.connectionKey
+            });
+
             // Verifica se as configurações necessárias estão presentes
             if (!WHATSAPP_CONFIG.apiUrl || !WHATSAPP_CONFIG.token) {
                 throw new Error('Configurações do WhatsApp não definidas');
