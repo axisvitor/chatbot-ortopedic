@@ -1072,7 +1072,10 @@ class WhatsAppService {
             // Tenta fazer uma requisição simples para verificar conexão
             const response = await this._retryWithExponentialBackoff(async () => {
                 console.log('[WhatsApp] Verificando conexão...');
-                const result = await this.client.post('/instance/connect', {
+                const result = await this.client.post('message/send-text', {
+                    to: WHATSAPP_CONFIG.whatsappNumber,
+                    content: 'Teste de conexão',
+                    delay: WHATSAPP_CONFIG.messageDelay,
                     key: this.connectionKey
                 });
                 console.log('[WhatsApp] Status da conexão:', result?.data);
@@ -1081,7 +1084,7 @@ class WhatsAppService {
 
             // Verifica se a conexão foi bem sucedida
             const status = response?.data?.status?.toLowerCase();
-            const connected = status === 'connected' || status === 'authenticated';
+            const connected = status === 'success' || status === 'ok';
             
             if (!connected) {
                 console.error('[WhatsApp] Falha ao conectar:', response?.data);
