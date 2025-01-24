@@ -6,8 +6,8 @@ const { OpenAIService } = require('./openai-service');
 
 class WhatsAppService {
     constructor(orderValidationService = null) {
-        this.client = null;
-        this.connectionKey = null;
+        this.isTest = process.env.NODE_ENV === 'test';
+        this.initialized = false;
         this.retryCount = 0;
         this.maxRetries = WHATSAPP_CONFIG.retryAttempts || 3;
         this.paymentProofMessages = {};
@@ -1084,15 +1084,14 @@ class WhatsAppService {
      */
     async initialize() {
         try {
-            if (this.isTest) {
-                console.log('[WhatsAppService] Executando em modo de teste');
-                return;
+            // Verifica se as configurações necessárias estão presentes
+            if (!WHATSAPP_CONFIG.apiUrl || !WHATSAPP_CONFIG.apiToken) {
+                throw new Error('Configurações do WhatsApp não definidas');
             }
 
-            // Inicializa o cliente
-            this.client = await this._createClient();
             this.initialized = true;
-            console.log('[WhatsAppService] Cliente inicializado com sucesso');
+            console.log('[WhatsAppService] Serviço inicializado com sucesso');
+            return true;
         } catch (error) {
             console.error('[WhatsAppService] Erro ao inicializar:', error);
             throw error;
