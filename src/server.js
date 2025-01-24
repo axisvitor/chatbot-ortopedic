@@ -30,17 +30,30 @@ const {
 } = require('./config/settings');
 
 // Lista de variáveis de ambiente requeridas
-const requiredEnvVars = [
+let requiredEnvVars = [
     'PORT'
 ];
 
-// Inicializa o Redis Store
-const redisStore = new RedisStore();
+// Declaração dos serviços
+let redisStore;
+let groqServices;
+let webhookService;
+let whatsappService;
+let aiServices;
+let audioService;
+let imageService;
+let mediaManagerService;
+let businessHoursService;
+let trackingService;
+let orderValidationService;
+let nuvemshopService;
+let openAIService;
+let financialService;
 
 // Configuração do rate limiter
 const limiter = rateLimit({
-    windowMs: RATE_LIMIT_CONFIG.windowMs || 15 * 60 * 1000, // 15 minutos por padrão
-    max: RATE_LIMIT_CONFIG.max || 100, // limite de 100 requisições por windowMs
+    windowMs: RATE_LIMIT_CONFIG.windowMs || 15 * 60 * 1000,
+    max: RATE_LIMIT_CONFIG.max || 100,
     message: 'Muitas requisições deste IP, por favor tente novamente mais tarde.',
     standardHeaders: true,
     legacyHeaders: false,
@@ -66,7 +79,7 @@ process.on('SIGTERM', async () => {
     console.log('🛑 Recebido sinal SIGTERM, encerrando graciosamente...');
     try {
         if (whatsappService) await whatsappService.close();
-        await redisStore.disconnect();
+        if (redisStore) await redisStore.disconnect();
         process.exit(0);
     } catch (error) {
         console.error('❌ Erro ao encerrar servidor:', error);
@@ -79,7 +92,6 @@ console.log('🚀 Iniciando servidor...');
 // Inicializa o app
 const app = express();
 app.set('trust proxy', req => {
-    // Confia apenas em requisições para a rota de health check
     return req.path === '/health';
 });
 const port = process.env.PORT || 8080;
@@ -90,21 +102,6 @@ console.log(`📝 Porta configurada: ${port}`);
 let isInitializing = true;
 let servicesReady = false;
 let lastError = null;
-
-// Declaração dos serviços
-let groqServices;
-let webhookService;
-let whatsappService;
-let aiServices;
-let audioService;
-let imageService;
-let whatsappImageService;
-let orderValidationService;
-let nuvemshopService;
-let trackingService;
-let cacheService;
-let mediaManagerService;
-let businessHoursService;
 
 // Função de inicialização
 async function initializeServices() {
