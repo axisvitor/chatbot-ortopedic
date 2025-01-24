@@ -101,15 +101,33 @@ class WhatsAppService {
             // Adiciona interceptors
             this.addInterceptor();
 
-            // Verifica se está realmente conectado
+            // Verifica se está realmente conectado fazendo uma requisição direta
             console.log('[WhatsApp] Verificando conexão inicial...');
-            const isConnected = await this.isConnected();
-            if (!isConnected) {
-                throw new Error('Não foi possível conectar ao WhatsApp');
+            try {
+                const endpoint = `${WHATSAPP_CONFIG.endpoints.connection.path}?connectionKey=${this.connectionKey}`;
+                console.log('[WhatsApp] Endpoint de conexão:', endpoint);
+                
+                const result = await this.client.get(endpoint);
+                console.log('[WhatsApp] Resposta da API:', {
+                    status: result.status,
+                    data: result.data,
+                    headers: result.headers
+                });
+                
+                if (!result.data || result.data.error) {
+                    throw new Error('API retornou erro: ' + JSON.stringify(result.data));
+                }
+                
+                console.log('[WhatsApp] Serviço inicializado com sucesso');
+                return this.client;
+            } catch (error) {
+                console.error('[WhatsApp] Erro ao verificar conexão:', {
+                    status: error.response?.status,
+                    data: error.response?.data,
+                    message: error.message
+                });
+                throw new Error('Não foi possível conectar ao WhatsApp: ' + error.message);
             }
-
-            console.log('[WhatsApp] Serviço inicializado com sucesso');
-            return this.client;
         } catch (error) {
             console.error('[WhatsApp] Erro ao inicializar serviço:', {
                 erro: error.message,
@@ -117,57 +135,42 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
             this.client = null;
+            this.connectionKey = null;
             throw error;
         }
     }
 
     /**
-     * Adiciona interceptors ao cliente HTTP
-     * @private
+     * Verifica se o serviço está conectado
+     * @returns {Promise<boolean>}
      */
-    addInterceptor() {
-        if (!this.client) {
-            console.error('[WhatsApp] Cliente não inicializado ao adicionar interceptor');
-            return;
-        }
-
-        this.client.interceptors.response.use(
-            response => response,
-            async error => {
-                console.error('[WhatsApp] Erro na requisição:', {
-                    status: error.response?.status,
-                    data: error.response?.data,
-                    message: error.message
-                });
-
-                // Se for erro 403 (Forbidden), tenta reconectar
-                if (error.response?.status === 403 && this.retryCount < this.maxRetries) {
-                    this.retryCount++;
-                    console.log(`[WhatsApp] Tentativa ${this.retryCount} de reconexão...`);
-                    
-                    try {
-                        // Aguarda 1 segundo antes de tentar novamente
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                        
-                        // Reinicializa o cliente
-                        await this.init();
-                        
-                        // Tenta a requisição novamente
-                        const config = error.config;
-                        config.headers['Authorization'] = `Bearer ${WHATSAPP_CONFIG.token}`;
-                        config.headers['Connection-Key'] = WHATSAPP_CONFIG.connectionKey;
-                        return this.client(config);
-                    } catch (retryError) {
-                        console.error('[WhatsApp] Erro na tentativa de reconexão:', retryError);
-                        return Promise.reject(retryError);
-                    }
-                }
-
-                // Se excedeu o número de tentativas ou não é erro 403
-                this.retryCount = 0;
-                return Promise.reject(error);
+    async isConnected() {
+        try {
+            // Verifica se as credenciais estão configuradas
+            if (!WHATSAPP_CONFIG.token || !WHATSAPP_CONFIG.connectionKey || !WHATSAPP_CONFIG.apiUrl) {
+                console.error('[WhatsApp] Credenciais não configuradas');
+                return false;
             }
-        );
+
+            // Verifica se o cliente está inicializado
+            if (!this.client) {
+                console.error('[WhatsApp] Cliente não inicializado');
+                return false;
+            }
+
+            // Tenta fazer uma requisição simples para verificar conexão
+            const endpoint = `${WHATSAPP_CONFIG.endpoints.connection.path}?connectionKey=${this.connectionKey}`;
+            const result = await this.client.get(endpoint);
+            
+            return !result.data?.error;
+        } catch (error) {
+            console.error('[WhatsApp] Erro ao verificar conexão:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            return false;
+        }
     }
 
     async getClient() {
@@ -1045,75 +1048,52 @@ class WhatsAppService {
     }
 
     /**
-     * Verifica se o serviço está conectado
-     * @returns {Promise<boolean>}
+     * Adiciona interceptors ao cliente HTTP
+     * @private
      */
-    async isConnected() {
-        try {
-            // Verifica se as credenciais estão configuradas
-            if (!WHATSAPP_CONFIG.token || !WHATSAPP_CONFIG.connectionKey || !WHATSAPP_CONFIG.apiUrl) {
-                console.error('[WhatsApp] Credenciais não configuradas');
-                return false;
-            }
+    addInterceptor() {
+        if (!this.client) {
+            console.error('[WhatsApp] Cliente não inicializado ao adicionar interceptor');
+            return;
+        }
 
-            // Tenta fazer uma requisição simples para verificar conexão
-            const response = await this._retryWithExponentialBackoff(async () => {
-                console.log('[WhatsApp] Verificando conexão...');
-                
-                // Monta a URL completa
-                const endpoint = `${WHATSAPP_CONFIG.endpoints.connection.path}?connectionKey=${this.connectionKey}`;
-                console.log('[WhatsApp] Endpoint de conexão:', endpoint);
-                
-                try {
-                    const result = await this.client.get(endpoint);
-                    console.log('[WhatsApp] Resposta da API:', {
-                        status: result.status,
-                        data: result.data,
-                        headers: result.headers
-                    });
-                    return result;
-                } catch (error) {
-                    console.error('[WhatsApp] Erro na requisição:', {
-                        status: error.response?.status,
-                        data: error.response?.data,
-                        message: error.message
-                    });
-                    throw error;
+        this.client.interceptors.response.use(
+            response => response,
+            async error => {
+                console.error('[WhatsApp] Erro na requisição:', {
+                    status: error.response?.status,
+                    data: error.response?.data,
+                    message: error.message
+                });
+
+                // Se for erro 403 (Forbidden), tenta reconectar
+                if (error.response?.status === 403 && this.retryCount < this.maxRetries) {
+                    this.retryCount++;
+                    console.log(`[WhatsApp] Tentativa ${this.retryCount} de reconexão...`);
+                    
+                    try {
+                        // Aguarda 1 segundo antes de tentar novamente
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        
+                        // Reinicializa o cliente
+                        await this.init();
+                        
+                        // Tenta a requisição novamente
+                        const config = error.config;
+                        config.headers['Authorization'] = `Bearer ${WHATSAPP_CONFIG.token}`;
+                        config.headers['Connection-Key'] = WHATSAPP_CONFIG.connectionKey;
+                        return this.client(config);
+                    } catch (retryError) {
+                        console.error('[WhatsApp] Erro na tentativa de reconexão:', retryError);
+                        return Promise.reject(retryError);
+                    }
                 }
-            });
 
-            // Se chegou até aqui sem erros, está conectado
-            return true;
-        } catch (error) {
-            console.error('[WhatsApp] Erro ao verificar conexão:', {
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
-            return false;
-        }
-    }
-
-    /**
-     * Inicializa o serviço do WhatsApp
-     */
-    async initialize() {
-        try {
-            // Debug das configurações
-            console.log('[WhatsAppService] WHATSAPP_CONFIG importado:', WHATSAPP_CONFIG);
-
-            // Verifica se as configurações necessárias estão presentes
-            if (!WHATSAPP_CONFIG.apiUrl || !WHATSAPP_CONFIG.token) {
-                throw new Error('Configurações do WhatsApp não definidas');
+                // Se excedeu o número de tentativas ou não é erro 403
+                this.retryCount = 0;
+                return Promise.reject(error);
             }
-
-            this.initialized = true;
-            console.log('[WhatsAppService] Serviço inicializado com sucesso');
-            return true;
-        } catch (error) {
-            console.error('[WhatsAppService] Erro ao inicializar:', error);
-            throw error;
-        }
+        );
     }
 }
 
