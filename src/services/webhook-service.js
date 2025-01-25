@@ -106,12 +106,6 @@ class WebhookService {
                 }
             }
 
-            // Se for áudio, processa primeiro
-            if (messageData.type === 'audio' && this.audioService) {
-                console.log('🎤 Processando áudio...');
-                messageData.text = await this.audioService.processWhatsAppAudio(messageData);
-            }
-
             // Processa a mensagem usando o AIServices (que já envia a resposta)
             await this.aiServices.handleMessage({
                 type: messageData.type,
