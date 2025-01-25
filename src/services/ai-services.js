@@ -106,7 +106,7 @@ class AIServices {
                     // Processa com o OpenAI Assistant
                     const response = await this.openAIService.processCustomerMessage(message.from, {
                         role: 'user',
-                        content: transcription
+                        transcription: transcription
                     });
 
                     if (response) {
