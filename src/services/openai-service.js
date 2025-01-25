@@ -8,6 +8,7 @@ const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { FinancialService } = require('./financial-service');
+const { DepartmentService } = require('./department-service'); // Adicionado DepartmentService
 
 class OpenAIService {
     /**
@@ -16,9 +17,10 @@ class OpenAIService {
      * @param {BusinessHoursService} businessHoursService - Serviço de horário de atendimento
      * @param {OrderValidationService} orderValidationService - Serviço de validação de pedidos
      * @param {FinancialService} financialService - Serviço financeiro
+     * @param {DepartmentService} departmentService - Serviço de departamentos // Adicionado DepartmentService
      * @param {Object} whatsappService - Serviço de WhatsApp (injetado para evitar dependência circular)
      */
-    constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService, financialService, whatsappService) {
+    constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService, financialService, departmentService, whatsappService) {
         this.client = new OpenAI({
             apiKey: OPENAI_CONFIG.apiKey,
             baseURL: OPENAI_CONFIG.baseUrl
@@ -49,6 +51,7 @@ class OpenAIService {
         this.businessHoursService = businessHoursService;
         this.orderValidationService = orderValidationService;
         this.financialService = financialService;
+        this.departmentService = departmentService; // Adicionado DepartmentService
         this.whatsappService = whatsappService;
 
         // Inicializa limpeza periódica
@@ -916,16 +919,18 @@ class OpenAIService {
 
                     case 'forward_to_financial':
                         const caseData = {
-                            type: parsedArgs.case_type,
-                            orderNumber: parsedArgs.order_number,
+                            reason: parsedArgs.reason,
+                            order_number: parsedArgs.order_number,
+                            tracking_code: parsedArgs.tracking_code,
+                            customer_message: parsedArgs.customer_message,
                             priority: parsedArgs.priority || 'medium',
-                            details: parsedArgs.details
+                            additional_info: parsedArgs.additional_info
                         };
                         
-                        await this.financialService.createCase(caseData);
+                        const success = await this.financialService.forwardCase(caseData);
                         output = { 
-                            status: 'forwarded',
-                            message: 'Caso encaminhado para análise',
+                            status: success ? 'forwarded' : 'error',
+                            message: success ? 'Caso encaminhado para análise' : 'Erro ao encaminhar caso',
                             priority: caseData.priority
                         };
                         break;
@@ -933,17 +938,20 @@ class OpenAIService {
                     case 'forward_to_department':
                         const departmentData = {
                             department: parsedArgs.department,
-                            orderNumber: parsedArgs.order_number,
                             reason: parsedArgs.reason,
+                            order_number: parsedArgs.order_number,
+                            tracking_code: parsedArgs.tracking_code,
+                            customer_message: parsedArgs.customer_message,
                             priority: parsedArgs.priority || 'medium',
-                            details: parsedArgs.details
+                            additional_info: parsedArgs.additional_info
                         };
                         
-                        await this.financialService.createCase(departmentData);
+                        const deptSuccess = await this.departmentService.forwardCase(departmentData);
                         output = { 
-                            status: 'forwarded',
-                            message: 'Caso encaminhado para análise',
-                            priority: departmentData.priority
+                            status: deptSuccess ? 'forwarded' : 'error',
+                            message: deptSuccess ? 'Caso encaminhado para análise' : 'Erro ao encaminhar caso',
+                            priority: departmentData.priority,
+                            department: parsedArgs.department
                         };
                         break;
 
@@ -1700,6 +1708,14 @@ class OpenAIService {
      */
     setFinancialService(financialService) {
         this.financialService = financialService;
+    }
+
+    /**
+     * Define o serviço de Departamentos após inicialização
+     * @param {Object} departmentService - Serviço de Departamentos
+     */
+    setDepartmentService(departmentService) {
+        this.departmentService = departmentService;
     }
 }
 

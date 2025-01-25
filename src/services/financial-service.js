@@ -40,8 +40,8 @@ class FinancialService {
 
             // Traduz o motivo para português
             const reasonMap = {
-                payment_issue: 'Problema de Pagamento',
-                refund_request: 'Solicitação de Reembolso',
+                payment: 'Problema de Pagamento',
+                refund: 'Solicitação de Reembolso',
                 taxation: 'Taxação/Tributos',
                 customs: 'Retenção na Alfândega',
                 payment_proof: 'Comprovante de Pagamento',
@@ -52,8 +52,7 @@ class FinancialService {
             const priorityMap = {
                 low: '🟢 Baixa',
                 medium: '🟡 Média',
-                high: '🟠 Alta',
-                urgent: '🔴 Urgente'
+                high: '🟠 Alta'
             };
 
             // Monta mensagem para o financeiro
