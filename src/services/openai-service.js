@@ -485,6 +485,8 @@ class OpenAIService {
                 messageText = message.message.extendedTextMessage.text;
             } else if (message?.message?.conversation) {
                 messageText = message.message.conversation;
+            } else if (message?.transcription) {
+                messageText = message.transcription;
             } else if (message?.text) {
                 messageText = message.text;
             }
