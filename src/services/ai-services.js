@@ -168,7 +168,10 @@ class AIServices {
                         new Date().toISOString()
                     );
 
-                    console.log('[AIServices] Resposta do OpenAI:', { response });
+                    console.log('[AIServices] Resposta do OpenAI:', { 
+                        responseType: typeof response,
+                        responseContent: response 
+                    });
 
                     // Se a resposta for null, significa que a mensagem foi enfileirada
                     if (response === null) {
@@ -176,8 +179,18 @@ class AIServices {
                         return { type: 'text', response: null, from: message.from };
                     }
 
-                    // Garante que a resposta seja uma string
-                    const textResponse = String(response || '').trim();
+                    // Garante que a resposta seja uma string válida
+                    let textResponse = '';
+                    if (typeof response === 'object' && response.content) {
+                        textResponse = response.content;
+                    } else if (typeof response === 'string') {
+                        textResponse = response;
+                    } else {
+                        console.error('[AIServices] Resposta em formato inválido:', response);
+                        textResponse = 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
+                    }
+                    
+                    textResponse = textResponse.trim();
                     
                     if (textResponse) {
                         await this.whatsAppService.sendText(message.from, textResponse);

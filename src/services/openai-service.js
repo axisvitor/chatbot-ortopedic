@@ -772,12 +772,22 @@ class OpenAIService {
             if (run.status === 'completed') {
                 const messages = await this.client.beta.threads.messages.list(threadId);
                 if (messages.data && messages.data.length > 0) {
-                    const content = messages.data[0].content[0];
-                    if (content?.text?.value) {
-                        const response = String(content.text.value).trim();
-                        logger.info('AssistantResponse', { threadId, response });
-                        console.log('[OpenAI] Resposta extraída:', response);
-                        return response;
+                    const lastMessage = messages.data[0];
+                    if (lastMessage.role === 'assistant') {
+                        let content = '';
+                        
+                        // Processa cada parte do conteúdo da mensagem
+                        for (const contentPart of lastMessage.content) {
+                            if (contentPart.type === 'text') {
+                                content += contentPart.text.value;
+                            }
+                        }
+                        
+                        if (content) {
+                            logger.info('AssistantResponse', { threadId, response: content });
+                            console.log('[OpenAI] Resposta extraída:', content);
+                            return { content: content.trim() };
+                        }
                     }
                     logger.error('ErrorExtractingAssistantResponse', { threadId, error: 'Unexpected message structure' });
                     console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
@@ -808,130 +818,6 @@ class OpenAIService {
         }
     }
 
-    async addMessageAndRun(threadId, message) {
-        try {
-            // Não processa mensagens vazias
-            if (!message.content) {
-                logger.warn('EmptyMessage', { threadId });
-                return null;
-            }
-
-            // Evita processar a mesma mensagem múltiplas vezes
-            const lastMessage = await this.getLastMessage(threadId);
-            if (lastMessage?.content === message.content) {
-                logger.warn('DuplicateMessage', { 
-                    threadId,
-                    content: message.content 
-                });
-                return null;
-            }
-
-            // Adiciona a mensagem
-            const createdMessage = await this.client.beta.threads.messages.create(
-                threadId,
-                message
-            );
-
-            logger.info('MessageCreated', { 
-                metadata: {
-                    messageId: createdMessage.id,
-                    threadId,
-                    service: 'ortopedic-bot'
-                }
-            });
-
-            // Executa o assistant e aguarda resposta
-            const response = await this.runAssistant(threadId);
-            
-            // Registra a resposta para evitar loops
-            this.lastAssistantResponse = response;
-            
-            return String(response || '').trim();
-
-        } catch (error) {
-            logger.error('ErrorAddingMessage', { threadId, error });
-            throw error;
-        }
-    }
-
-    async getLastMessage(threadId) {
-        try {
-            const messages = await this.client.beta.threads.messages.list(threadId, {
-                limit: 1,
-                order: 'desc'
-            });
-            return messages.data[0];
-        } catch (error) {
-            logger.error('ErrorGettingLastMessage', { threadId, error });
-            return null;
-        }
-    }
-
-    async runAssistant(threadId) {
-        try {
-            // Cria um novo run
-            const run = await this.client.beta.threads.runs.create(
-                threadId,
-                { assistant_id: this.assistantId }
-            );
-
-            // Aguarda e retorna a resposta processada
-            const response = await this.waitForResponse(threadId, run.id);
-            return response;
-
-        } catch (error) {
-            logger.error('ErrorRunningAssistant', { threadId, error });
-            throw error;
-        }
-    }
-
-    /**
-     * Envia resposta ao cliente
-     * @param {string} customerId ID do cliente
-     * @param {string} response Resposta a ser enviada
-     */
-    async sendResponse(customerId, response) {
-        try {
-            if (!response) return;
-
-            if (!this.whatsappService) {
-                throw new Error('WhatsAppService não inicializado');
-            }
-
-            await this.whatsappService.sendText(customerId, response);
-        } catch (error) {
-            logger.error('ErrorSendingResponse', {
-                error: { customerId, error: error.message }
-            });
-        }
-    }
-
-    /**
-     * Cria um novo thread
-     * @returns {Promise<Object>} Thread criado
-     */
-    async createThread() {
-        try {
-            const thread = await this.client.beta.threads.create();
-            logger.info('NewThreadCreated', { threadId: thread.id });
-            console.log(' Novo thread criado:', {
-                threadId: thread.id,
-                timestamp: new Date().toISOString()
-            });
-            return thread;
-        } catch (error) {
-            logger.error('ErrorCreatingThread', { error });
-            console.error('[OpenAI] Erro ao criar thread:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Adiciona uma mensagem ao thread e executa o assistant
-     * @param {string} threadId - ID do thread
-     * @param {Object} message - Mensagem a ser adicionada
-     * @returns {Promise<Object>} Resultado da execução
-     */
     async addMessageAndRun(threadId, message) {
         try {
             logger.info('AddingMessage', { 
@@ -1056,11 +942,22 @@ class OpenAIService {
             if (run.status === 'completed') {
                 const messages = await this.client.beta.threads.messages.list(threadId);
                 if (messages.data && messages.data.length > 0) {
-                    const content = messages.data[0].content[0];
-                    if (content && content.text && typeof content.text.value === 'string') {
-                        logger.info('AssistantResponse', { threadId, response: content.text.value });
-                        console.log('[OpenAI] Resposta extraída:', content.text.value);
-                        return content.text.value;
+                    const lastMessage = messages.data[0];
+                    if (lastMessage.role === 'assistant') {
+                        let content = '';
+                        
+                        // Processa cada parte do conteúdo da mensagem
+                        for (const contentPart of lastMessage.content) {
+                            if (contentPart.type === 'text') {
+                                content += contentPart.text.value;
+                            }
+                        }
+                        
+                        if (content) {
+                            logger.info('AssistantResponse', { threadId, response: content });
+                            console.log('[OpenAI] Resposta extraída:', content);
+                            return content;
+                        }
                     }
                     logger.error('ErrorExtractingAssistantResponse', { threadId, error: 'Unexpected message structure' });
                     console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
