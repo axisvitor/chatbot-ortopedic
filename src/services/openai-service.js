@@ -625,8 +625,11 @@ class OpenAIService {
             // Evita processar a mesma mensagem múltiplas vezes
             const lastMessage = await this.getLastMessage(threadId);
             if (lastMessage?.content === message.content) {
-                logger.warn('DuplicateMessage', { threadId });
-                return null;
+                logger.warn('DuplicateMessage', { 
+                    threadId,
+                    content: message.content 
+                });
+                return;
             }
 
             // Adiciona a mensagem
@@ -1340,52 +1343,53 @@ class OpenAIService {
 
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             
-            // Verifica run ativo
-            const hasActiveRun = await this.hasActiveRun(threadId);
-            if (hasActiveRun) {
-                logger.info('ActiveRunDetected', { threadId });
-                this.queueMessage(threadId, { role: "user", content: message });
-                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
-            }
-
-            // Formata a mensagem com as imagens
-            const messageContent = [];
-            
-            if (message) {
-                messageContent.push({
-                    type: "text",
-                    text: message
-                });
-            }
-
-            for (const image of images) {
-                messageContent.push({
-                    type: "image_url",
-                    image_url: {
-                        url: image.base64 ? 
-                            `data:${image.mimetype};base64,${image.base64}` : 
-                            image.url
-                    }
-                });
-            }
-
             // Verifica se já tem um run ativo
             if (await this.hasActiveRun(threadId)) {
+                const messageContent = this._formatImageMessage(message, images);
                 this.queueMessage(threadId, { role: "user", content: messageContent });
                 return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
+            // Formata a mensagem com as imagens
+            const messageContent = this._formatImageMessage(message, images);
+
             // Adiciona a mensagem e executa o assistant
-            const response = await this.addMessageAndRun(threadId, {
+            return await this.addMessageAndRun(threadId, {
                 role: "user",
                 content: messageContent
             });
 
-            return response || "Desculpe, não consegui processar sua mensagem. Pode tentar novamente?";
         } catch (error) {
             logger.error('ErrorProcessingCustomerMessageWithImage', { customerId, error });
+            if (error.code === 'rate_limit_exceeded') {
+                return "⏳ Sistema está muito ocupado. Por favor, aguarde alguns segundos e tente novamente.";
+            }
             return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.";
         }
+    }
+
+    _formatImageMessage(message, images) {
+        const messageContent = [];
+        
+        if (message) {
+            messageContent.push({
+                type: "text",
+                text: message
+            });
+        }
+
+        for (const image of images || []) {
+            messageContent.push({
+                type: "image_url",
+                image_url: {
+                    url: image.base64 ? 
+                        `data:${image.mimetype};base64,${image.base64}` : 
+                        image.url
+                }
+            });
+        }
+
+        return messageContent;
     }
 
     /**
