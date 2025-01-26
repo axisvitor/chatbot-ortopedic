@@ -400,14 +400,14 @@ class RedisStore {
 
     async hset(key, field, value) {
         try {
-            await this.client.hSet(key, field, value);
-            return true;
+            if (typeof field === 'object') {
+                // Se field for um objeto, usa como hash
+                return await this.client.hSet(key, field);
+            }
+            // Caso contrário, usa field e value
+            return await this.client.hSet(key, field, value);
         } catch (error) {
-            console.error('[Redis] Erro ao salvar hash:', {
-                key,
-                field,
-                error: error.message
-            });
+            console.error('[Redis] Erro ao definir hash:', error);
             return false;
         }
     }
@@ -775,9 +775,18 @@ class RedisStore {
 
     async pipeline() {
         try {
-            return this.client.pipeline();
+            return this.client.multi();
         } catch (error) {
             console.error('[Redis] Erro ao criar pipeline:', error);
+            throw error;
+        }
+    }
+
+    async multi() {
+        try {
+            return this.client.multi();
+        } catch (error) {
+            console.error('[Redis] Erro ao criar transação:', error);
             throw error;
         }
     }
@@ -805,15 +814,6 @@ class RedisStore {
             return await this.client.lTrim(key, start, stop);
         } catch (error) {
             console.error('[Redis] Erro ao executar LTRIM:', { key, error });
-            throw error;
-        }
-    }
-
-    async multi() {
-        try {
-            return this.client.multi();
-        } catch (error) {
-            console.error('[Redis] Erro ao criar multi:', error);
             throw error;
         }
     }

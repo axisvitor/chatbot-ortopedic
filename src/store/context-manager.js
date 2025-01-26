@@ -13,32 +13,32 @@ class ContextManager {
 
     async saveContext(threadId, context) {
         try {
-            const pipeline = this.redisStore.pipeline();
+            const pipeline = await this.redisStore.multi();
             const baseKey = `context:${threadId}`;
 
             // Salva dados da conversa
             if (context.conversation) {
-                pipeline.hset(`${baseKey}:conversation`, context.conversation);
-                pipeline.expire(`${baseKey}:conversation`, this.TTL_CONFIG.conversation);
+                await pipeline.hSet(`${baseKey}:conversation`, context.conversation);
+                await pipeline.expire(`${baseKey}:conversation`, this.TTL_CONFIG.conversation);
             }
 
             // Salva dados do pedido
             if (context.order) {
-                pipeline.hset(`${baseKey}:order`, context.order);
-                pipeline.expire(`${baseKey}:order`, this.TTL_CONFIG.order);
+                await pipeline.hSet(`${baseKey}:order`, context.order);
+                await pipeline.expire(`${baseKey}:order`, this.TTL_CONFIG.order);
             }
 
             // Salva metadados
             if (context.metadata) {
-                pipeline.hset(`${baseKey}:metadata`, context.metadata);
-                pipeline.expire(`${baseKey}:metadata`, this.TTL_CONFIG.metadata);
+                await pipeline.hSet(`${baseKey}:metadata`, context.metadata);
+                await pipeline.expire(`${baseKey}:metadata`, this.TTL_CONFIG.metadata);
             }
 
             // Salva histórico (mantém apenas os últimos 5 itens)
             if (context.history) {
-                pipeline.lpush(`${baseKey}:history`, JSON.stringify(context.history));
-                pipeline.ltrim(`${baseKey}:history`, 0, 4);
-                pipeline.expire(`${baseKey}:history`, this.TTL_CONFIG.history);
+                await pipeline.lPush(`${baseKey}:history`, JSON.stringify(context.history));
+                await pipeline.lTrim(`${baseKey}:history`, 0, 4);
+                await pipeline.expire(`${baseKey}:history`, this.TTL_CONFIG.history);
             }
 
             await pipeline.exec();
