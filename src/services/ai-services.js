@@ -76,9 +76,59 @@ class AIServices {
         }
     }
 
+    extractMessageText(message) {
+        try {
+            let messageText = '';
+
+            // Verifica mensagem extendida
+            if (message.message?.extendedTextMessage?.text) {
+                messageText = message.message.extendedTextMessage.text;
+            }
+            // Verifica mensagem direta
+            else if (message.message?.conversation) {
+                messageText = message.message.conversation;
+            }
+            // Verifica texto direto
+            else if (message.text) {
+                messageText = message.text;
+            }
+
+            // Valida e limpa o texto
+            if (typeof messageText !== 'string') {
+                throw new Error('Texto da mensagem inválido');
+            }
+
+            messageText = messageText.trim();
+
+            if (!messageText) {
+                throw new Error('Texto da mensagem vazio');
+            }
+
+            console.log('MessageTextExtracted', {
+                messageId: message.messageId,
+                textLength: messageText.length,
+                timestamp: new Date().toISOString()
+            });
+
+            return { messageText };
+
+        } catch (error) {
+            console.error('ErrorExtractingMessageText', {
+                error: {
+                    message: error.message,
+                    stack: error.stack
+                },
+                messageId: message?.messageId,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
     async handleMessage(message) {
         try {
-            console.log('💬 [AIServices] Processando mensagem:', message);
+            // Extrai e valida o texto
+            const { messageText } = this.extractMessageText(message);
 
             // Se for mensagem de imagem
             if (message.type === 'image') {
@@ -133,76 +183,24 @@ class AIServices {
 
             // Se for mensagem de texto
             if (message.type === 'text') {
-                // Extrai o texto da mensagem
-                let messageText = '';
-                if (message.message?.extendedTextMessage?.text) {
-                    messageText = message.message.extendedTextMessage.text;
-                } else if (message.message?.conversation) {
-                    messageText = message.message.conversation;
-                } else if (message.text) {
-                    messageText = message.text;
-                }
+                // Prepara os dados para o OpenAI
+                const messageData = {
+                    customerId: message.from || message.key?.remoteJid?.split('@')[0],
+                    messageText,
+                    messageId: message.messageId || message.key?.id,
+                    timestamp: new Date().toISOString()
+                };
 
-                console.log('[AIServices] Texto extraído:', { messageText });
+                console.log('ProcessingMessage', {
+                    messageId: messageData.messageId,
+                    customerId: messageData.customerId,
+                    timestamp: messageData.timestamp
+                });
 
-                // Verifica se é comando #resetid
-                if (messageText.toLowerCase() === '#resetid') {
-                    try {
-                        await this.openAIService.deleteThread(message.from);
-                        const response = '🔄 Seu ID foi resetado com sucesso! Agora podemos começar uma nova conversa.';
-                        await this.whatsAppService.sendText(message.from, response);
-                        return { type: 'text', response, from: message.from };
-                    } catch (error) {
-                        console.error('[AIServices] Erro ao resetar ID:', error);
-                        const errorMsg = '❌ Desculpe, não consegui resetar seu ID. Por favor, tente novamente em alguns instantes.';
-                        await this.whatsAppService.sendText(message.from, errorMsg);
-                        return { type: 'text', response: errorMsg, from: message.from };
-                    }
-                }
+                // Processa a mensagem
+                const response = await this.openAIService.processMessage(messageData);
 
-                try {
-                    // Envia a mensagem no formato esperado
-                    const response = await this.openAIService.processMessage(
-                        message.from, 
-                        messageText,
-                        new Date().toISOString()
-                    );
-
-                    console.log('[AIServices] Resposta do OpenAI:', { 
-                        responseType: typeof response,
-                        responseContent: response 
-                    });
-
-                    // Se a resposta for null, significa que a mensagem foi enfileirada
-                    if (response === null) {
-                        // Não envia resposta, apenas aguarda o processamento em lote
-                        return { type: 'text', response: null, from: message.from };
-                    }
-
-                    // Garante que a resposta seja uma string válida
-                    let textResponse = '';
-                    if (typeof response === 'object' && response.content) {
-                        textResponse = response.content;
-                    } else if (typeof response === 'string') {
-                        textResponse = response;
-                    } else {
-                        console.error('[AIServices] Resposta em formato inválido:', response);
-                        textResponse = 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
-                    }
-                    
-                    textResponse = textResponse.trim();
-                    
-                    if (textResponse) {
-                        await this.whatsAppService.sendText(message.from, textResponse);
-                    }
-
-                    return { type: 'text', response: textResponse, from: message.from };
-                } catch (error) {
-                    console.error('[AIServices] Erro ao processar mensagem:', error);
-                    const errorMsg = '❌ Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.';
-                    await this.whatsAppService.sendText(message.from, errorMsg);
-                    return { type: 'text', response: errorMsg, from: message.from };
-                }
+                return response;
             }
 
             throw new Error(`Tipo de mensagem não suportado: ${message.type}`);
