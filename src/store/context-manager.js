@@ -13,53 +13,65 @@ class ContextManager {
 
     async saveContext(threadId, context) {
         try {
-            const pipeline = await this.redisStore.multi();
             const baseKey = `context:${threadId}`;
-
-            // Salva dados da conversa
-            if (context.conversation) {
-                // Converte objetos em strings JSON
-                const conversationData = Object.entries(context.conversation).reduce((acc, [key, value]) => {
+            
+            // Prepara os dados para salvar
+            const prepareObjectForRedis = (obj) => {
+                if (!obj) return {};
+                return Object.entries(obj).reduce((acc, [key, value]) => {
                     acc[key] = typeof value === 'object' ? JSON.stringify(value) : value;
                     return acc;
                 }, {});
-                await pipeline.hSet(`${baseKey}:conversation`, conversationData);
-                await pipeline.expire(`${baseKey}:conversation`, this.TTL_CONFIG.conversation);
-            }
+            };
 
-            // Salva dados do pedido
-            if (context.order) {
-                const orderData = Object.entries(context.order).reduce((acc, [key, value]) => {
-                    acc[key] = typeof value === 'object' ? JSON.stringify(value) : value;
-                    return acc;
-                }, {});
-                await pipeline.hSet(`${baseKey}:order`, orderData);
-                await pipeline.expire(`${baseKey}:order`, this.TTL_CONFIG.order);
-            }
+            // Executa a transação com retry
+            await this.redisStore.executeTransaction(async (multi) => {
+                // Salva dados da conversa
+                if (context.conversation) {
+                    const conversationData = prepareObjectForRedis(context.conversation);
+                    await multi.hSet(`${baseKey}:conversation`, conversationData);
+                    await multi.expire(`${baseKey}:conversation`, this.TTL_CONFIG.conversation);
+                }
 
-            // Salva metadados
-            if (context.metadata) {
-                const metadataData = Object.entries(context.metadata).reduce((acc, [key, value]) => {
-                    acc[key] = typeof value === 'object' ? JSON.stringify(value) : value;
-                    return acc;
-                }, {});
-                await pipeline.hSet(`${baseKey}:metadata`, metadataData);
-                await pipeline.expire(`${baseKey}:metadata`, this.TTL_CONFIG.metadata);
-            }
+                // Salva dados do pedido
+                if (context.order) {
+                    const orderData = prepareObjectForRedis(context.order);
+                    await multi.hSet(`${baseKey}:order`, orderData);
+                    await multi.expire(`${baseKey}:order`, this.TTL_CONFIG.order);
+                }
 
-            // Salva histórico (mantém apenas os últimos 5 itens)
-            if (context.history && Array.isArray(context.history)) {
-                const historyJson = JSON.stringify(context.history);
-                await pipeline.lPush(`${baseKey}:history`, historyJson);
-                await pipeline.lTrim(`${baseKey}:history`, 0, 4);
-                await pipeline.expire(`${baseKey}:history`, this.TTL_CONFIG.history);
-            }
+                // Salva metadados
+                if (context.metadata) {
+                    const metadataData = prepareObjectForRedis(context.metadata);
+                    await multi.hSet(`${baseKey}:metadata`, metadataData);
+                    await multi.expire(`${baseKey}:metadata`, this.TTL_CONFIG.metadata);
+                }
 
-            await pipeline.exec();
-            logger.info('ContextSaved', { threadId });
+                // Salva histórico (mantém apenas os últimos 5 itens)
+                if (context.history && Array.isArray(context.history)) {
+                    const historyJson = JSON.stringify(context.history);
+                    await multi.lPush(`${baseKey}:history`, historyJson);
+                    await multi.lTrim(`${baseKey}:history`, 0, 4);
+                    await multi.expire(`${baseKey}:history`, this.TTL_CONFIG.history);
+                }
+            });
+
+            logger.info('ContextSaved', { 
+                threadId,
+                timestamp: new Date().toISOString(),
+                contextSize: JSON.stringify(context).length
+            });
 
         } catch (error) {
-            logger.error('ErrorSavingContext', { threadId, error });
+            logger.error('ErrorSavingContext', { 
+                threadId, 
+                error: {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code
+                },
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }
@@ -108,26 +120,36 @@ class ContextManager {
         }
     }
 
-    async updateContext(threadId, updateFn) {
-        const lockKey = `lock:${threadId}`;
+    async updateContext(threadId, context) {
         try {
-            // Tenta adquirir lock por 5 segundos usando o formato correto
-            const acquired = await this.redisStore.set(lockKey, 1, {
-                EX: 5,
-                NX: true
+            const lockKey = `lock:${threadId}`;
+            const acquired = await this.redisStore.set(lockKey, 1, { 
+                EX: 5,  // 5 segundos de TTL
+                NX: true // Só define se não existir
             });
-            
+
             if (!acquired) {
-                throw new Error('Contexto bloqueado');
+                throw new Error('Não foi possível adquirir o lock');
             }
 
-            const currentContext = await this.getContext(threadId);
-            const updatedContext = updateFn(currentContext);
-            await this.saveContext(threadId, updatedContext);
+            try {
+                await this.saveContext(threadId, context);
+            } finally {
+                // Sempre remove o lock, mesmo em caso de erro
+                await this.redisStore.del(lockKey);
+            }
 
-            return updatedContext;
-        } finally {
-            await this.redisStore.del(lockKey);
+        } catch (error) {
+            logger.error('ErrorUpdatingContext', {
+                threadId,
+                error: {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code
+                },
+                timestamp: new Date().toISOString()
+            });
+            throw error;
         }
     }
 

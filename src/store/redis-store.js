@@ -773,12 +773,23 @@ class RedisStore {
         }
     }
 
-    async pipeline() {
-        try {
-            return this.client.multi();
-        } catch (error) {
-            console.error('[Redis] Erro ao criar pipeline:', error);
-            throw error;
+    async executeTransaction(callback, maxRetries = 3) {
+        let retryCount = 0;
+        while (retryCount < maxRetries) {
+            try {
+                const multi = this.client.multi();
+                await callback(multi);
+                const result = await multi.exec();
+                return result;
+            } catch (error) {
+                retryCount++;
+                if (error.message.includes('EXECABORT') && retryCount < maxRetries) {
+                    console.warn(`[Redis] Retry ${retryCount}/${maxRetries} após EXECABORT`);
+                    await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, retryCount)));
+                    continue;
+                }
+                throw error;
+            }
         }
     }
 
@@ -787,6 +798,35 @@ class RedisStore {
             return this.client.multi();
         } catch (error) {
             console.error('[Redis] Erro ao criar transação:', error);
+            throw error;
+        }
+    }
+
+    async watch(key) {
+        try {
+            await this.client.watch(key);
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao observar chave:', error);
+            return false;
+        }
+    }
+
+    async unwatch() {
+        try {
+            await this.client.unwatch();
+            return true;
+        } catch (error) {
+            console.error('[Redis] Erro ao remover observação:', error);
+            return false;
+        }
+    }
+
+    async pipeline() {
+        try {
+            return this.client.multi();
+        } catch (error) {
+            console.error('[Redis] Erro ao criar pipeline:', error);
             throw error;
         }
     }
@@ -814,15 +854,6 @@ class RedisStore {
             return await this.client.lTrim(key, start, stop);
         } catch (error) {
             console.error('[Redis] Erro ao executar LTRIM:', { key, error });
-            throw error;
-        }
-    }
-
-    async watch(key) {
-        try {
-            return await this.client.watch(key);
-        } catch (error) {
-            console.error('[Redis] Erro ao executar WATCH:', { key, error });
             throw error;
         }
     }
