@@ -1323,96 +1323,151 @@ class OpenAIService {
         }
     }
 
+    async processCustomerMessageWithImage(customerId, message, images) {
+        try {
+            logger.info('ProcessingCustomerMessageWithImage', { 
+                customerId, 
+                hasMessage: !!message, 
+                imageCount: images?.length 
+            });
+
+            const threadId = await this.getOrCreateThreadForCustomer(customerId);
+            const waiting = await this.redisStore.get(`openai:waiting_order:${threadId}`);
+
+            if (waiting === 'payment_proof') {
+                logger.info('WaitingForPaymentProof', { threadId });
+                
+                if (!images?.length) {
+                    return ' Não recebi nenhuma imagem. Por favor, envie uma foto do comprovante.';
+                }
+
+                let orderNumber = message ? 
+                    await this.orderValidationService.extractOrderNumber(message) :
+                    await this.redisStore.get(`openai:pending_order:${threadId}`);
+
+                return await this.processPaymentProof(threadId, images[0], orderNumber);
+            }
+
+            // Formata a mensagem com as imagens
+            const messageContent = [];
+            
+            if (message) {
+                messageContent.push({
+                    type: "text",
+                    text: message
+                });
+            }
+
+            for (const image of images) {
+                messageContent.push({
+                    type: "image_url",
+                    image_url: {
+                        url: image.base64 ? 
+                            `data:${image.mimetype};base64,${image.base64}` : 
+                            image.url
+                    }
+                });
+            }
+
+            // Verifica se já tem um run ativo
+            if (await this.hasActiveRun(threadId)) {
+                this.queueMessage(threadId, { role: "user", content: messageContent });
+                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
+            }
+
+            // Adiciona a mensagem e executa o assistant
+            const response = await this.addMessageAndRun(threadId, {
+                role: "user",
+                content: messageContent
+            });
+
+            return response || "Desculpe, não consegui processar sua mensagem. Pode tentar novamente?";
+        } catch (error) {
+            logger.error('ErrorProcessingCustomerMessageWithImage', { customerId, error });
+            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.";
+        }
+    }
+
+    /**
+     * Exporta todas as threads para análise
+     * @returns {Promise<Array>} Lista de metadados das threads
+     */
+    async exportThreadsMetadata() {
+        try {
+            return await this.redisStore.getAllThreadMetadata();
+        } catch (error) {
+            logger.error('ErrorExportingThreadsMetadata', { error });
+            console.error('[OpenAI] Erro ao exportar metadados:', {
+                erro: error.message,
+                stack: error.stack
+            });
+            return [];
+        }
+    }
+
     async handleCommand(threadId, command) {
         try {
             if (command === '#resetid') {
                 logger.info('StartingThreadReset', { threadId });
 
-                // Verifica e cancela run ativo se existir
-                const hasActiveRun = await this.hasActiveRun(threadId);
+                // Obtém o threadId correto da OpenAI antes de qualquer operação
+                const openAIThreadId = await this.redisStore.getThreadForCustomer(threadId);
+                if (!openAIThreadId) {
+                    logger.info('NoThreadFound', { customerId: threadId });
+                    return true;
+                }
+
+                // Usa o threadId correto para operações da OpenAI
+                const hasActiveRun = await this.hasActiveRun(openAIThreadId);
                 if (hasActiveRun) {
-                    logger.info('CancelingActiveRun', { threadId });
-                    await this.cancelActiveRun(threadId);
+                    logger.info('CancelingActiveRun', { threadId: openAIThreadId });
+                    await this.cancelActiveRun(openAIThreadId);
                 }
 
-                // Remove run ativo e cancela timers
-                await this.removeActiveRun(threadId);
-                if (this.processingTimers.has(threadId)) {
-                    clearTimeout(this.processingTimers.get(threadId));
-                    this.processingTimers.delete(threadId);
+                await this.removeActiveRun(openAIThreadId);
+                if (this.processingTimers.has(openAIThreadId)) {
+                    clearTimeout(this.processingTimers.get(openAIThreadId));
+                    this.processingTimers.delete(openAIThreadId);
                 }
 
-                // Limpa fila de mensagens
-                this.messageQueue.delete(threadId);
-
-                // Continua com o processo normal de reset...
-                let customerId;
-                try {
-                    const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
-                    if (metadata) {
-                        const parsedMetadata = JSON.parse(metadata);
-                        customerId = parsedMetadata.customerId;
-                    }
-                } catch (error) {
-                    logger.error('ErrorGettingCustomerId', { threadId, error });
-                }
+                this.messageQueue.delete(openAIThreadId);
 
                 // Deleta thread OpenAI
                 try {
-                    const existingThread = await this.client.beta.threads.retrieve(threadId);
+                    const existingThread = await this.client.beta.threads.retrieve(openAIThreadId);
                     if (existingThread) {
-                        await this.client.beta.threads.del(threadId);
-                        logger.info('OpenAIThreadDeleted', { threadId });
+                        await this.client.beta.threads.del(openAIThreadId);
+                        logger.info('OpenAIThreadDeleted', { threadId: openAIThreadId });
                     }
                 } catch (error) {
-                    // Log error but continue with reset
-                    logger.error('ErrorDeletingOpenAIThread', { threadId, error });
+                    logger.error('ErrorDeletingOpenAIThread', { threadId: openAIThreadId, error });
                 }
 
                 // Limpa dados Redis
                 try {
-                    // Limpa todos os dados do usuário e da thread
-                    if (customerId) {
-                        await this.redisStore.deleteUserData(customerId);
-                        // Força criação de nova thread removendo o mapeamento customer -> thread
-                        await this.redisStore.del(`openai:customer_threads:${customerId}`);
-                        logger.info('CustomerDataDeleted', { customerId });
-                    }
-                    await this.redisStore.deleteThreadData(threadId);
-                    await this.redisStore.deleteUserContext(threadId);
+                    await this.redisStore.deleteUserData(threadId);
+                    await this.redisStore.del(`openai:customer_threads:${threadId}`);
+                    await this.redisStore.deleteThreadData(openAIThreadId);
+                    await this.redisStore.deleteUserContext(openAIThreadId);
                     
-                    // Limpa chaves específicas que podem não ter sido pegas pelos métodos acima
                     const specificKeys = [
-                        `openai:active_run:${threadId}`,
-                        `openai:context:thread:${threadId}`,
-                        `openai:context:update:${threadId}`,
-                        `openai:pending_order:${threadId}`,
-                        `openai:tracking:${threadId}`,
-                        `openai:waiting_order:${threadId}`,
-                        `openai:tool_calls:${threadId}`,
-                        `openai:thread_meta:${threadId}`
+                        `openai:active_run:${openAIThreadId}`,
+                        `openai:context:thread:${openAIThreadId}`,
+                        `openai:context:update:${openAIThreadId}`,
+                        `openai:pending_order:${openAIThreadId}`,
+                        `openai:tracking:${openAIThreadId}`,
+                        `openai:waiting_order:${openAIThreadId}`,
+                        `openai:tool_calls:${openAIThreadId}`,
+                        `openai:thread_meta:${openAIThreadId}`
                     ];
 
                     await Promise.all(specificKeys.map(key => this.redisStore.del(key)));
-                    logger.info('RedisDataCleared', { threadId, customerId });
+                    logger.info('RedisDataCleared', { customerId: threadId, threadId: openAIThreadId });
                 } catch (error) {
-                    logger.error('ErrorClearingRedisData', { threadId, error });
+                    logger.error('ErrorClearingRedisData', { customerId: threadId, threadId: openAIThreadId, error });
                 }
 
-                // Verifica se tudo foi limpo
-                try {
-                    const threadExists = await this.client.beta.threads.retrieve(threadId);
-                    if (threadExists) {
-                        logger.error('ThreadStillExists', { threadId });
-                        throw new Error('Thread não foi deletada completamente');
-                    }
-                } catch (error) {
-                    if (!error.message.includes('No thread found')) {
-                        throw error;
-                    }
-                }
-
-                logger.info('ThreadResetComplete', { threadId });
+                logger.info('ThreadResetComplete', { customerId: threadId, threadId: openAIThreadId });
                 return true;
             }
             return false;
