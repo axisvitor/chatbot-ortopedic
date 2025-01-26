@@ -2,13 +2,14 @@ const OpenAI = require('openai');
 const moment = require('moment-timezone');
 const logger = require('../utils/logger');
 const { RedisStore } = require('../store/redis-store');
+const { ContextManager } = require('../store/context-manager');
 const { OPENAI_CONFIG } = require('../config/settings');
 const { TrackingService } = require('./tracking-service');
 const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
 const { NuvemshopService } = require('./nuvemshop-service');
 const { FinancialService } = require('./financial-service');
-const { DepartmentService } = require('./department-service'); // Adicionado DepartmentService
+const { DepartmentService } = require('./department-service');
 
 class OpenAIService {
     /**
@@ -17,7 +18,7 @@ class OpenAIService {
      * @param {BusinessHoursService} businessHoursService - Serviço de horário de atendimento
      * @param {OrderValidationService} orderValidationService - Serviço de validação de pedidos
      * @param {FinancialService} financialService - Serviço financeiro
-     * @param {DepartmentService} departmentService - Serviço de departamentos // Adicionado DepartmentService
+     * @param {DepartmentService} departmentService - Serviço de departamentos
      * @param {Object} whatsappService - Serviço de WhatsApp (injetado para evitar dependência circular)
      */
     constructor(nuvemshopService, trackingService, businessHoursService, orderValidationService, financialService, departmentService, whatsappService) {
@@ -27,6 +28,7 @@ class OpenAIService {
         });
         this.assistantId = OPENAI_CONFIG.assistantId;
         this.redisStore = new RedisStore(); // Redis para controlar runs ativos
+        this.contextManager = new ContextManager(this.redisStore);
         
         // Conecta ao Redis
         this.redisStore.connect().catch(error => {
@@ -627,27 +629,39 @@ class OpenAIService {
 
     async addMessageAndRun(threadId, message) {
         try {
-            // Não processa mensagens vazias
-            if (!message.content) {
-                logger.warn('EmptyMessage', { threadId });
-                return null;
-            }
+            logger.info('AddingMessage', { 
+                metadata: {
+                    contentType: typeof message.content,
+                    role: message.role,
+                    threadId,
+                    service: 'ortopedic-bot'
+                }
+            });
 
-            // Evita processar a mesma mensagem múltiplas vezes
-            const lastMessage = await this.getLastMessage(threadId);
-            if (lastMessage?.content === message.content) {
-                logger.warn('DuplicateMessage', { 
+            // Verifica se a mensagem já não é uma resposta do assistant
+            if (message.role === 'user' && message.content === this.lastAssistantResponse) {
+                logger.warn('SkippingDuplicateMessage', { 
                     threadId,
                     content: message.content 
                 });
-                return null;
+                return;
             }
 
-            // Adiciona a mensagem
+            console.log('[OpenAI] Adicionando mensagem:', {
+                threadId,
+                role: message.role,
+                contentType: typeof message.content
+            });
+
             const createdMessage = await this.client.beta.threads.messages.create(
                 threadId,
                 message
             );
+
+            console.log('[OpenAI] Mensagem adicionada com sucesso:', {
+                threadId,
+                messageId: createdMessage.id
+            });
 
             logger.info('MessageCreated', { 
                 metadata: {
@@ -657,12 +671,8 @@ class OpenAIService {
                 }
             });
 
-            // Executa o assistant e aguarda resposta
             const response = await this.runAssistant(threadId);
-            
-            // Registra a resposta para evitar loops
-            this.lastAssistantResponse = response;
-            
+            this.lastAssistantResponse = response; // Guarda a última resposta
             return String(response || '').trim();
 
         } catch (error) {
@@ -673,11 +683,11 @@ class OpenAIService {
 
     async getLastMessage(threadId) {
         try {
-            const messages = await this.client.beta.threads.messages.list(threadId, {
-                limit: 1,
-                order: 'desc'
-            });
-            return messages.data[0];
+            const messages = await this.client.beta.threads.messages.list(threadId);
+            if (messages.data && messages.data.length > 0) {
+                return messages.data[0];
+            }
+            return null;
         } catch (error) {
             logger.error('ErrorGettingLastMessage', { threadId, error });
             return null;
@@ -864,7 +874,15 @@ class OpenAIService {
 
             const response = await this.runAssistant(threadId);
             this.lastAssistantResponse = response; // Guarda a última resposta
-            return String(response || '').trim();
+            
+            // Atualiza o contexto com a nova mensagem
+            await this.contextManager.updateContext(threadId, (context) => {
+                context.conversation.lastMessage = message.content;
+                context.conversation.interactionCount++;
+                return context;
+            });
+
+            return { content: String(response || '').trim() };
 
         } catch (error) {
             logger.error('ErrorAddingMessage', { threadId, error });

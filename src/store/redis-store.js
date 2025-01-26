@@ -764,6 +764,60 @@ class RedisStore {
             // Não lança erro para manter a consistência com outros métodos de delete
         }
     }
+
+    async pipeline() {
+        try {
+            return this.client.pipeline();
+        } catch (error) {
+            console.error('[Redis] Erro ao criar pipeline:', error);
+            throw error;
+        }
+    }
+
+    async lrange(key, start, stop) {
+        try {
+            return await this.client.lRange(key, start, stop);
+        } catch (error) {
+            console.error('[Redis] Erro ao executar LRANGE:', { key, error });
+            return [];
+        }
+    }
+
+    async lpush(key, ...values) {
+        try {
+            return await this.client.lPush(key, ...values);
+        } catch (error) {
+            console.error('[Redis] Erro ao executar LPUSH:', { key, error });
+            throw error;
+        }
+    }
+
+    async ltrim(key, start, stop) {
+        try {
+            return await this.client.lTrim(key, start, stop);
+        } catch (error) {
+            console.error('[Redis] Erro ao executar LTRIM:', { key, error });
+            throw error;
+        }
+    }
+
+    async multi() {
+        try {
+            return this.client.multi();
+        } catch (error) {
+            console.error('[Redis] Erro ao criar multi:', error);
+            throw error;
+        }
+    }
+
+    async watch(key) {
+        try {
+            return await this.client.watch(key);
+        } catch (error) {
+            console.error('[Redis] Erro ao executar WATCH:', { key, error });
+            throw error;
+        }
+    }
 }
 
 module.exports = { RedisStore };
