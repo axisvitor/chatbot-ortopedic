@@ -573,88 +573,117 @@ class OpenAIService {
      * @param {Object} message Mensagem a ser processada
      * @returns {Promise<Object>} Resposta do processamento
      */
-    async processCustomerMessage(customerId, message) {
+    async processMessage(customerId, messageText, timestamp) {
         try {
-            // Extrai texto da mensagem
-            let messageText = '';
-            if (typeof message === 'string') {
-                messageText = message;
-            } else if (message?.message?.extendedTextMessage?.text) {
-                messageText = message.message.extendedTextMessage.text;
-            } else if (message?.message?.conversation) {
-                messageText = message.message.conversation;
-            } else if (message?.transcription) {
-                messageText = message.transcription;
-            } else if (message?.text) {
-                messageText = message.text;
-            }
-
-            // Valida e limpa texto
-            messageText = messageText ? messageText.trim() : '';
-            if (!messageText) {
-                logger.warn('EmptyMessageText', { customerId });
-                return 'Desculpe, não consegui entender sua mensagem. Pode tentar novamente?';
-            }
-
             console.log('[OpenAI] Processando mensagem:', {
                 customerId,
                 messageText,
-                timestamp: new Date().toISOString()
+                timestamp
             });
 
-            // Obtém ou cria thread
+            // 1. Obtém ou cria thread
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             
-            // Verifica run ativo
-            const hasActiveRun = await this.hasActiveRun(threadId);
-            if (hasActiveRun) {
-                console.log('[OpenAI] Run ativo detectado, enfileirando mensagem');
-                await this.queueMessage(threadId, { text: messageText });
+            // 2. Verifica se é um comando
+            if (messageText.startsWith('#')) {
+                const handled = await this.handleCommand(customerId, messageText);
+                if (handled) return null;
+            }
+
+            // 3. Verifica run ativo
+            if (await this.hasActiveRun(threadId)) {
+                this.queueMessage(threadId, {
+                    role: "user",
+                    content: messageText
+                });
+                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
+            }
+
+            // 4. Adiciona mensagem e executa
+            return await this.addMessageAndRun(threadId, {
+                role: "user",
+                content: messageText
+            });
+
+        } catch (error) {
+            logger.error('ErrorProcessingMessage', { customerId, error });
+            if (error.code === 'rate_limit_exceeded') {
+                return "⏳ Sistema está muito ocupado. Por favor, aguarde alguns segundos e tente novamente.";
+            }
+            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.";
+        }
+    }
+
+    async addMessageAndRun(threadId, message) {
+        try {
+            // Não processa mensagens vazias
+            if (!message.content) {
+                logger.warn('EmptyMessage', { threadId });
                 return null;
             }
 
-            // Obtém thread do cache/Redis
-            const thread = await this._getThread(threadId);
-            if (thread?.messages?.length > this.MAX_THREAD_MESSAGES) {
-                thread.messages = thread.messages.slice(-this.MAX_THREAD_MESSAGES);
-                this.threadCache.set(threadId, thread);
+            // Evita processar a mesma mensagem múltiplas vezes
+            const lastMessage = await this.getLastMessage(threadId);
+            if (lastMessage?.content === message.content) {
+                logger.warn('DuplicateMessage', { threadId });
+                return null;
             }
 
-            // Adiciona à fila e agenda processamento
-            await this.queueMessage(threadId, { text: messageText });
-            
-            // Processa imediatamente se não houver timer
-            if (!this.processingTimers.has(threadId)) {
-                console.log('[OpenAI] Agendando processamento da mensagem');
-                const timer = setTimeout(async () => {
-                    try {
-                        const response = await this.processQueuedMessages(threadId);
-                        if (response) {
-                            await this.sendResponse(customerId, response);
-                        }
-                    } catch (error) {
-                        logger.error('ErrorProcessingTimer', {
-                            threadId,
-                            error: error.message
-                        });
-                        await this.sendResponse(
-                            customerId,
-                            'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
-                        );
-                    }
-                }, this.MESSAGE_DELAY);
-                this.processingTimers.set(threadId, timer);
-            }
+            // Adiciona a mensagem
+            const createdMessage = await this.client.beta.threads.messages.create(
+                threadId,
+                message
+            );
 
-            return null;
+            logger.info('MessageCreated', { 
+                metadata: {
+                    messageId: createdMessage.id,
+                    threadId,
+                    service: 'ortopedic-bot'
+                }
+            });
+
+            // Executa o assistant e retorna a resposta
+            const response = await this.runAssistant(threadId);
+            return response;
 
         } catch (error) {
-            logger.error('ErrorProcessingMessage', {
-                customerId,
-                error: error.message,
-                stack: error.stack
+            logger.error('ErrorAddingMessage', { threadId, error });
+            throw error;
+        }
+    }
+
+    async getLastMessage(threadId) {
+        try {
+            const messages = await this.client.beta.threads.messages.list(threadId, {
+                limit: 1,
+                order: 'desc'
             });
-            return 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.';
+            return messages.data[0];
+        } catch (error) {
+            logger.error('ErrorGettingLastMessage', { threadId, error });
+            return null;
+        }
+    }
+
+    async runAssistant(threadId) {
+        try {
+            // Cria e aguarda o run
+            const run = await this.client.beta.threads.runs.create(threadId, {
+                assistant_id: this.assistantId
+            });
+
+            // Aguarda a resposta
+            const response = await this.waitForResponse(threadId, run.id);
+            return response;
+
+        } catch (error) {
+            if (error.code === 'rate_limit_exceeded') {
+                logger.warn('RateLimitExceeded', { threadId });
+                throw error;
+            }
+            logger.error('ErrorRunningAssistant', { threadId, error });
+            throw error;
         }
     }
 
