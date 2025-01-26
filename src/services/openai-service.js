@@ -629,64 +629,80 @@ class OpenAIService {
 
     async addMessageAndRun(threadId, message) {
         try {
-            logger.info('AddingMessage', { 
-                metadata: {
-                    contentType: typeof message.content,
-                    role: message.role,
-                    threadId,
-                    service: 'ortopedic-bot'
-                }
-            });
-
-            // Verifica se a mensagem já não é uma resposta do assistant
-            if (message.role === 'user' && message.content === this.lastAssistantResponse) {
-                logger.warn('SkippingDuplicateMessage', { 
-                    threadId,
-                    content: message.content 
-                });
-                return;
+            // Valida parâmetros
+            if (!threadId || !message) {
+                throw new Error('ThreadId e message são obrigatórios');
             }
 
-            console.log('[OpenAI] Adicionando mensagem:', {
-                threadId,
-                role: message.role,
-                contentType: typeof message.content
-            });
-
-            const createdMessage = await this.client.beta.threads.messages.create(
-                threadId,
-                message
-            );
-
-            console.log('[OpenAI] Mensagem adicionada com sucesso:', {
-                threadId,
-                messageId: createdMessage.id
-            });
-
-            logger.info('MessageCreated', { 
-                metadata: {
-                    messageId: createdMessage.id,
-                    threadId,
-                    service: 'ortopedic-bot'
-                }
-            });
-
-            const response = await this.runAssistant(threadId);
-            this.lastAssistantResponse = response; // Guarda a última resposta
+            // Recupera o contexto atual
+            let currentContext = await this.contextManager.getContext(threadId);
             
-            // Atualiza o contexto com a nova mensagem
-            const currentContext = await this.contextManager.getContext(threadId);
-            currentContext.conversation = currentContext.conversation || {};
-            currentContext.conversation.lastMessage = message.content;
+            // Prepara os dados da mensagem
+            const messageData = {
+                role: message.role || 'user',
+                content: message.messageText || '',
+                metadata: {
+                    customerId: message.customerId,
+                    timestamp: new Date().toISOString(),
+                    messageId: message.messageId
+                }
+            };
+
+            // Adiciona a mensagem ao histórico
+            if (!currentContext.history) {
+                currentContext.history = [];
+            }
+            currentContext.history.push(messageData);
+
+            // Atualiza dados da conversa
+            if (!currentContext.conversation) {
+                currentContext.conversation = {};
+            }
+            currentContext.conversation.lastMessage = messageData;
             currentContext.conversation.interactionCount = (currentContext.conversation.interactionCount || 0) + 1;
             currentContext.conversation.lastUpdate = new Date().toISOString();
-            
-            await this.contextManager.updateContext(threadId, currentContext);
 
-            return { content: String(response || '').trim() };
+            // Salva o contexto antes de adicionar a mensagem
+            await this.contextManager.saveContext(threadId, currentContext);
+
+            // Adiciona a mensagem ao thread do OpenAI
+            const openaiMessage = await this.client.beta.threads.messages.create(threadId, {
+                role: messageData.role,
+                content: messageData.content
+            });
+
+            // Atualiza o contexto com o ID da mensagem do OpenAI
+            currentContext.conversation.lastOpenAIMessageId = openaiMessage.id;
+            await this.contextManager.saveContext(threadId, currentContext);
+
+            // Executa o assistente
+            const response = await this.runAssistant(threadId);
+            this.lastAssistantResponse = response;
+
+            // Registra sucesso
+            logger.info('MessageProcessed', {
+                threadId,
+                messageId: message.messageId,
+                customerId: message.customerId,
+                timestamp: new Date().toISOString()
+            });
+
+            return response;
 
         } catch (error) {
-            logger.error('ErrorAddingMessage', { threadId, error });
+            // Registra erro
+            logger.error('ErrorProcessingMessage', {
+                error: {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code
+                },
+                threadId,
+                messageId: message?.messageId,
+                customerId: message?.customerId,
+                timestamp: new Date().toISOString()
+            });
+
             throw error;
         }
     }
@@ -809,64 +825,80 @@ class OpenAIService {
 
     async addMessageAndRun(threadId, message) {
         try {
-            logger.info('AddingMessage', { 
-                metadata: {
-                    contentType: typeof message.content,
-                    role: message.role,
-                    threadId,
-                    service: 'ortopedic-bot'
-                }
-            });
-
-            // Verifica se a mensagem já não é uma resposta do assistant
-            if (message.role === 'user' && message.content === this.lastAssistantResponse) {
-                logger.warn('SkippingDuplicateMessage', { 
-                    threadId,
-                    content: message.content 
-                });
-                return;
+            // Valida parâmetros
+            if (!threadId || !message) {
+                throw new Error('ThreadId e message são obrigatórios');
             }
 
-            console.log('[OpenAI] Adicionando mensagem:', {
-                threadId,
-                role: message.role,
-                contentType: typeof message.content
-            });
-
-            const createdMessage = await this.client.beta.threads.messages.create(
-                threadId,
-                message
-            );
-
-            console.log('[OpenAI] Mensagem adicionada com sucesso:', {
-                threadId,
-                messageId: createdMessage.id
-            });
-
-            logger.info('MessageCreated', { 
-                metadata: {
-                    messageId: createdMessage.id,
-                    threadId,
-                    service: 'ortopedic-bot'
-                }
-            });
-
-            const response = await this.runAssistant(threadId);
-            this.lastAssistantResponse = response; // Guarda a última resposta
+            // Recupera o contexto atual
+            let currentContext = await this.contextManager.getContext(threadId);
             
-            // Atualiza o contexto com a nova mensagem
-            const currentContext = await this.contextManager.getContext(threadId);
-            currentContext.conversation = currentContext.conversation || {};
-            currentContext.conversation.lastMessage = message.content;
+            // Prepara os dados da mensagem
+            const messageData = {
+                role: message.role || 'user',
+                content: message.messageText || '',
+                metadata: {
+                    customerId: message.customerId,
+                    timestamp: new Date().toISOString(),
+                    messageId: message.messageId
+                }
+            };
+
+            // Adiciona a mensagem ao histórico
+            if (!currentContext.history) {
+                currentContext.history = [];
+            }
+            currentContext.history.push(messageData);
+
+            // Atualiza dados da conversa
+            if (!currentContext.conversation) {
+                currentContext.conversation = {};
+            }
+            currentContext.conversation.lastMessage = messageData;
             currentContext.conversation.interactionCount = (currentContext.conversation.interactionCount || 0) + 1;
             currentContext.conversation.lastUpdate = new Date().toISOString();
-            
-            await this.contextManager.updateContext(threadId, currentContext);
 
-            return { content: String(response || '').trim() };
+            // Salva o contexto antes de adicionar a mensagem
+            await this.contextManager.saveContext(threadId, currentContext);
+
+            // Adiciona a mensagem ao thread do OpenAI
+            const openaiMessage = await this.client.beta.threads.messages.create(threadId, {
+                role: messageData.role,
+                content: messageData.content
+            });
+
+            // Atualiza o contexto com o ID da mensagem do OpenAI
+            currentContext.conversation.lastOpenAIMessageId = openaiMessage.id;
+            await this.contextManager.saveContext(threadId, currentContext);
+
+            // Executa o assistente
+            const response = await this.runAssistant(threadId);
+            this.lastAssistantResponse = response;
+
+            // Registra sucesso
+            logger.info('MessageProcessed', {
+                threadId,
+                messageId: message.messageId,
+                customerId: message.customerId,
+                timestamp: new Date().toISOString()
+            });
+
+            return response;
 
         } catch (error) {
-            logger.error('ErrorAddingMessage', { threadId, error });
+            // Registra erro
+            logger.error('ErrorProcessingMessage', {
+                error: {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code
+                },
+                threadId,
+                messageId: message?.messageId,
+                customerId: message?.customerId,
+                timestamp: new Date().toISOString()
+            });
+
             throw error;
         }
     }
