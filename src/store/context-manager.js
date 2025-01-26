@@ -84,8 +84,12 @@ class ContextManager {
     async updateContext(threadId, updateFn) {
         const lockKey = `lock:${threadId}`;
         try {
-            // Tenta adquirir lock por 5 segundos
-            const acquired = await this.redisStore.set(lockKey, '1', 'NX', 'EX', 5);
+            // Tenta adquirir lock por 5 segundos usando o formato correto
+            const acquired = await this.redisStore.set(lockKey, 1, {
+                EX: 5,
+                NX: true
+            });
+            
             if (!acquired) {
                 throw new Error('Contexto bloqueado');
             }

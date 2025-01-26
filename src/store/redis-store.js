@@ -134,12 +134,20 @@ class RedisStore {
         }
     }
 
-    async set(key, value, ttl = REDIS_CONFIG.ttl) {
+    async set(key, value, options = {}) {
         try {
-            await this.client.set(key, value, {
-                EX: ttl
-            });
-            return true;
+            // Se options for número, assume que é TTL
+            if (typeof options === 'number') {
+                options = { EX: options };
+            }
+
+            // Se não for objeto, converte para objeto com as opções padrão
+            if (typeof options !== 'object') {
+                options = { EX: REDIS_CONFIG.ttl };
+            }
+
+            const result = await this.client.set(key, value, options);
+            return result === 'OK' || result === true;
         } catch (error) {
             console.error('[Redis] Erro ao salvar no cache:', {
                 key,
