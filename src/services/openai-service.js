@@ -209,15 +209,14 @@ class OpenAIService {
                         reason: {
                             type: "string",
                             enum: [
-                                "payment_issue",      // Problema com pagamento
-                                "payment_proof",      // Comprovante de pagamento
-                                "refund_request",     // Solicitação de reembolso
-                                "duplicate_charge",   // Cobrança duplicada
-                                "taxation",           // Questões de impostos
-                                "customs",            // Retenção na alfândega
-                                "other"               // Outros motivos
+                                "payment",           // Problema com pagamento
+                                "refund",            // Solicitação de reembolso
+                                "taxation",          // Questões de impostos
+                                "customs",           // Retenção na alfândega
+                                "payment_proof",     // Comprovante de pagamento
+                                "other"              // Outros motivos
                             ],
-                            description: "Motivo específico do encaminhamento"
+                            description: "Motivo do encaminhamento"
                         },
                         customer_message: {
                             type: "string",
@@ -225,8 +224,8 @@ class OpenAIService {
                         },
                         priority: {
                             type: "string",
-                            enum: ["urgent", "high", "medium", "low"],
-                            description: "Nível de urgência (urgent: erros de cobrança, high: reembolsos, medium: impostos, low: dúvidas gerais)"
+                            enum: ["high", "medium", "low"],
+                            description: "Nível de urgência"
                         },
                         additional_info: {
                             type: "string",
@@ -265,7 +264,7 @@ class OpenAIService {
                         },
                         priority: {
                             type: "string",
-                            enum: ["urgent", "high", "medium", "low"],
+                            enum: ["high", "medium", "low"],
                             description: "Nível de urgência do caso"
                         },
                         additional_info: {
@@ -662,15 +661,7 @@ class OpenAIService {
                 throw error;
             }
         } catch (error) {
-            logger.error('ErrorInAddMessageAndRun', { 
-                threadId,
-                error: {
-                    message: error.message,
-                    stack: error.stack,
-                    name: error.name,
-                    code: error.code
-                }
-            });
+            logger.error('ErrorInAddMessageAndRun', { threadId, error });
             throw error;
         }
     }

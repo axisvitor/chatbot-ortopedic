@@ -34,6 +34,18 @@ class FinancialService {
                 throw new Error('Motivo e mensagem do cliente são obrigatórios');
             }
 
+            // Valida reason
+            const validReasons = ['payment', 'refund', 'taxation', 'customs', 'payment_proof', 'other'];
+            if (!validReasons.includes(data.reason)) {
+                throw new Error('Motivo inválido');
+            }
+
+            // Valida prioridade
+            const validPriorities = ['high', 'medium', 'low'];
+            if (data.priority && !validPriorities.includes(data.priority)) {
+                throw new Error('Prioridade inválida');
+            }
+
             // Gera ID único para o caso
             const caseId = `FIN${Date.now()}`;
             const caseKey = `financial_case:${caseId}`;

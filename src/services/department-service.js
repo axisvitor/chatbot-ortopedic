@@ -73,7 +73,7 @@ class DepartmentService {
                           `*Motivo:* ${data.reason}\n` +
                           (data.order_number ? `*Pedido:* #${data.order_number}\n` : '') +
                           (data.tracking_code ? `*Rastreio:* ${data.tracking_code}\n` : '') +
-                          `\n*📱 Mensagem do Cliente:*\n${data.customer_message}\n` +
+                          `\n*📱 Mensagem do Cliente:*\n${data.customer_message.replace(/(\r\n|\n|\r)/gm, '\n')}\n` +
                           (data.additional_info ? `\n*ℹ️ Informações Adicionais:*\n${data.additional_info}` : '');
 
             // Salva caso no Redis
