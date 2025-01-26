@@ -18,25 +18,39 @@ class ContextManager {
 
             // Salva dados da conversa
             if (context.conversation) {
-                await pipeline.hSet(`${baseKey}:conversation`, context.conversation);
+                // Converte objetos em strings JSON
+                const conversationData = Object.entries(context.conversation).reduce((acc, [key, value]) => {
+                    acc[key] = typeof value === 'object' ? JSON.stringify(value) : value;
+                    return acc;
+                }, {});
+                await pipeline.hSet(`${baseKey}:conversation`, conversationData);
                 await pipeline.expire(`${baseKey}:conversation`, this.TTL_CONFIG.conversation);
             }
 
             // Salva dados do pedido
             if (context.order) {
-                await pipeline.hSet(`${baseKey}:order`, context.order);
+                const orderData = Object.entries(context.order).reduce((acc, [key, value]) => {
+                    acc[key] = typeof value === 'object' ? JSON.stringify(value) : value;
+                    return acc;
+                }, {});
+                await pipeline.hSet(`${baseKey}:order`, orderData);
                 await pipeline.expire(`${baseKey}:order`, this.TTL_CONFIG.order);
             }
 
             // Salva metadados
             if (context.metadata) {
-                await pipeline.hSet(`${baseKey}:metadata`, context.metadata);
+                const metadataData = Object.entries(context.metadata).reduce((acc, [key, value]) => {
+                    acc[key] = typeof value === 'object' ? JSON.stringify(value) : value;
+                    return acc;
+                }, {});
+                await pipeline.hSet(`${baseKey}:metadata`, metadataData);
                 await pipeline.expire(`${baseKey}:metadata`, this.TTL_CONFIG.metadata);
             }
 
             // Salva histórico (mantém apenas os últimos 5 itens)
-            if (context.history) {
-                await pipeline.lPush(`${baseKey}:history`, JSON.stringify(context.history));
+            if (context.history && Array.isArray(context.history)) {
+                const historyJson = JSON.stringify(context.history);
+                await pipeline.lPush(`${baseKey}:history`, historyJson);
                 await pipeline.lTrim(`${baseKey}:history`, 0, 4);
                 await pipeline.expire(`${baseKey}:history`, this.TTL_CONFIG.history);
             }
@@ -60,20 +74,33 @@ class ContextManager {
                 this.redisStore.lrange(`${baseKey}:history`, 0, -1)
             ]);
 
-            // Processa o histórico
-            const processedHistory = history ? history.map(item => {
+            // Parse dos dados do Redis
+            const parseRedisObject = (obj) => {
+                if (!obj) return {};
+                return Object.entries(obj).reduce((acc, [key, value]) => {
+                    try {
+                        acc[key] = JSON.parse(value);
+                    } catch {
+                        acc[key] = value;
+                    }
+                    return acc;
+                }, {});
+            };
+
+            // Parse do histórico
+            const parsedHistory = (history || []).map(item => {
                 try {
                     return JSON.parse(item);
                 } catch {
                     return item;
                 }
-            }) : [];
+            });
 
             return {
-                conversation: conversation || {},
-                order: order || {},
-                metadata: metadata || {},
-                history: processedHistory
+                conversation: parseRedisObject(conversation),
+                order: parseRedisObject(order),
+                metadata: parseRedisObject(metadata),
+                history: parsedHistory
             };
         } catch (error) {
             logger.error('ErrorGettingContext', { threadId, error });
