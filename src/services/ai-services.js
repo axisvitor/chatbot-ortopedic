@@ -176,11 +176,14 @@ class AIServices {
                         return { type: 'text', response: null, from: message.from };
                     }
 
-                    if (response) {
-                        await this.whatsAppService.sendText(message.from, response);
+                    // Garante que a resposta seja uma string
+                    const textResponse = String(response || '').trim();
+                    
+                    if (textResponse) {
+                        await this.whatsAppService.sendText(message.from, textResponse);
                     }
 
-                    return { type: 'text', response, from: message.from };
+                    return { type: 'text', response: textResponse, from: message.from };
                 } catch (error) {
                     console.error('[AIServices] Erro ao processar mensagem:', error);
                     const errorMsg = '❌ Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.';

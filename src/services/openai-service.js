@@ -596,7 +596,7 @@ class OpenAIService {
                     role: "user",
                     content: messageText
                 });
-                return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
+                return String("⏳ Aguarde um momento enquanto processo sua mensagem anterior...").trim();
             }
 
             // 4. Adiciona a mensagem e executa
@@ -609,7 +609,8 @@ class OpenAIService {
                 }
             });
 
-            return response;
+            // 5. Garante que a resposta seja uma string
+            return String(response || '').trim();
 
         } catch (error) {
             logger.error('ErrorProcessingMessage', { 
