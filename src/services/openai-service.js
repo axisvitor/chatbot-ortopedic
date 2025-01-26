@@ -629,7 +629,7 @@ class OpenAIService {
                     threadId,
                     content: message.content 
                 });
-                return;
+                return null;
             }
 
             // Adiciona a mensagem
@@ -646,8 +646,12 @@ class OpenAIService {
                 }
             });
 
-            // Executa o assistant e retorna a resposta
+            // Executa o assistant e aguarda resposta
             const response = await this.runAssistant(threadId);
+            
+            // Registra a resposta para evitar loops
+            this.lastAssistantResponse = response;
+            
             return response;
 
         } catch (error) {
@@ -1566,10 +1570,10 @@ class OpenAIService {
             }
 
             // Cria a mensagem
-            const result = await this.client.beta.threads.messages.create(threadId, {
-                role: message.role,
-                content: content
-            });
+            const result = await this.client.beta.threads.messages.create(
+                threadId,
+                message
+            );
 
             logger.info('MessageCreated', { 
                 metadata: {
