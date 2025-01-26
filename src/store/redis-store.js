@@ -31,11 +31,52 @@ class RedisStore {
                 stack: err.stack,
                 timestamp: new Date().toISOString()
             });
+            // Tenta reconectar automaticamente em caso de erro
+            this._reconnect();
         });
 
         this.client.on('connect', () => {
             console.log('[Redis] Redis conectado com sucesso');
         });
+
+        // Conecta automaticamente ao Redis
+        this._connect();
+    }
+
+    // Método privado para conectar ao Redis
+    async _connect() {
+        try {
+            if (!this.client.isOpen) {
+                await this.client.connect();
+                console.log('[Redis] Conexão estabelecida com sucesso');
+            }
+        } catch (error) {
+            console.error('[Redis] Erro ao conectar:', error);
+            // Tenta reconectar em caso de erro
+            setTimeout(() => this._reconnect(), 5000);
+        }
+    }
+
+    // Método privado para reconexão
+    async _reconnect() {
+        console.log('[Redis] Tentando reconectar...');
+        try {
+            if (this.client.isOpen) {
+                await this.client.quit();
+            }
+            this.client = createClient({
+                socket: {
+                    host: REDIS_CONFIG.host,
+                    port: REDIS_CONFIG.port
+                },
+                password: REDIS_CONFIG.password
+            });
+            await this._connect();
+        } catch (error) {
+            console.error('[Redis] Erro na reconexão:', error);
+            // Agenda nova tentativa
+            setTimeout(() => this._reconnect(), 5000);
+        }
     }
 
     async connect() {

@@ -8,16 +8,26 @@ class OrderApi extends NuvemshopApiBase {
         super(client, cacheService);
         
         this.cachePrefix = NUVEMSHOP_CONFIG.cache.prefix + 'order:';
+        // Reduzir campos padrão para apenas os necessários
         this.defaultFields = [
             'id',
             'number',
             'status',
             'payment_status',
             'shipping_status',
-            'customer',
-            'products',
             'shipping_tracking_number',
-            'shipping_tracking_url'
+            'shipping_tracking_url',
+            'total',
+            'customer.name',
+            'customer.email',
+            'customer.phone',
+            'shipping_address.address',
+            'shipping_address.city',
+            'shipping_address.state',
+            'shipping_address.zipcode',
+            'products.id',
+            'products.name',
+            'products.quantity'
         ].join(',');
     }
 
@@ -54,46 +64,27 @@ class OrderApi extends NuvemshopApiBase {
 
     // Métodos principais
     async getOrderByNumber(orderNumber) {
-        this.validateOrderNumber(orderNumber);
-        
-        // Remove tudo que não for número
-        const cleanNumber = String(orderNumber).replace(/[^\d]/g, '');
-        
-        // Gera as chaves do cache
+        const cleanNumber = this.validateOrderNumber(orderNumber).replace(/[^\d]/g, '');
         const cacheKey = `${this.cachePrefix}number:${cleanNumber}`;
         
-        // Tenta buscar do cache primeiro
-        const cachedOrder = await this.cacheService.get(cacheKey);
-        if (cachedOrder) {
-            console.log('[Nuvemshop] Pedido encontrado no cache:', {
-                numeroOriginal: orderNumber,
-                numeroLimpo: cleanNumber,
-                timestamp: new Date().toISOString()
-            });
-            return JSON.parse(cachedOrder);
-        }
-
         try {
-            console.log('[Nuvemshop] Buscando pedido:', {
-                numeroOriginal: orderNumber,
-                numeroLimpo: cleanNumber,
-                timestamp: new Date().toISOString()
-            });
+            // Tenta buscar do cache
+            const cachedOrder = await this.cacheService.get(cacheKey);
+            if (cachedOrder) {
+                return this._cleanOrderData(JSON.parse(cachedOrder));
+            }
 
-            // Busca usando o endpoint de busca geral primeiro
-            const searchResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+            // Busca direto pelo número
+            const searchResponse = await this.client.get('/orders', {
                 params: {
                     q: cleanNumber,
-                    fields: this.defaultFields,
-                    per_page: 50
+                    fields: this.defaultFields
                 }
             });
 
-            // Se não encontrar nada, tenta buscar diretamente pelo número
-            if (!searchResponse?.data || !Array.isArray(searchResponse.data) || searchResponse.data.length === 0) {
-                console.log('[Nuvemshop] Nada encontrado na busca geral, tentando busca direta');
-                
-                const directResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+            // Se não encontrou na busca geral, tenta busca direta
+            if (!searchResponse?.data?.length) {
+                const directResponse = await this.client.get('/orders', {
                     params: {
                         number: cleanNumber,
                         fields: this.defaultFields
@@ -109,12 +100,11 @@ class OrderApi extends NuvemshopApiBase {
                     return null;
                 }
 
-                const order = directResponse.data[0];
-                await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
-                return order;
+                const cleanedOrder = this._cleanOrderData(directResponse.data[0]);
+                await this.cacheService.set(cacheKey, JSON.stringify(directResponse.data[0]), 300);
+                return cleanedOrder;
             }
 
-            // Encontra o pedido com o número exato
             const order = searchResponse.data.find(o => 
                 String(o.number).replace(/[^\d]/g, '') === cleanNumber
             );
@@ -128,20 +118,19 @@ class OrderApi extends NuvemshopApiBase {
                 return null;
             }
 
-            // Salva no cache
+            const cleanedOrder = this._cleanOrderData(order);
             await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
             
             console.log('[Nuvemshop] Pedido encontrado:', {
                 numeroOriginal: orderNumber,
                 numeroLimpo: cleanNumber,
-                id: order.id,
-                status: order.status,
-                rastreio: order.shipping_tracking_number,
+                id: cleanedOrder.id,
+                status: cleanedOrder.status,
+                rastreio: cleanedOrder.tracking?.code,
                 timestamp: new Date().toISOString()
             });
             
-            return order;
-
+            return cleanedOrder;
         } catch (error) {
             console.error('[Nuvemshop] Erro ao buscar pedido:', {
                 numeroOriginal: orderNumber,
@@ -170,7 +159,7 @@ class OrderApi extends NuvemshopApiBase {
                 id: numericId,
                 timestamp: new Date().toISOString()
             });
-            return JSON.parse(cachedOrder);
+            return this._cleanOrderData(JSON.parse(cachedOrder));
         }
 
         try {
@@ -179,7 +168,6 @@ class OrderApi extends NuvemshopApiBase {
                 timestamp: new Date().toISOString()
             });
 
-            // Busca direta pelo ID
             const response = await this.client.get(`/orders/${numericId}`, {
                 params: {
                     fields: this.defaultFields
@@ -187,29 +175,21 @@ class OrderApi extends NuvemshopApiBase {
             });
 
             if (response?.data) {
+                const cleanedOrder = this._cleanOrderData(response.data);
                 // Salva no cache
                 await this.cacheService.set(
                     cacheKey, 
                     JSON.stringify(response.data),
                     NUVEMSHOP_CONFIG.cache.ttl
                 );
-                return response.data;
+                return cleanedOrder;
             }
 
             return null;
         } catch (error) {
             if (error.response?.status === 404) {
-                console.log('[Nuvemshop] Pedido não encontrado:', {
-                    id: numericId,
-                    timestamp: new Date().toISOString()
-                });
                 return null;
             }
-            console.error('[Nuvemshop] Erro ao buscar pedido:', {
-                id: numericId,
-                erro: error.message,
-                timestamp: new Date().toISOString()
-            });
             throw error;
         }
     }
@@ -412,6 +392,49 @@ class OrderApi extends NuvemshopApiBase {
             style: 'currency',
             currency: 'BRL'
         }).format(value);
+    }
+
+    /**
+     * Limpa e simplifica os dados do pedido
+     * @private
+     * @param {Object} order - Dados completos do pedido
+     * @returns {Object} Dados limpos e simplificados
+     */
+    _cleanOrderData(order) {
+        if (!order) return null;
+
+        // Extrai apenas as informações essenciais
+        return {
+            id: order.id,
+            number: order.number,
+            status: {
+                order: this.formatOrderStatus(order.status),
+                payment: order.payment_status,
+                shipping: order.shipping_status
+            },
+            tracking: order.shipping_tracking_number ? {
+                code: order.shipping_tracking_number,
+                url: order.shipping_tracking_url
+            } : null,
+            customer: order.customer ? {
+                name: order.customer.name,
+                email: order.customer.email,
+                phone: order.customer.phone
+            } : null,
+            shipping_address: order.shipping_address ? {
+                full: `${order.shipping_address.address}, ${order.shipping_address.city} - ${order.shipping_address.state}, ${order.shipping_address.zipcode}`,
+                address: order.shipping_address.address,
+                city: order.shipping_address.city,
+                state: order.shipping_address.state,
+                zipcode: order.shipping_address.zipcode
+            } : null,
+            products: order.products ? order.products.map(product => ({
+                id: product.id,
+                name: product.name,
+                quantity: product.quantity
+            })) : [],
+            total: this.formatPrice(order.total)
+        };
     }
 
     // Métodos auxiliares

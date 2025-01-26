@@ -145,53 +145,25 @@ class TrackingService {
 
             const response = await this._makeRequest(this.config.paths.status, data);
             
-            // Log detalhado da resposta
-            console.log('📦 [Tracking] Resposta completa da API:', {
-                code: response?.code,
-                message: response?.message,
-                responseData: JSON.stringify(response, null, 2)
-            });
-
-            // Valida a resposta
-            if (!response || response.code !== 0 || !response.data || !response.data.accepted) {
-                throw new Error('Resposta inválida da API');
-            }
-
-            // Pega o primeiro item aceito
-            const trackInfo = response.data.accepted[0];
-            if (!trackInfo || !trackInfo.track_info) {
-                throw new Error('Dados de rastreamento não encontrados');
-            }
-
-            // Extrai as informações relevantes
-            const trackingData = {
-                status: trackInfo.track_info.latest_status?.status || 'Unknown',
-                sub_status: trackInfo.track_info.latest_status?.sub_status,
-                last_event: {
-                    time: trackInfo.track_info.latest_event?.time_iso,
-                    time_utc: trackInfo.track_info.latest_event?.time_utc,
-                    stage: trackInfo.track_info.latest_event?.key_stage
-                },
-                carrier: {
-                    name: trackInfo.track_info.carrier?.name,
-                    country: trackInfo.track_info.carrier?.country
-                },
-                events: trackInfo.track_info.milestone || []
-            };
-
-            console.log('✅ [Tracking] Dados processados:', {
+            // Limpa e simplifica os dados antes de logar
+            const cleanedData = this._cleanTrackingData(response);
+            
+            // Log apenas dos dados relevantes
+            console.log('📦 [Tracking] Dados do rastreamento:', {
                 trackingNumber,
-                status: trackingData.status,
-                lastEvent: trackingData.last_event
+                status: cleanedData?.status,
+                latestEvent: cleanedData?.latest_event
             });
 
-            return trackingData;
+            if (!cleanedData) {
+                throw new Error('Dados de rastreamento não encontrados ou inválidos');
+            }
 
+            return cleanedData;
         } catch (error) {
             console.error('❌ [Tracking] Erro ao consultar status:', {
                 trackingNumber,
-                error: error.message,
-                stack: error.stack
+                error: error.message
             });
             throw error;
         }
@@ -630,6 +602,30 @@ class TrackingService {
     }
 
     /**
+     * Atualiza o status do pedido na Nuvemshop quando entregue
+     * @private
+     */
+    async _updateNuvemshopOrderStatus(trackingNumber) {
+        try {
+            // Busca o pedido associado ao código de rastreio
+            const order = await this.nuvemshopService.findOrderByTrackingNumber(trackingNumber);
+            
+            if (!order) {
+                console.warn(`[Tracking] Pedido não encontrado para o código de rastreio: ${trackingNumber}`);
+                return;
+            }
+
+            // Atualiza o status do pedido para "entregue"
+            await this.nuvemshopService.updateOrderStatus(order.id, 'delivered');
+            
+            console.log(`[Tracking] Status do pedido ${order.number} atualizado para entregue na Nuvemshop`);
+        } catch (error) {
+            console.error('[Tracking] Erro ao atualizar status do pedido na Nuvemshop:', error);
+            // Não propaga o erro para não interromper o fluxo principal
+        }
+    }
+
+    /**
      * Busca pacotes com taxas pendentes na alfândega
      * @returns {Promise<Array>} Lista de pacotes com taxas pendentes
      */
@@ -670,6 +666,45 @@ class TrackingService {
             console.error('[Tracking] Erro ao buscar pacotes com taxas:', error);
             throw error;
         }
+    }
+
+    /**
+     * Limpa e simplifica os dados de rastreamento
+     * @private
+     * @param {Object} response - Resposta completa da API
+     * @returns {Object} Dados limpos e simplificados
+     */
+    _cleanTrackingData(response) {
+        if (!response?.data?.accepted?.[0]) {
+            return null;
+        }
+
+        const trackInfo = response.data.accepted[0];
+        if (!trackInfo?.track_info) {
+            return null;
+        }
+
+        // Extrai apenas as informações essenciais
+        return {
+            number: trackInfo.number,
+            status: {
+                current: trackInfo.track_info.latest_status?.status || 'Unknown',
+                description: this._translateStatus(trackInfo.track_info.latest_status?.status)
+            },
+            latest_event: {
+                time: trackInfo.track_info.latest_event?.time_iso,
+                description: trackInfo.track_info.latest_event?.description,
+                location: trackInfo.track_info.latest_event?.location || 'Local não informado'
+            },
+            // Mantém apenas os 3 últimos eventos significativos
+            recent_events: (trackInfo.track_info.milestone || [])
+                .slice(0, 3)
+                .map(event => ({
+                    time: event.time_iso,
+                    description: event.description,
+                    location: event.location || 'Local não informado'
+                }))
+        };
     }
 }
 

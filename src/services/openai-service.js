@@ -39,6 +39,24 @@ class OpenAIService {
         this.messageQueue = new Map(); // Map para fila de mensagens por thread
         this.processingTimers = new Map(); // Map para controlar timers de processamento
         
+        // Rate Limiting - Otimizado para gpt-4o-mini
+        this.rateLimitConfig = {
+            maxRequestsPerMin: 400, // 500 RPM max, mantendo margem de segurança
+            maxRequestsPerDay: 9000, // 10000 RPD max
+            maxTokensPerMin: 180000, // 200k TPM max
+            windowMs: 60 * 1000, // Janela de 1 minuto
+            retryAfter: 5 * 1000, // Reduzido para 5 segundos
+            maxTokensPerRequest: 4000, // Limite por requisição para evitar exceder TPM
+            batchSize: 5 // Número de mensagens para processar em batch
+        };
+        
+        // Contadores de rate limit
+        this.requestCountsPerMin = new Map();
+        this.requestCountsPerDay = new Map();
+        this.tokenCountsPerMin = new Map();
+        this.lastRequestTime = new Map();
+        this.dayStartTime = Date.now();
+
         // Configurações de otimização
         this.MESSAGE_DELAY = 8000; // 8 segundos de delay
         this.THREAD_CACHE_TTL = 30 * 60 * 1000; // 30 minutos de cache
@@ -51,11 +69,13 @@ class OpenAIService {
         this.businessHoursService = businessHoursService;
         this.orderValidationService = orderValidationService;
         this.financialService = financialService;
-        this.departmentService = departmentService; // Adicionado DepartmentService
+        this.departmentService = departmentService;
         this.whatsappService = whatsappService;
 
         // Inicializa limpeza periódica
         setInterval(() => this._cleanupCache(), this.THREAD_CACHE_TTL);
+        // Limpa contadores de rate limit periodicamente
+        setInterval(() => this._cleanupRateLimits(), this.rateLimitConfig.windowMs);
         
         // Define as funções disponíveis para o Assistant
         this.functions = this._getAssistantFunctions();
@@ -65,6 +85,83 @@ class OpenAIService {
             baseUrl: OPENAI_CONFIG.baseUrl,
             timestamp: new Date().toISOString()
         });
+    }
+
+    /**
+     * Verifica e atualiza o rate limit
+     * @private
+     * @param {string} threadId - ID da thread
+     * @param {number} estimatedTokens - Estimativa de tokens da requisição
+     * @returns {Promise<boolean>} - true se pode prosseguir, false se deve esperar
+     */
+    async _checkRateLimit(threadId, estimatedTokens = 1000) {
+        const now = Date.now();
+        const windowStart = now - this.rateLimitConfig.windowMs;
+        const dayStart = now - (24 * 60 * 60 * 1000);
+        
+        // Reseta contadores diários se necessário
+        if (this.dayStartTime < dayStart) {
+            this.requestCountsPerDay.clear();
+            this.dayStartTime = now;
+        }
+        
+        // Limpa contadores antigos por minuto
+        for (const [id, time] of this.lastRequestTime.entries()) {
+            if (time < windowStart) {
+                this.requestCountsPerMin.delete(id);
+                this.tokenCountsPerMin.delete(id);
+                this.lastRequestTime.delete(id);
+            }
+        }
+        
+        // Obtém contadores atuais
+        const currentMinCount = this.requestCountsPerMin.get(threadId) || 0;
+        const currentDayCount = this.requestCountsPerDay.get(threadId) || 0;
+        const currentTokenCount = this.tokenCountsPerMin.get(threadId) || 0;
+        
+        // Verifica limites
+        if (currentMinCount >= this.rateLimitConfig.maxRequestsPerMin ||
+            currentDayCount >= this.rateLimitConfig.maxRequestsPerDay ||
+            currentTokenCount + estimatedTokens > this.rateLimitConfig.maxTokensPerMin) {
+            
+            logger.warn('RateLimitExceeded', {
+                threadId,
+                currentMinCount,
+                currentDayCount,
+                currentTokenCount,
+                estimatedTokens,
+                timestamp: new Date().toISOString()
+            });
+            
+            // Agenda retry
+            await new Promise(resolve => setTimeout(resolve, this.rateLimitConfig.retryAfter));
+            return this._checkRateLimit(threadId, estimatedTokens);
+        }
+        
+        // Atualiza contadores
+        this.requestCountsPerMin.set(threadId, currentMinCount + 1);
+        this.requestCountsPerDay.set(threadId, currentDayCount + 1);
+        this.tokenCountsPerMin.set(threadId, currentTokenCount + estimatedTokens);
+        this.lastRequestTime.set(threadId, now);
+        
+        return true;
+    }
+
+    /**
+     * Limpa contadores de rate limit antigos
+     * @private
+     */
+    _cleanupRateLimits() {
+        const now = Date.now();
+        const windowStart = now - this.rateLimitConfig.windowMs;
+        
+        for (const [threadId, time] of this.lastRequestTime.entries()) {
+            if (time < windowStart) {
+                this.requestCountsPerMin.delete(threadId);
+                this.tokenCountsPerMin.delete(threadId);
+                this.lastRequestTime.delete(threadId);
+            }
+        }
     }
 
     /**
@@ -398,63 +495,26 @@ class OpenAIService {
      */
     async processQueuedMessages(threadId) {
         try {
-            // Obtém fila de mensagens
-            const queue = this.messageQueue.get(threadId) || [];
-            if (queue.length === 0) return;
+            const messages = this.messageQueue.get(threadId) || [];
+            if (!messages.length) return null;
 
-            logger.info('ProcessingQueuedMessages', {
-                threadId,
-                queueLength: queue.length
-            });
+            // Processa mensagens em batch
+            const batches = [];
+            for (let i = 0; i < messages.length; i += this.rateLimitConfig.batchSize) {
+                batches.push(messages.slice(i, i + this.rateLimitConfig.batchSize));
+            }
 
-            // Limpa fila e timer
+            const responses = [];
+            for (const batch of batches) {
+                const response = await this._processBatch(threadId, batch);
+                if (response) responses.push(response);
+            }
+
+            // Limpa a fila após processamento
             this.messageQueue.delete(threadId);
             this.processingTimers.delete(threadId);
 
-            // Obtém thread do cache/Redis
-            const thread = await this._getThread(threadId);
-            
-            // Cria mensagem consolidada com todas as entradas da fila
-            const messages = queue.map(m => m.text).filter(Boolean);
-            if (messages.length === 0) {
-                throw new Error('Nenhuma mensagem válida na fila');
-            }
-            
-            const consolidatedMessage = messages.join('\n');
-            if (!consolidatedMessage.trim()) {
-                throw new Error('Mensagem consolidada está vazia');
-            }
-
-            logger.info('ConsolidatedMessage', {
-                threadId,
-                messageCount: messages.length,
-                consolidatedLength: consolidatedMessage.length
-            });
-            
-            // Adiciona mensagem à thread
-            const message = await this.addMessage(threadId, {
-                role: 'user',
-                content: consolidatedMessage
-            });
-
-            // Atualiza cache
-            if (thread) {
-                thread.messages = thread.messages || [];
-                thread.messages.push(message);
-                if (thread.messages.length > this.MAX_THREAD_MESSAGES) {
-                    thread.messages = thread.messages.slice(-this.MAX_THREAD_MESSAGES);
-                }
-                this.threadCache.set(threadId, thread);
-            }
-
-            // Executa o assistant
-            const run = await this.runAssistant(threadId);
-            await this.registerActiveRun(threadId, run.id);
-            const response = await this.waitForResponse(threadId, run.id);
-            await this.removeActiveRun(threadId);
-            
-            return response;
-
+            return responses.join('\n');
         } catch (error) {
             logger.error('ErrorProcessingQueuedMessages', {
                 threadId,
@@ -469,6 +529,42 @@ class OpenAIService {
             
             throw error;
         }
+    }
+
+    /**
+     * Processa mensagens em batch para otimizar uso da API
+     * @private
+     * @param {string} threadId - ID da thread
+     * @param {Array} messages - Array de mensagens para processar
+     * @returns {Promise<Array>} - Array com respostas processadas
+     */
+    async _processBatch(threadId, messages) {
+        // Estima tokens total do batch
+        const estimatedTokens = messages.reduce((total, msg) => {
+            return total + (msg.text.length * 1.3); // Estimativa rough de tokens
+        }, 0);
+
+        // Verifica rate limit para o batch
+        await this._checkRateLimit(threadId, estimatedTokens);
+
+        // Consolida mensagens do batch
+        const consolidatedMessage = messages
+            .map(msg => msg.text)
+            .join('\n---\n');
+
+        // Adiciona mensagem consolidada
+        const message = await this.addMessage(threadId, {
+            role: 'user',
+            content: consolidatedMessage
+        });
+
+        // Executa o assistant
+        const run = await this.runAssistant(threadId);
+        await this.registerActiveRun(threadId, run.id);
+        const response = await this.waitForResponse(threadId, run.id);
+        await this.removeActiveRun(threadId);
+
+        return response;
     }
 
     /**
@@ -611,6 +707,11 @@ class OpenAIService {
      */
     async addMessageAndRun(threadId, message) {
         try {
+            // Verifica rate limit antes de prosseguir
+            if (!await this._checkRateLimit(threadId)) {
+                throw new Error('Rate limit excedido. Tente novamente em alguns segundos.');
+            }
+
             logger.info('StartingMessageAndRun', { threadId, messageRole: message.role });
 
             // Se houver run ativo, coloca na fila e retorna
