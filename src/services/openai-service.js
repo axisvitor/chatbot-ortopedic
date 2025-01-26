@@ -585,7 +585,7 @@ class OpenAIService {
             const threadId = await this.getOrCreateThreadForCustomer(customerId);
             
             // 2. Verifica se é um comando
-            if (messageText.startsWith('#')) {
+            if (typeof messageText === 'string' && messageText.startsWith('#')) {
                 const handled = await this.handleCommand(customerId, messageText);
                 if (handled) return null;
             }
@@ -599,18 +599,28 @@ class OpenAIService {
                 return "⏳ Aguarde um momento enquanto processo sua mensagem anterior...";
             }
 
-            // 4. Adiciona mensagem e executa
-            return await this.addMessageAndRun(threadId, {
+            // 4. Adiciona a mensagem e executa
+            const response = await this.addMessageAndRun(threadId, {
                 role: "user",
-                content: messageText
+                content: messageText,
+                metadata: {
+                    timestamp,
+                    customerId
+                }
             });
 
+            return response;
+
         } catch (error) {
-            logger.error('ErrorProcessingMessage', { customerId, error });
-            if (error.code === 'rate_limit_exceeded') {
-                return "⏳ Sistema está muito ocupado. Por favor, aguarde alguns segundos e tente novamente.";
-            }
-            return "Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.";
+            logger.error('ErrorProcessingMessage', { 
+                error: { 
+                    customerId, 
+                    message: error.message,
+                    stack: error.stack
+                }
+            });
+            console.error('[OpenAI] Erro ao processar mensagem:', error);
+            throw error;
         }
     }
 
@@ -652,7 +662,7 @@ class OpenAIService {
             // Registra a resposta para evitar loops
             this.lastAssistantResponse = response;
             
-            return response;
+            return String(response || '').trim();
 
         } catch (error) {
             logger.error('ErrorAddingMessage', { threadId, error });
@@ -835,7 +845,7 @@ class OpenAIService {
             // Registra a resposta para evitar loops
             this.lastAssistantResponse = response;
             
-            return response;
+            return String(response || '').trim();
 
         } catch (error) {
             logger.error('ErrorAddingMessage', { threadId, error });
@@ -967,7 +977,8 @@ class OpenAIService {
 
             const response = await this.runAssistant(threadId);
             this.lastAssistantResponse = response; // Guarda a última resposta
-            return response;
+            return String(response || '').trim();
+
         } catch (error) {
             logger.error('ErrorAddingMessage', { threadId, error });
             throw error;
