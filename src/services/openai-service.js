@@ -673,41 +673,20 @@ class OpenAIService {
 
             const response = await this.runAssistant(threadId);
             this.lastAssistantResponse = response; // Guarda a última resposta
-            return String(response || '').trim();
+            
+            // Atualiza o contexto com a nova mensagem
+            const currentContext = await this.contextManager.getContext(threadId);
+            currentContext.conversation = currentContext.conversation || {};
+            currentContext.conversation.lastMessage = message.content;
+            currentContext.conversation.interactionCount = (currentContext.conversation.interactionCount || 0) + 1;
+            currentContext.conversation.lastUpdate = new Date().toISOString();
+            
+            await this.contextManager.updateContext(threadId, currentContext);
+
+            return { content: String(response || '').trim() };
 
         } catch (error) {
             logger.error('ErrorAddingMessage', { threadId, error });
-            throw error;
-        }
-    }
-
-    async getLastMessage(threadId) {
-        try {
-            const messages = await this.client.beta.threads.messages.list(threadId);
-            if (messages.data && messages.data.length > 0) {
-                return messages.data[0];
-            }
-            return null;
-        } catch (error) {
-            logger.error('ErrorGettingLastMessage', { threadId, error });
-            return null;
-        }
-    }
-
-    async runAssistant(threadId) {
-        try {
-            // Cria um novo run
-            const run = await this.client.beta.threads.runs.create(
-                threadId,
-                { assistant_id: this.assistantId }
-            );
-
-            // Aguarda e retorna a resposta processada
-            const response = await this.waitForResponse(threadId, run.id);
-            return response;
-
-        } catch (error) {
-            logger.error('ErrorRunningAssistant', { threadId, error });
             throw error;
         }
     }
@@ -876,11 +855,13 @@ class OpenAIService {
             this.lastAssistantResponse = response; // Guarda a última resposta
             
             // Atualiza o contexto com a nova mensagem
-            await this.contextManager.updateContext(threadId, (context) => {
-                context.conversation.lastMessage = message.content;
-                context.conversation.interactionCount++;
-                return context;
-            });
+            const currentContext = await this.contextManager.getContext(threadId);
+            currentContext.conversation = currentContext.conversation || {};
+            currentContext.conversation.lastMessage = message.content;
+            currentContext.conversation.interactionCount = (currentContext.conversation.interactionCount || 0) + 1;
+            currentContext.conversation.lastUpdate = new Date().toISOString();
+            
+            await this.contextManager.updateContext(threadId, currentContext);
 
             return { content: String(response || '').trim() };
 

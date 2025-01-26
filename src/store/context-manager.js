@@ -11,15 +11,60 @@ class ContextManager {
         };
     }
 
+    _createInitialContext() {
+        return {
+            conversation: {
+                lastMessage: null,
+                interactionCount: 0,
+                lastUpdate: new Date().toISOString()
+            },
+            metadata: {},
+            order: {},
+            history: []
+        };
+    }
+
+    _validateContext(context) {
+        // Garante que o contexto tem a estrutura básica
+        if (!context) {
+            return this._createInitialContext();
+        }
+
+        return {
+            conversation: {
+                lastMessage: context.conversation?.lastMessage || null,
+                interactionCount: parseInt(context.conversation?.interactionCount || 0, 10),
+                lastUpdate: context.conversation?.lastUpdate || new Date().toISOString()
+            },
+            metadata: context.metadata || {},
+            order: context.order || {},
+            history: Array.isArray(context.history) ? context.history : []
+        };
+    }
+
     async saveContext(threadId, context) {
+        if (!threadId) {
+            throw new Error('ThreadId é obrigatório');
+        }
+
         try {
             const baseKey = `context:${threadId}`;
+            const validatedContext = this._validateContext(context);
             
             // Prepara os dados para salvar
             const prepareObjectForRedis = (obj) => {
                 if (!obj) return {};
                 return Object.entries(obj).reduce((acc, [key, value]) => {
-                    acc[key] = typeof value === 'object' ? JSON.stringify(value) : value;
+                    try {
+                        acc[key] = typeof value === 'object' ? JSON.stringify(value) : String(value);
+                    } catch (error) {
+                        logger.warn('ErrorStringifyingValue', { 
+                            threadId, 
+                            key, 
+                            error: error.message 
+                        });
+                        acc[key] = String(value);
+                    }
                     return acc;
                 }, {});
             };
@@ -27,29 +72,29 @@ class ContextManager {
             // Executa a transação com retry
             await this.redisStore.executeTransaction(async (multi) => {
                 // Salva dados da conversa
-                if (context.conversation) {
-                    const conversationData = prepareObjectForRedis(context.conversation);
+                if (validatedContext.conversation) {
+                    const conversationData = prepareObjectForRedis(validatedContext.conversation);
                     await multi.hSet(`${baseKey}:conversation`, conversationData);
                     await multi.expire(`${baseKey}:conversation`, this.TTL_CONFIG.conversation);
                 }
 
                 // Salva dados do pedido
-                if (context.order) {
-                    const orderData = prepareObjectForRedis(context.order);
+                if (validatedContext.order) {
+                    const orderData = prepareObjectForRedis(validatedContext.order);
                     await multi.hSet(`${baseKey}:order`, orderData);
                     await multi.expire(`${baseKey}:order`, this.TTL_CONFIG.order);
                 }
 
                 // Salva metadados
-                if (context.metadata) {
-                    const metadataData = prepareObjectForRedis(context.metadata);
+                if (validatedContext.metadata) {
+                    const metadataData = prepareObjectForRedis(validatedContext.metadata);
                     await multi.hSet(`${baseKey}:metadata`, metadataData);
                     await multi.expire(`${baseKey}:metadata`, this.TTL_CONFIG.metadata);
                 }
 
                 // Salva histórico (mantém apenas os últimos 5 itens)
-                if (context.history && Array.isArray(context.history)) {
-                    const historyJson = JSON.stringify(context.history);
+                if (validatedContext.history && Array.isArray(validatedContext.history)) {
+                    const historyJson = JSON.stringify(validatedContext.history);
                     await multi.lPush(`${baseKey}:history`, historyJson);
                     await multi.lTrim(`${baseKey}:history`, 0, 4);
                     await multi.expire(`${baseKey}:history`, this.TTL_CONFIG.history);
@@ -59,7 +104,7 @@ class ContextManager {
             logger.info('ContextSaved', { 
                 threadId,
                 timestamp: new Date().toISOString(),
-                contextSize: JSON.stringify(context).length
+                contextSize: JSON.stringify(validatedContext).length
             });
 
         } catch (error) {
@@ -121,6 +166,10 @@ class ContextManager {
     }
 
     async updateContext(threadId, context) {
+        if (!threadId) {
+            throw new Error('ThreadId é obrigatório');
+        }
+
         try {
             const lockKey = `lock:${threadId}`;
             const acquired = await this.redisStore.set(lockKey, 1, { 
@@ -151,27 +200,6 @@ class ContextManager {
             });
             throw error;
         }
-    }
-
-    _createInitialContext() {
-        return {
-            conversation: {
-                lastMessage: null,
-                intent: null,
-                waitingFor: null,
-                interactionCount: 0
-            },
-            order: {},
-            metadata: {
-                lastToolUsed: null,
-                lastFunctionResponse: null,
-                rateLimitState: {
-                    tokensUsed: 0,
-                    lastRequest: new Date().toISOString()
-                }
-            },
-            history: []
-        };
     }
 }
 
