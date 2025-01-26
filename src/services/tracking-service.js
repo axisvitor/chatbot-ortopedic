@@ -277,21 +277,28 @@ class TrackingService {
      * @private
      */
     _checkForTaxation(trackingData) {
-        if (!trackingData || !trackingData.status) {
+        if (!trackingData || (!trackingData.status?.current && typeof trackingData.status !== 'string')) {
             return false;
         }
 
+        const statusText = typeof trackingData.status === 'string' 
+            ? trackingData.status 
+            : trackingData.status.current;
+
+        if (!statusText) return false;
+
         const taxationTerms = [
-            'taxa a pagar',
-            'aguardando pagamento',
-            'pagamento de taxas',
-            'tributos',
+            'taxa',
             'imposto',
-            'darf'
+            'tributação',
+            'alfândega',
+            'customs',
+            'taxation',
+            'tax'
         ];
 
         return taxationTerms.some(term => 
-            trackingData.status.toLowerCase().includes(term)
+            statusText.toLowerCase().includes(term)
         );
     }
 
@@ -416,16 +423,17 @@ class TrackingService {
      */
     async _formatTrackingResponse(trackInfo, from) {
         try {
-            if (!trackInfo || !trackInfo.status) {
+            if (!trackInfo) {
                 return 'Desculpe, não foi possível obter informações de rastreamento no momento.';
             }
 
             // Emoji baseado no status
             const statusEmoji = this.STATUS_EMOJIS[trackInfo.status] || '📦';
+            const statusText = this._translateStatus(trackInfo.status);
 
             // Formata a data do último evento
-            const lastEventDate = trackInfo.last_event?.time 
-                ? new Date(trackInfo.last_event.time).toLocaleString('pt-BR', {
+            const eventDate = trackInfo.time 
+                ? new Date(trackInfo.time).toLocaleString('pt-BR', {
                     timeZone: 'America/Sao_Paulo',
                     day: '2-digit',
                     month: '2-digit',
@@ -435,28 +443,33 @@ class TrackingService {
                   })
                 : 'Data não disponível';
 
-            // Status principal
+            // Monta a mensagem com todas as informações
             let message = `${statusEmoji} *Status da Encomenda*\n\n`;
-            message += `📍 *Status:* ${this._translateStatus(trackInfo.status)}\n`;
-            message += `🕒 *Última Atualização:* ${lastEventDate}\n`;
+            
+            // Status principal
+            message += `📍 *Status:* ${statusText}\n`;
+            message += `🕒 *Última Atualização:* ${eventDate}\n`;
 
-            // Adiciona detalhes do sub-status se disponível
+            // Sub-status e Stage
             if (trackInfo.sub_status) {
                 message += `📝 *Detalhe:* ${this._translateSubStatus(trackInfo.sub_status)}\n`;
             }
-
-            // Adiciona local do último evento se disponível
-            if (trackInfo.last_event?.stage) {
-                message += `📌 *Situação:* ${this._translateStage(trackInfo.last_event.stage)}\n`;
+            
+            if (trackInfo.stage) {
+                message += `📌 *Situação:* ${this._translateStage(trackInfo.stage)}\n`;
             }
 
-            // Adiciona eventos recentes se disponíveis
-            if (trackInfo.events && trackInfo.events.length > 0) {
+            // Local atual
+            if (trackInfo.location) {
+                message += `📍 *Local:* ${trackInfo.location}\n`;
+            }
+
+            // Eventos recentes
+            if (trackInfo.events?.length > 0) {
                 message += '\n📋 *Últimos eventos:*\n';
-                const recentEvents = trackInfo.events.slice(0, 3); // Mostra apenas os 3 eventos mais recentes
-                recentEvents.forEach(event => {
-                    const eventDate = event.time_iso 
-                        ? new Date(event.time_iso).toLocaleString('pt-BR', {
+                trackInfo.events.forEach(event => {
+                    const date = event.time 
+                        ? new Date(event.time).toLocaleString('pt-BR', {
                             timeZone: 'America/Sao_Paulo',
                             day: '2-digit',
                             month: '2-digit',
@@ -464,17 +477,22 @@ class TrackingService {
                             minute: '2-digit'
                           })
                         : 'Data não disponível';
-                    message += `\n• ${eventDate}: ${this._translateStage(event.key_stage) || 'Status não disponível'}`;
+                    
+                    message += `\n• ${date}`;
+                    if (event.stage) {
+                        message += ` - ${this._translateStage(event.stage)}`;
+                    }
+                    if (event.location) {
+                        message += `\n  📍 ${event.location}`;
+                    }
                 });
             }
 
             return message;
+
         } catch (error) {
-            console.error('❌ [Tracking] Erro ao formatar resposta:', {
-                error: error.message,
-                trackInfo
-            });
-            return 'Desculpe, houve um erro ao formatar as informações de rastreamento.';
+            console.error('❌ [Tracking] Erro ao formatar resposta:', error);
+            return 'Desculpe, ocorreu um erro ao formatar as informações de rastreamento.';
         }
     }
 
@@ -675,33 +693,26 @@ class TrackingService {
      * @returns {Object} Dados limpos e simplificados
      */
     _cleanTrackingData(response) {
-        if (!response?.data?.accepted?.[0]) {
+        if (!response?.data?.accepted?.[0]?.track_info) {
             return null;
         }
 
-        const trackInfo = response.data.accepted[0];
-        if (!trackInfo?.track_info) {
-            return null;
-        }
+        const info = response.data.accepted[0].track_info;
+        const latestStatus = info.latest_status || {};
+        const latestEvent = info.latest_event || {};
 
-        // Extrai apenas as informações essenciais
         return {
-            number: trackInfo.number,
-            status: {
-                current: trackInfo.track_info.latest_status?.status || 'Unknown',
-                description: this._translateStatus(trackInfo.track_info.latest_status?.status)
-            },
-            latest_event: {
-                time: trackInfo.track_info.latest_event?.time_iso,
-                description: trackInfo.track_info.latest_event?.description,
-                location: trackInfo.track_info.latest_event?.location || 'Local não informado'
-            },
-            // Mantém apenas os 3 últimos eventos significativos
-            recent_events: (trackInfo.track_info.milestone || [])
+            status: latestStatus.status || 'Unknown',
+            sub_status: latestStatus.sub_status,
+            stage: latestEvent.stage,
+            time: latestEvent.time_iso,
+            location: latestEvent.location || 'Local não informado',
+            description: latestEvent.description,
+            events: (info.milestone || [])
                 .slice(0, 3)
                 .map(event => ({
                     time: event.time_iso,
-                    description: event.description,
+                    stage: event.stage,
                     location: event.location || 'Local não informado'
                 }))
         };
