@@ -127,9 +127,6 @@ class AIServices {
 
     async handleMessage(message) {
         try {
-            // Extrai e valida o texto
-            const { messageText } = this.extractMessageText(message);
-
             // Se for mensagem de imagem
             if (message.type === 'image') {
                 const result = await this.handleImageMessage(message);
@@ -141,7 +138,7 @@ class AIServices {
 
             // Se for mensagem de áudio
             if (message.type === 'audio' || message.type === 'ptt') {
-                console.log('[AIServices] Processando mensagem de áudio:', {
+                console.log('ProcessingAudioMessage', {
                     from: message.from,
                     seconds: message?.message?.audioMessage?.seconds,
                     mimetype: message?.message?.audioMessage?.mimetype
@@ -155,7 +152,7 @@ class AIServices {
                         throw new Error(transcription?.message || 'Falha ao transcrever áudio');
                     }
 
-                    console.log('[AIServices] Áudio transcrito:', { transcription });
+                    console.log('AudioTranscribed', { transcription });
                     
                     // Processa com o OpenAI Assistant
                     const response = await this.openAIService.processCustomerMessage(message.from, {
@@ -174,7 +171,13 @@ class AIServices {
                         from: message.from
                     };
                 } catch (error) {
-                    console.error('[AIServices] Erro ao processar áudio:', error);
+                    console.error('ErrorProcessingAudio', {
+                        error: {
+                            message: error.message,
+                            stack: error.stack
+                        },
+                        from: message.from
+                    });
                     const errorMsg = 'Desculpe, não consegui processar seu áudio. Por favor, tente enviar novamente ou envie como mensagem de texto.';
                     await this.whatsAppService.sendText(message.from, errorMsg);
                     throw error;
@@ -183,22 +186,36 @@ class AIServices {
 
             // Se for mensagem de texto
             if (message.type === 'text') {
+                // Extrai e valida o texto
+                const { messageText } = this.extractMessageText(message);
+
                 // Prepara os dados para o OpenAI
                 const messageData = {
                     customerId: message.from || message.key?.remoteJid?.split('@')[0],
-                    messageText,
+                    messageText: messageText.trim(),
                     messageId: message.messageId || message.key?.id,
                     timestamp: new Date().toISOString()
                 };
 
-                console.log('ProcessingMessage', {
+                // Valida os dados antes de processar
+                if (!messageData.customerId || !messageData.messageText) {
+                    throw new Error('Dados da mensagem inválidos');
+                }
+
+                console.log('ProcessingTextMessage', {
                     messageId: messageData.messageId,
                     customerId: messageData.customerId,
+                    messageLength: messageData.messageText.length,
                     timestamp: messageData.timestamp
                 });
 
                 // Processa a mensagem
                 const response = await this.openAIService.processMessage(messageData);
+
+                // Envia a resposta
+                if (response?.response) {
+                    await this.whatsAppService.sendText(messageData.customerId, response.response);
+                }
 
                 return response;
             }
@@ -206,12 +223,20 @@ class AIServices {
             throw new Error(`Tipo de mensagem não suportado: ${message.type}`);
 
         } catch (error) {
-            console.error('❌ [AIServices] Erro ao processar mensagem:', error);
-            try {
-                await this.sendErrorMessage(message.from, error);
-            } catch (sendError) {
-                console.error('❌ [AIServices] Erro ao enviar mensagem de erro:', sendError);
-            }
+            console.error('ErrorHandlingMessage', {
+                error: {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code
+                },
+                messageId: message?.messageId || message?.key?.id,
+                timestamp: new Date().toISOString()
+            });
+
+            // Envia mensagem de erro para o usuário
+            const errorMessage = '❌ Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.';
+            await this.whatsAppService.sendText(message.from || message.key?.remoteJid?.split('@')[0], errorMessage);
+
             throw error;
         }
     }

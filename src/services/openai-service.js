@@ -620,6 +620,106 @@ class OpenAIService {
         }
     }
 
+    async addMessageAndRun(threadId, messageData) {
+        try {
+            // Valida parâmetros
+            if (!threadId || !messageData?.messageText) {
+                throw new Error('ThreadId e messageText são obrigatórios');
+            }
+
+            // Recupera o contexto atual
+            let currentContext = await this.contextManager.getContext(threadId);
+            
+            // Prepara os dados da mensagem para OpenAI
+            const openaiMessage = {
+                role: 'user',
+                content: messageData.messageText
+            };
+
+            // Adiciona a mensagem ao thread do OpenAI
+            logger.info('AddingMessageToThread', {
+                threadId,
+                messageLength: openaiMessage.content.length,
+                timestamp: new Date().toISOString()
+            });
+
+            const createdMessage = await this.client.beta.threads.messages.create(
+                threadId,
+                openaiMessage
+            );
+
+            // Atualiza o contexto
+            if (!currentContext.conversation) {
+                currentContext.conversation = {};
+            }
+
+            currentContext.conversation.lastMessage = {
+                role: openaiMessage.role,
+                content: openaiMessage.content,
+                messageId: createdMessage.id,
+                timestamp: new Date().toISOString()
+            };
+
+            currentContext.conversation.interactionCount = 
+                (currentContext.conversation.interactionCount || 0) + 1;
+
+            // Adiciona ao histórico
+            if (!currentContext.history) {
+                currentContext.history = [];
+            }
+
+            currentContext.history.push({
+                role: openaiMessage.role,
+                content: openaiMessage.content,
+                messageId: createdMessage.id,
+                metadata: {
+                    customerId: messageData.customerId,
+                    timestamp: new Date().toISOString()
+                }
+            });
+
+            // Salva o contexto
+            await this.contextManager.saveContext(threadId, currentContext);
+
+            // Executa o assistente
+            logger.info('RunningAssistant', {
+                threadId,
+                messageId: createdMessage.id,
+                timestamp: new Date().toISOString()
+            });
+
+            const response = await this.runAssistant(threadId);
+            
+            if (!response) {
+                throw new Error('Resposta vazia do assistente');
+            }
+
+            // Registra sucesso
+            logger.info('MessageProcessed', {
+                threadId,
+                messageId: createdMessage.id,
+                responseLength: response.length,
+                timestamp: new Date().toISOString()
+            });
+
+            return response;
+
+        } catch (error) {
+            logger.error('ErrorProcessingMessage', {
+                error: {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code
+                },
+                threadId,
+                messageData,
+                timestamp: new Date().toISOString()
+            });
+
+            throw error;
+        }
+    }
+
     /**
      * Verifica o status de um run
      * @param {string} threadId - ID do thread
