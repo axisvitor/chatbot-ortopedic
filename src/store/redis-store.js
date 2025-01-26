@@ -6,22 +6,21 @@ class RedisStore {
         this.client = createClient({
             socket: {
                 host: REDIS_CONFIG.host,
-                port: REDIS_CONFIG.port
+                port: REDIS_CONFIG.port,
+                reconnectStrategy: (retries) => {
+                    if (retries > 10) {
+                        return new Error('Máximo de tentativas de reconexão excedido');
+                    }
+                    return Math.min(retries * 100, 3000);
+                }
             },
             password: REDIS_CONFIG.password,
-            retry_strategy: function(options) {
-                if (options.error && options.error.code === 'ECONNREFUSED') {
-                    console.error('[Redis] Servidor recusou conexão');
-                    return new Error('Servidor Redis indisponível');
-                }
-                if (options.total_retry_time > 1000 * 60 * 60) {
-                    return new Error('Tempo máximo de retry excedido');
-                }
-                if (options.attempt > 10) {
-                    return new Error('Máximo de tentativas excedido');
-                }
-                // Retry com exponential backoff
-                return Math.min(options.attempt * 100, 3000);
+            database: 0,
+            commandsQueueMaxLength: 1000,
+            isolationPoolOptions: {
+                min: 5,
+                max: 20,
+                acquireTimeoutMillis: 5000
             }
         });
 
@@ -31,51 +30,35 @@ class RedisStore {
                 stack: err.stack,
                 timestamp: new Date().toISOString()
             });
-            // Tenta reconectar automaticamente em caso de erro
-            this._reconnect();
         });
 
         this.client.on('connect', () => {
             console.log('[Redis] Redis conectado com sucesso');
         });
 
+        this.client.on('reconnecting', () => {
+            console.log('[Redis] Tentando reconectar ao Redis...');
+        });
+
+        this.client.on('end', () => {
+            console.log('[Redis] Conexão com Redis encerrada');
+        });
+
         // Conecta automaticamente ao Redis
         this._connect();
     }
 
-    // Método privado para conectar ao Redis
     async _connect() {
         try {
             if (!this.client.isOpen) {
                 await this.client.connect();
-                console.log('[Redis] Conexão estabelecida com sucesso');
             }
+            // Verifica se realmente está conectado
+            await this.ping();
+            console.log('[Redis] Conexão estabelecida e verificada');
         } catch (error) {
             console.error('[Redis] Erro ao conectar:', error);
-            // Tenta reconectar em caso de erro
-            setTimeout(() => this._reconnect(), 5000);
-        }
-    }
-
-    // Método privado para reconexão
-    async _reconnect() {
-        console.log('[Redis] Tentando reconectar...');
-        try {
-            if (this.client.isOpen) {
-                await this.client.quit();
-            }
-            this.client = createClient({
-                socket: {
-                    host: REDIS_CONFIG.host,
-                    port: REDIS_CONFIG.port
-                },
-                password: REDIS_CONFIG.password
-            });
-            await this._connect();
-        } catch (error) {
-            console.error('[Redis] Erro na reconexão:', error);
-            // Agenda nova tentativa
-            setTimeout(() => this._reconnect(), 5000);
+            throw error;
         }
     }
 
@@ -136,6 +119,10 @@ class RedisStore {
 
     async set(key, value, options = {}) {
         try {
+            if (!this.client.isOpen) {
+                await this._connect();
+            }
+
             // Se options for número, assume que é TTL
             if (typeof options === 'number') {
                 options = { EX: options };
@@ -146,12 +133,17 @@ class RedisStore {
                 options = { EX: REDIS_CONFIG.ttl };
             }
 
-            const result = await this.client.set(key, value, options);
+            // Garante que o valor seja string
+            const stringValue = typeof value === 'object' ? 
+                JSON.stringify(value) : String(value);
+
+            const result = await this.client.set(key, stringValue, options);
             return result === 'OK' || result === true;
         } catch (error) {
             console.error('[Redis] Erro ao salvar no cache:', {
                 key,
-                error: error.message
+                error: error.message,
+                stack: error.stack
             });
             return false;
         }
@@ -582,12 +574,6 @@ class RedisStore {
         }
     }
 
-    /**
-     * Adiciona um ou mais membros a um Set
-     * @param {string} key Chave do Set
-     * @param {...string} members Membros a serem adicionados
-     * @returns {Promise<number>} Número de membros adicionados
-     */
     async sadd(key, ...members) {
         try {
             return await this.client.sAdd(key, members);
@@ -601,12 +587,6 @@ class RedisStore {
         }
     }
 
-    /**
-     * Remove um ou mais membros de um Set
-     * @param {string} key Chave do Set
-     * @param {...string} members Membros a serem removidos
-     * @returns {Promise<number>} Número de membros removidos
-     */
     async srem(key, ...members) {
         try {
             return await this.client.sRem(key, members);
@@ -620,11 +600,6 @@ class RedisStore {
         }
     }
 
-    /**
-     * Lista todos os membros de um Set
-     * @param {string} key Chave do Set
-     * @returns {Promise<string[]>} Array com os membros do Set
-     */
     async smembers(key) {
         try {
             return await this.client.sMembers(key);
@@ -637,12 +612,6 @@ class RedisStore {
         }
     }
 
-    /**
-     * Verifica se um membro existe em um Set
-     * @param {string} key Chave do Set
-     * @param {string} member Membro a ser verificado
-     * @returns {Promise<boolean>} True se o membro existe
-     */
     async sismember(key, member) {
         try {
             return await this.client.sIsMember(key, member);
@@ -656,11 +625,6 @@ class RedisStore {
         }
     }
 
-    /**
-     * Retorna o número de membros em um Set
-     * @param {string} key Chave do Set
-     * @returns {Promise<number>} Número de membros
-     */
     async scard(key) {
         try {
             return await this.client.sCard(key);
@@ -673,13 +637,6 @@ class RedisStore {
         }
     }
 
-    /**
-     * Move um membro de um Set para outro
-     * @param {string} source Set de origem
-     * @param {string} destination Set de destino
-     * @param {string} member Membro a ser movido
-     * @returns {Promise<boolean>} True se o membro foi movido
-     */
     async smove(source, destination, member) {
         try {
             return await this.client.sMove(source, destination, member);
@@ -756,10 +713,6 @@ class RedisStore {
         }
     }
 
-    /**
-     * Deleta todo o contexto de um usuário
-     * @param {string} userId - ID do usuário
-     */
     async deleteUserContext(userId) {
         try {
             const keys = await this.client.keys(`*:${userId}*`);
@@ -777,17 +730,33 @@ class RedisStore {
         let retryCount = 0;
         while (retryCount < maxRetries) {
             try {
+                if (!this.client.isOpen) {
+                    await this._connect();
+                }
+                
                 const multi = this.client.multi();
                 await callback(multi);
                 const result = await multi.exec();
+                
+                if (!result) {
+                    throw new Error('Transação falhou - resultado nulo');
+                }
+                
                 return result;
             } catch (error) {
                 retryCount++;
+                console.error(`[Redis] Erro na transação (tentativa ${retryCount}/${maxRetries}):`, error);
+                
                 if (error.message.includes('EXECABORT') && retryCount < maxRetries) {
                     console.warn(`[Redis] Retry ${retryCount}/${maxRetries} após EXECABORT`);
                     await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, retryCount)));
                     continue;
                 }
+                
+                if (retryCount === maxRetries) {
+                    console.error('[Redis] Máximo de tentativas excedido:', error);
+                }
+                
                 throw error;
             }
         }

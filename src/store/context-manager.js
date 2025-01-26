@@ -56,12 +56,24 @@ class ContextManager {
                 if (!obj) return {};
                 return Object.entries(obj).reduce((acc, [key, value]) => {
                     try {
-                        acc[key] = typeof value === 'object' ? JSON.stringify(value) : String(value);
+                        // Garante que números e booleanos são convertidos para string
+                        if (typeof value === 'number' || typeof value === 'boolean') {
+                            acc[key] = String(value);
+                        } 
+                        // Objetos e arrays são convertidos para JSON
+                        else if (typeof value === 'object') {
+                            acc[key] = JSON.stringify(value);
+                        }
+                        // Strings permanecem como estão
+                        else {
+                            acc[key] = value;
+                        }
                     } catch (error) {
                         logger.warn('ErrorStringifyingValue', { 
                             threadId, 
                             key, 
-                            error: error.message 
+                            error: error.message,
+                            value: typeof value 
                         });
                         acc[key] = String(value);
                     }
@@ -74,22 +86,28 @@ class ContextManager {
                 // Salva dados da conversa
                 if (validatedContext.conversation) {
                     const conversationData = prepareObjectForRedis(validatedContext.conversation);
-                    await multi.hSet(`${baseKey}:conversation`, conversationData);
-                    await multi.expire(`${baseKey}:conversation`, this.TTL_CONFIG.conversation);
+                    if (Object.keys(conversationData).length > 0) {
+                        await multi.hSet(`${baseKey}:conversation`, conversationData);
+                        await multi.expire(`${baseKey}:conversation`, this.TTL_CONFIG.conversation);
+                    }
                 }
 
                 // Salva dados do pedido
                 if (validatedContext.order) {
                     const orderData = prepareObjectForRedis(validatedContext.order);
-                    await multi.hSet(`${baseKey}:order`, orderData);
-                    await multi.expire(`${baseKey}:order`, this.TTL_CONFIG.order);
+                    if (Object.keys(orderData).length > 0) {
+                        await multi.hSet(`${baseKey}:order`, orderData);
+                        await multi.expire(`${baseKey}:order`, this.TTL_CONFIG.order);
+                    }
                 }
 
                 // Salva metadados
                 if (validatedContext.metadata) {
                     const metadataData = prepareObjectForRedis(validatedContext.metadata);
-                    await multi.hSet(`${baseKey}:metadata`, metadataData);
-                    await multi.expire(`${baseKey}:metadata`, this.TTL_CONFIG.metadata);
+                    if (Object.keys(metadataData).length > 0) {
+                        await multi.hSet(`${baseKey}:metadata`, metadataData);
+                        await multi.expire(`${baseKey}:metadata`, this.TTL_CONFIG.metadata);
+                    }
                 }
 
                 // Salva histórico (mantém apenas os últimos 5 itens)
@@ -104,7 +122,11 @@ class ContextManager {
             logger.info('ContextSaved', { 
                 threadId,
                 timestamp: new Date().toISOString(),
-                contextSize: JSON.stringify(validatedContext).length
+                contextSize: JSON.stringify(validatedContext).length,
+                hasConversation: !!validatedContext.conversation,
+                hasOrder: !!validatedContext.order,
+                hasMetadata: !!validatedContext.metadata,
+                hasHistory: Array.isArray(validatedContext.history)
             });
 
         } catch (error) {
