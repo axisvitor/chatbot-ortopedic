@@ -675,20 +675,200 @@ class OpenAIService {
 
     async runAssistant(threadId) {
         try {
-            // Cria e aguarda o run
-            const run = await this.client.beta.threads.runs.create(threadId, {
-                assistant_id: this.assistantId
-            });
+            // Cria um novo run
+            const run = await this.client.beta.threads.runs.create(
+                threadId,
+                { assistant_id: this.assistantId }
+            );
 
-            // Aguarda a resposta
+            // Aguarda e retorna a resposta processada
             const response = await this.waitForResponse(threadId, run.id);
             return response;
 
         } catch (error) {
-            if (error.code === 'rate_limit_exceeded') {
-                logger.warn('RateLimitExceeded', { threadId });
-                throw error;
+            logger.error('ErrorRunningAssistant', { threadId, error });
+            throw error;
+        }
+    }
+
+    /**
+     * Verifica o status de um run
+     * @param {string} threadId - ID do thread
+     * @param {string} runId - ID do run
+     * @returns {Promise<Object>} Status do run
+     */
+    async checkRunStatus(threadId, runId) {
+        try {
+            return await this.client.beta.threads.runs.retrieve(threadId, runId);
+        } catch (error) {
+            logger.error('ErrorCheckingRunStatus', { threadId, runId, error });
+            console.error('[OpenAI] Erro ao verificar status:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Lista as mensagens de um thread
+     * @param {string} threadId - ID do thread
+     * @returns {Promise<Object>} Lista de mensagens
+     */
+    async listMessages(threadId) {
+        try {
+            return await this.client.beta.threads.messages.list(threadId);
+        } catch (error) {
+            logger.error('ErrorListingMessages', { threadId, error });
+            console.error('[OpenAI] Erro ao listar mensagens:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Aguarda a resposta do assistant
+     * @param {string} threadId - ID da thread
+     * @param {string} runId - ID do run
+     * @returns {Promise<string>} Resposta do assistant
+     */
+    async waitForResponse(threadId, runId) {
+        try {
+            let run = await this.checkRunStatus(threadId, runId);
+            
+            while (run.status === 'queued' || run.status === 'in_progress') {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                run = await this.checkRunStatus(threadId, runId);
             }
+
+            if (run.status === 'requires_action') {
+                logger.info('RunRequiresAction', { threadId, runId });
+                console.log('[OpenAI] Ação requerida, processando tool calls...');
+                
+                if (run.required_action?.type === 'submit_tool_outputs') {
+                    const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+                    logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
+                    console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => t.function.name));
+                    
+                    const toolOutputs = await this.handleToolCalls(run, threadId);
+                    
+                    await this.client.beta.threads.runs.submitToolOutputs(
+                        threadId,
+                        runId,
+                        { tool_outputs: toolOutputs }
+                    );
+                    
+                    return await this.waitForResponse(threadId, runId);
+                }
+            }
+
+            if (run.status === 'completed') {
+                const messages = await this.client.beta.threads.messages.list(threadId);
+                if (messages.data && messages.data.length > 0) {
+                    const content = messages.data[0].content[0];
+                    if (content?.text?.value) {
+                        const response = String(content.text.value).trim();
+                        logger.info('AssistantResponse', { threadId, response });
+                        console.log('[OpenAI] Resposta extraída:', response);
+                        return response;
+                    }
+                    logger.error('ErrorExtractingAssistantResponse', { threadId, error: 'Unexpected message structure' });
+                    console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
+                    throw new Error('Não foi possível extrair a resposta da mensagem');
+                }
+                throw new Error('Não foi possível extrair a resposta da mensagem');
+            }
+
+            if (run.status === 'failed') {
+                logger.error('RunFailed', { threadId, runId, error: run.last_error });
+                console.error('[OpenAI] Run falhou:', run.last_error);
+                throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
+            }
+
+            if (run.status === 'cancelled' || run.status === 'expired') {
+                logger.error('RunCancelledOrExpired', { threadId, runId, status: run.status });
+                console.error('[OpenAI] Run cancelado ou expirado:', run.status);
+                throw new Error(`Run cancelado ou expirado: ${run.status}`);
+            }
+
+            throw new Error(`Run terminou com status inesperado: ${run.status}`);
+            
+        } catch (error) {
+            logger.error('ErrorWaitingForResponse', { threadId, runId, error });
+            console.error('[OpenAI] Erro ao aguardar resposta:', error);
+            await this.removeActiveRun(threadId); // Garante remoção do run em caso de erro
+            throw error;
+        }
+    }
+
+    async addMessageAndRun(threadId, message) {
+        try {
+            // Não processa mensagens vazias
+            if (!message.content) {
+                logger.warn('EmptyMessage', { threadId });
+                return null;
+            }
+
+            // Evita processar a mesma mensagem múltiplas vezes
+            const lastMessage = await this.getLastMessage(threadId);
+            if (lastMessage?.content === message.content) {
+                logger.warn('DuplicateMessage', { 
+                    threadId,
+                    content: message.content 
+                });
+                return null;
+            }
+
+            // Adiciona a mensagem
+            const createdMessage = await this.client.beta.threads.messages.create(
+                threadId,
+                message
+            );
+
+            logger.info('MessageCreated', { 
+                metadata: {
+                    messageId: createdMessage.id,
+                    threadId,
+                    service: 'ortopedic-bot'
+                }
+            });
+
+            // Executa o assistant e aguarda resposta
+            const response = await this.runAssistant(threadId);
+            
+            // Registra a resposta para evitar loops
+            this.lastAssistantResponse = response;
+            
+            return response;
+
+        } catch (error) {
+            logger.error('ErrorAddingMessage', { threadId, error });
+            throw error;
+        }
+    }
+
+    async getLastMessage(threadId) {
+        try {
+            const messages = await this.client.beta.threads.messages.list(threadId, {
+                limit: 1,
+                order: 'desc'
+            });
+            return messages.data[0];
+        } catch (error) {
+            logger.error('ErrorGettingLastMessage', { threadId, error });
+            return null;
+        }
+    }
+
+    async runAssistant(threadId) {
+        try {
+            // Cria um novo run
+            const run = await this.client.beta.threads.runs.create(
+                threadId,
+                { assistant_id: this.assistantId }
+            );
+
+            // Aguarda e retorna a resposta processada
+            const response = await this.waitForResponse(threadId, run.id);
+            return response;
+
+        } catch (error) {
             logger.error('ErrorRunningAssistant', { threadId, error });
             throw error;
         }
