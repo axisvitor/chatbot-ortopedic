@@ -110,7 +110,13 @@ class AIServices {
                 timestamp: new Date().toISOString()
             });
 
-            return { messageText };
+            return { 
+                type: 'text',
+                messageText, 
+                customerId: message.from || message.key?.remoteJid?.split('@')[0],
+                messageId: message.messageId || message.key?.id,
+                timestamp: new Date().toISOString()
+            };
 
         } catch (error) {
             console.error('ErrorExtractingMessageText', {
@@ -186,42 +192,46 @@ class AIServices {
 
             // Se for mensagem de texto
             if (message.type === 'text') {
-                // Extrai e valida o texto
-                const { messageText } = this.extractMessageText(message);
+                const messageData = await this.extractMessageText(message);
+                
+                if (messageData && messageData.type === 'text') {
+                    console.log('📝 [AIServices] Dados básicos extraídos:', {
+                        de: messageData.customerId,
+                        timestamp: messageData.timestamp,
+                        texto: messageData.messageText,
+                        temAudio: false,
+                        temDocumento: false
+                    });
 
-                // Prepara os dados para o OpenAI
-                const messageData = {
-                    customerId: message.from || message.key?.remoteJid?.split('@')[0],
-                    messageText: messageText.trim(),
-                    messageId: message.messageId || message.key?.id,
-                    timestamp: new Date().toISOString()
-                };
+                    if (!messageData.customerId || !messageData.messageText) {
+                        throw new Error('Dados da mensagem inválidos');
+                    }
 
-                // Valida os dados antes de processar
-                if (!messageData.customerId || !messageData.messageText) {
-                    throw new Error('Dados da mensagem inválidos');
+                    console.log('ProcessingTextMessage', {
+                        messageId: messageData.messageId,
+                        customerId: messageData.customerId,
+                        messageLength: messageData.messageText.length,
+                        timestamp: messageData.timestamp
+                    });
+
+                    // Processa a mensagem
+                    const response = await this.openAIService.processMessage({
+                        messageId: messageData.messageId,
+                        customerId: messageData.customerId,
+                        messageText: messageData.messageText,
+                        timestamp: messageData.timestamp
+                    });
+
+                    // Envia a resposta
+                    if (response?.response) {
+                        await this.whatsAppService.sendText(messageData.customerId, response.response);
+                    }
+
+                    return response;
                 }
-
-                console.log('ProcessingTextMessage', {
-                    messageId: messageData.messageId,
-                    customerId: messageData.customerId,
-                    messageLength: messageData.messageText.length,
-                    timestamp: messageData.timestamp
-                });
-
-                // Processa a mensagem
-                const response = await this.openAIService.processMessage(messageData);
-
-                // Envia a resposta
-                if (response?.response) {
-                    await this.whatsAppService.sendText(messageData.customerId, response.response);
-                }
-
-                return response;
             }
 
             throw new Error(`Tipo de mensagem não suportado: ${message.type}`);
-
         } catch (error) {
             console.error('ErrorHandlingMessage', {
                 error: {

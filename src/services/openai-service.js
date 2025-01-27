@@ -561,12 +561,18 @@ class OpenAIService {
         });
 
         // Executa o assistant
-        const run = await this.runAssistant(threadId);
-        await this.registerActiveRun(threadId, run.id);
-        const response = await this.waitForResponse(threadId, run.id);
+        logger.info('RunningAssistant', {
+            threadId,
+            messageId: message.id,
+            timestamp: new Date().toISOString()
+        });
+
+        const response = await this.runAssistant(threadId);
+        await this.registerActiveRun(threadId, response.id);
+        const result = await this.waitForResponse(threadId, response.id);
         await this.removeActiveRun(threadId);
 
-        return response;
+        return result;
     }
 
     /**
@@ -627,84 +633,72 @@ class OpenAIService {
                 throw new Error('ThreadId e messageText são obrigatórios');
             }
 
+            if (!messageData.messageText) {
+                throw new Error('Mensagem não pode estar vazia');
+            }
+
             // Recupera o contexto atual
             let currentContext = await this.contextManager.getContext(threadId);
             
             // Prepara os dados da mensagem para OpenAI
-            const openaiMessage = {
+            const message = {
                 role: 'user',
-                content: messageData.messageText
+                content: messageData.messageText.trim()
             };
 
-            // Adiciona a mensagem ao thread do OpenAI
-            logger.info('AddingMessageToThread', {
-                threadId,
-                messageLength: openaiMessage.content.length,
-                timestamp: new Date().toISOString()
-            });
-
-            const createdMessage = await this.client.beta.threads.messages.create(
-                threadId,
-                openaiMessage
-            );
-
-            // Atualiza o contexto
-            if (!currentContext.conversation) {
-                currentContext.conversation = {};
-            }
-
-            currentContext.conversation.lastMessage = {
-                role: openaiMessage.role,
-                content: openaiMessage.content,
-                messageId: createdMessage.id,
-                timestamp: new Date().toISOString()
+            // Adiciona metadados ao contexto
+            const metadata = {
+                customerId: messageData.customerId,
+                timestamp: new Date().toISOString(),
+                messageId: messageData.messageId
             };
 
-            currentContext.conversation.interactionCount = 
-                (currentContext.conversation.interactionCount || 0) + 1;
-
-            // Adiciona ao histórico
+            // Adiciona a mensagem ao histórico
             if (!currentContext.history) {
                 currentContext.history = [];
             }
-
             currentContext.history.push({
-                role: openaiMessage.role,
-                content: openaiMessage.content,
-                messageId: createdMessage.id,
-                metadata: {
-                    customerId: messageData.customerId,
-                    timestamp: new Date().toISOString()
-                }
+                ...message,
+                metadata
             });
 
-            // Salva o contexto
+            // Atualiza dados da conversa
+            if (!currentContext.conversation) {
+                currentContext.conversation = {};
+            }
+            currentContext.conversation.lastMessage = message;
+            currentContext.conversation.interactionCount = (currentContext.conversation.interactionCount || 0) + 1;
+            currentContext.conversation.lastUpdate = new Date().toISOString();
+
+            // Salva o contexto antes de adicionar a mensagem
+            await this.contextManager.saveContext(threadId, currentContext);
+
+            // Adiciona a mensagem ao thread do OpenAI
+            const openaiMessage = await this.client.beta.threads.messages.create(
+                threadId,
+                message
+            );
+
+            // Atualiza o contexto com o ID da mensagem do OpenAI
+            currentContext.conversation.lastOpenAIMessageId = openaiMessage.id;
             await this.contextManager.saveContext(threadId, currentContext);
 
             // Executa o assistente
-            logger.info('RunningAssistant', {
-                threadId,
-                messageId: createdMessage.id,
-                timestamp: new Date().toISOString()
-            });
-
             const response = await this.runAssistant(threadId);
-            
-            if (!response) {
-                throw new Error('Resposta vazia do assistente');
-            }
+            this.lastAssistantResponse = response;
 
             // Registra sucesso
             logger.info('MessageProcessed', {
                 threadId,
-                messageId: createdMessage.id,
-                responseLength: response.length,
+                messageId: messageData.messageId,
+                customerId: messageData.customerId,
                 timestamp: new Date().toISOString()
             });
 
             return response;
 
         } catch (error) {
+            // Registra erro
             logger.error('ErrorProcessingMessage', {
                 error: {
                     message: error.message,
@@ -712,7 +706,8 @@ class OpenAIService {
                     code: error.code
                 },
                 threadId,
-                messageData,
+                messageId: messageData?.messageId,
+                customerId: messageData?.customerId,
                 timestamp: new Date().toISOString()
             });
 
@@ -1143,7 +1138,7 @@ class OpenAIService {
             }
 
             // Verifica se já existe um thread para o cliente
-            const threadId = await this.getOrCreateThread(messageData.customerId);
+            const threadId = await this.getOrCreateThreadForCustomer(messageData.customerId);
 
             // Prepara a mensagem para o OpenAI
             const message = {
