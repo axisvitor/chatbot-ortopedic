@@ -74,56 +74,42 @@ class OrderApi extends NuvemshopApiBase {
                 return this._cleanOrderData(JSON.parse(cachedOrder));
             }
 
-            // Busca direto pelo número
+            // Busca usando o parâmetro q
             const searchResponse = await this.client.get('/orders', {
                 params: {
-                    number: cleanNumber
+                    q: cleanNumber,
+                    per_page: 50 // Aumenta o limite para ter certeza de encontrar
                 }
             });
 
             if (!searchResponse?.data?.length) {
-                // Se não encontrou pelo número exato, tenta buscar por query
-                const queryResponse = await this.client.get('/orders', {
-                    params: {
-                        q: cleanNumber
-                    }
+                console.log('[Nuvemshop] Pedido não encontrado:', {
+                    numeroOriginal: orderNumber,
+                    numeroLimpo: cleanNumber,
+                    timestamp: new Date().toISOString()
                 });
-
-                if (!queryResponse?.data?.length) {
-                    console.log('[Nuvemshop] Pedido não encontrado:', {
-                        numeroOriginal: orderNumber,
-                        numeroLimpo: cleanNumber,
-                        timestamp: new Date().toISOString()
-                    });
-                    return {
-                        error: true,
-                        message: 'Pedido não encontrado',
-                        details: 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto ou tente informar de outra forma.'
-                    };
-                }
-
-                // Procura por correspondência exata no resultado da busca
-                const order = queryResponse.data.find(o => 
-                    String(o.number) === cleanNumber || 
-                    String(o.number).replace(/[^\d]/g, '') === cleanNumber
-                );
-
-                if (!order) {
-                    return {
-                        error: true,
-                        message: 'Pedido não encontrado',
-                        details: 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto ou tente informar de outra forma.'
-                    };
-                }
-
-                // Encontrou o pedido, salva no cache e retorna
-                const cleanedOrder = this._cleanOrderData(order);
-                await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
-                return cleanedOrder;
+                return {
+                    error: true,
+                    message: 'Pedido não encontrado',
+                    details: 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.'
+                };
             }
 
-            // Encontrou o pedido na primeira busca
-            const order = searchResponse.data[0];
+            // Procura por correspondência exata
+            const order = searchResponse.data.find(o => 
+                String(o.number) === cleanNumber || 
+                String(o.number).replace(/[^\d]/g, '') === cleanNumber
+            );
+
+            if (!order) {
+                return {
+                    error: true,
+                    message: 'Pedido não encontrado',
+                    details: 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto.'
+                };
+            }
+
+            // Encontrou o pedido, salva no cache e retorna
             await this.cacheService.set(cacheKey, JSON.stringify(order), 300);
             return this._cleanOrderData(order);
 
@@ -134,14 +120,6 @@ class OrderApi extends NuvemshopApiBase {
                 stack: error.stack,
                 timestamp: new Date().toISOString()
             });
-
-            if (error.response?.status === 404) {
-                return {
-                    error: true,
-                    message: 'Pedido não encontrado',
-                    details: 'Não encontrei nenhum pedido com esse número. Por favor, verifique se o número está correto ou tente informar de outra forma.'
-                };
-            }
 
             return {
                 error: true,

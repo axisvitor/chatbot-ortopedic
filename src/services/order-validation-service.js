@@ -114,7 +114,7 @@ class OrderValidationService {
     /**
      * Extrai e valida número do pedido
      * @param {string|Buffer} input Texto ou buffer de imagem
-     * @returns {Promise<{orderNumber: string|null, isImage: boolean}>} Número do pedido validado e se veio de imagem
+     * @returns {Promise<{orderNumber: string|null, isImage: boolean, error: string|null, details: Object|null}>} Número do pedido validado e se veio de imagem
      */
     async extractOrderNumber(input) {
         try {
@@ -136,21 +136,43 @@ class OrderValidationService {
                     input: typeof input === 'string' ? input.substring(0, 100) : 'Buffer',
                     isImage
                 });
-                return { orderNumber: null, isImage };
+                return { orderNumber: null, isImage, error: null, details: null };
             }
 
             // Verifica se o pedido existe - remove o # para consulta na Nuvemshop
             const order = await this.nuvemshopService.getOrderByNumber(orderNumber.replace('#', ''));
-            if (!order) {
-                console.log('[OrderValidation] Pedido não encontrado:', orderNumber);
-                return { orderNumber: null, isImage };
+            
+            if (order?.error) {
+                console.log('[OrderValidation] Erro ao buscar pedido:', {
+                    numero: orderNumber,
+                    erro: order.message,
+                    detalhes: order.details,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Se for erro de autenticação, notifica o suporte
+                if (order.message === 'Unauthorized') {
+                    console.error('[OrderValidation] ⚠️ Erro de autenticação na API da Nuvemshop. Por favor, verifique o token de acesso.');
+                }
+
+                return { 
+                    orderNumber: null, 
+                    isImage,
+                    error: order.message,
+                    details: order.details 
+                };
             }
 
-            return { orderNumber, isImage };
+            if (!order) {
+                console.log('[OrderValidation] Pedido não encontrado:', orderNumber);
+                return { orderNumber: null, isImage, error: null, details: null };
+            }
+
+            return { orderNumber, isImage, error: null, details: null };
 
         } catch (error) {
             console.error('[OrderValidation] Erro ao extrair número do pedido:', error);
-            return { orderNumber: null, isImage: false };
+            return { orderNumber: null, isImage: false, error: error.message, details: null };
         }
     }
 
@@ -172,7 +194,7 @@ class OrderValidationService {
             }
 
             // Extrai número do pedido
-            const { orderNumber, isImage } = await this.extractOrderNumber(imageUrl);
+            const { orderNumber, isImage, error, details } = await this.extractOrderNumber(imageUrl);
             
             // Se não encontrou o número do pedido, mas é uma imagem que parece ser um comprovante
             const isPaymentProof = await this.imageProcessor.isPaymentProof(imageUrl);
@@ -329,7 +351,7 @@ class OrderValidationService {
      */
     async findOrder(input) {
         try {
-            const { orderNumber } = await this.extractOrderNumber(input);
+            const { orderNumber, isImage, error, details } = await this.extractOrderNumber(input);
             if (!orderNumber) {
                 return null;
             }
