@@ -227,7 +227,11 @@ class AIServices {
                         await this.whatsAppService.sendText(messageData.customerId, response.response);
                     }
 
-                    return response;
+                    return {
+                        type: 'text',
+                        response: response?.response,
+                        from: messageData.customerId
+                    };
                 }
             }
 
