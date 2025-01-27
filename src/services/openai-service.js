@@ -595,24 +595,23 @@ class OpenAIService {
 
             const response = await this.addMessageAndRun(threadId, message);
 
-            return {
-                type: 'text',
-                response: response,
-                from: messageData.customerId
-            };
+            // Retorna apenas o texto da resposta
+            return response.content || response;
 
         } catch (error) {
+            // Registra erro
             logger.error('ErrorProcessingMessage', {
                 error: {
-                    customerId: messageData?.customerId,
-                    messageId: messageData?.messageId,
-                    error: {
-                        message: error.message,
-                        stack: error.stack
-                    },
-                    timestamp: new Date().toISOString()
-                }
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code
+                },
+                threadId,
+                messageId: messageData?.messageId,
+                customerId: messageData?.customerId,
+                timestamp: new Date().toISOString()
             });
+
             throw error;
         }
     }
@@ -933,7 +932,7 @@ class OpenAIService {
 
             // Retorna a resposta formatada
             return {
-                response: response,
+                response: response.content || response,
                 threadId: threadId
             };
 
