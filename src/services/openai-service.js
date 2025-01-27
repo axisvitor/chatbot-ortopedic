@@ -582,35 +582,26 @@ class OpenAIService {
      */
     async processMessage(messageData) {
         try {
-            // Valida os dados da mensagem
             if (!messageData?.customerId || !messageData?.messageText) {
                 throw new Error('CustomerId e messageText são obrigatórios');
             }
 
-            // Verifica se já existe um thread para o cliente
             const threadId = await this.getOrCreateThreadForCustomer(messageData.customerId);
-
-            // Prepara a mensagem para o OpenAI
+            
             const message = {
                 role: 'user',
                 content: messageData.messageText
             };
 
-            // Adiciona a mensagem e executa o assistente
-            const response = await this.addMessageAndRun(threadId, {
-                ...messageData,
-                role: message.role,
-                content: message.content
-            });
+            const response = await this.addMessageAndRun(threadId, message);
 
-            // Retorna a resposta formatada
             return {
+                type: 'text',
                 response: response,
-                threadId: threadId
+                from: messageData.customerId
             };
 
         } catch (error) {
-            // Registra erro
             logger.error('ErrorProcessingMessage', {
                 error: {
                     customerId: messageData?.customerId,
@@ -626,216 +617,11 @@ class OpenAIService {
         }
     }
 
-    async addMessageAndRun(threadId, messageData) {
-        try {
-            // Valida parâmetros
-            if (!threadId || !messageData?.messageText) {
-                throw new Error('ThreadId e message são obrigatórios');
-            }
-
-            if (!messageData.messageText) {
-                throw new Error('Mensagem não pode estar vazia');
-            }
-
-            // Recupera o contexto atual
-            let currentContext = await this.contextManager.getContext(threadId);
-            
-            // Prepara os dados da mensagem
-            const message = {
-                role: 'user',
-                content: messageData.messageText
-            };
-
-            // Adiciona metadados ao contexto
-            const metadata = {
-                customerId: messageData.customerId,
-                timestamp: new Date().toISOString(),
-                messageId: messageData.messageId
-            };
-
-            // Adiciona a mensagem ao histórico
-            if (!currentContext.history) {
-                currentContext.history = [];
-            }
-            currentContext.history.push({
-                ...message,
-                metadata
-            });
-
-            // Atualiza dados da conversa
-            if (!currentContext.conversation) {
-                currentContext.conversation = {};
-            }
-            currentContext.conversation.lastMessage = message;
-            currentContext.conversation.interactionCount = (currentContext.conversation.interactionCount || 0) + 1;
-            currentContext.conversation.lastUpdate = new Date().toISOString();
-
-            // Salva o contexto antes de adicionar a mensagem
-            await this.contextManager.saveContext(threadId, currentContext);
-
-            // Adiciona a mensagem ao thread do OpenAI
-            const openaiMessage = await this.client.beta.threads.messages.create(
-                threadId,
-                message
-            );
-
-            // Atualiza o contexto com o ID da mensagem do OpenAI
-            currentContext.conversation.lastOpenAIMessageId = openaiMessage.id;
-            await this.contextManager.saveContext(threadId, currentContext);
-
-            // Executa o assistente
-            const response = await this.runAssistant(threadId);
-            this.lastAssistantResponse = response;
-
-            // Registra sucesso
-            logger.info('MessageProcessed', {
-                threadId,
-                messageId: messageData.messageId,
-                customerId: messageData.customerId,
-                timestamp: new Date().toISOString()
-            });
-
-            return response;
-
-        } catch (error) {
-            // Registra erro
-            logger.error('ErrorProcessingMessage', {
-                error: {
-                    message: error.message,
-                    stack: error.stack,
-                    code: error.code
-                },
-                threadId,
-                messageId: messageData?.messageId,
-                customerId: messageData?.customerId,
-                timestamp: new Date().toISOString()
-            });
-
-            throw error;
-        }
-    }
-
-    /**
-     * Verifica o status de um run
-     * @param {string} threadId - ID do thread
-     * @param {string} runId - ID do run
-     * @returns {Promise<Object>} Status do run
-     */
-    async checkRunStatus(threadId, runId) {
-        try {
-            return await this.client.beta.threads.runs.retrieve(threadId, runId);
-        } catch (error) {
-            logger.error('ErrorCheckingRunStatus', { threadId, runId, error });
-            console.error('[OpenAI] Erro ao verificar status:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Lista as mensagens de um thread
-     * @param {string} threadId - ID do thread
-     * @returns {Promise<Object>} Lista de mensagens
-     */
-    async listMessages(threadId) {
-        try {
-            return await this.client.beta.threads.messages.list(threadId);
-        } catch (error) {
-            logger.error('ErrorListingMessages', { threadId, error });
-            console.error('[OpenAI] Erro ao listar mensagens:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Aguarda a resposta do assistant
-     * @param {string} threadId - ID da thread
-     * @param {string} runId - ID do run
-     * @returns {Promise<string>} Resposta do assistant
-     */
-    async waitForResponse(threadId, runId) {
-        try {
-            let run = await this.checkRunStatus(threadId, runId);
-            
-            while (run.status === 'queued' || run.status === 'in_progress') {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                run = await this.checkRunStatus(threadId, runId);
-            }
-
-            if (run.status === 'requires_action') {
-                logger.info('RunRequiresAction', { threadId, runId });
-                console.log('[OpenAI] Ação requerida, processando tool calls...');
-                
-                if (run.required_action?.type === 'submit_tool_outputs') {
-                    const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
-                    logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
-                    console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => t.function.name));
-                    
-                    const toolOutputs = await this.handleToolCalls(run, threadId);
-                    
-                    await this.client.beta.threads.runs.submitToolOutputs(
-                        threadId,
-                        runId,
-                        { tool_outputs: toolOutputs }
-                    );
-                    
-                    return await this.waitForResponse(threadId, runId);
-                }
-            }
-
-            if (run.status === 'completed') {
-                const messages = await this.client.beta.threads.messages.list(threadId);
-                if (messages.data && messages.data.length > 0) {
-                    const lastMessage = messages.data[0];
-                    if (lastMessage.role === 'assistant') {
-                        let content = '';
-                        
-                        // Processa cada parte do conteúdo da mensagem
-                        for (const contentPart of lastMessage.content) {
-                            if (contentPart.type === 'text') {
-                                content += contentPart.text.value;
-                            }
-                        }
-                        
-                        if (content) {
-                            logger.info('AssistantResponse', { threadId, response: content });
-                            console.log('[OpenAI] Resposta extraída:', content);
-                            return { content: content.trim() };
-                        }
-                    }
-                    logger.error('ErrorExtractingAssistantResponse', { threadId, error: 'Unexpected message structure' });
-                    console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
-                    throw new Error('Não foi possível extrair a resposta da mensagem');
-                }
-                throw new Error('Não foi possível extrair a resposta da mensagem');
-            }
-
-            if (run.status === 'failed') {
-                logger.error('RunFailed', { threadId, runId, error: run.last_error });
-                console.error('[OpenAI] Run falhou:', run.last_error);
-                throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
-            }
-
-            if (run.status === 'cancelled' || run.status === 'expired') {
-                logger.error('RunCancelledOrExpired', { threadId, runId, status: run.status });
-                console.error('[OpenAI] Run cancelado ou expirado:', run.status);
-                throw new Error(`Run cancelado ou expirado: ${run.status}`);
-            }
-
-            throw new Error(`Run terminou com status inesperado: ${run.status}`);
-            
-        } catch (error) {
-            logger.error('ErrorWaitingForResponse', { threadId, runId, error });
-            console.error('[OpenAI] Erro ao aguardar resposta:', error);
-            await this.removeActiveRun(threadId); // Garante remoção do run em caso de erro
-            throw error;
-        }
-    }
-
     async addMessageAndRun(threadId, message) {
         try {
             // Valida parâmetros
-            if (!threadId || !message) {
-                throw new Error('ThreadId e message são obrigatórios');
+            if (!threadId || !message?.content) {
+                throw new Error('ThreadId e content são obrigatórios');
             }
 
             if (!message.messageText) {
@@ -991,16 +777,8 @@ class OpenAIService {
                 const messages = await this.client.beta.threads.messages.list(threadId);
                 if (messages.data && messages.data.length > 0) {
                     const lastMessage = messages.data[0];
-                    if (lastMessage.role === 'assistant') {
-                        let content = '';
-                        
-                        // Processa cada parte do conteúdo da mensagem
-                        for (const contentPart of lastMessage.content) {
-                            if (contentPart.type === 'text') {
-                                content += contentPart.text.value;
-                            }
-                        }
-                        
+                    if (lastMessage.role === 'assistant' && lastMessage.content && lastMessage.content.length > 0) {
+                        const content = lastMessage.content[0]?.text?.value;
                         if (content) {
                             logger.info('AssistantResponse', { threadId, response: content });
                             console.log('[OpenAI] Resposta extraída:', content);
@@ -1008,10 +786,10 @@ class OpenAIService {
                         }
                     }
                     logger.error('ErrorExtractingAssistantResponse', { threadId, error: 'Unexpected message structure' });
-                    console.error('[OpenAI] Estrutura da mensagem inesperada:', messages.data[0]);
-                    throw new Error('Não foi possível extrair a resposta da mensagem');
+                    throw new Error('Não foi possível extrair a resposta do assistente');
                 }
-                throw new Error('Não foi possível extrair a resposta da mensagem');
+                logger.error('NoMessagesFound', { threadId });
+                throw new Error('Nenhuma mensagem encontrada na thread');
             }
 
             if (run.status === 'failed') {
