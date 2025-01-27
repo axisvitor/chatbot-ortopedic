@@ -29,6 +29,12 @@ class OrderApi extends NuvemshopApiBase {
             'products.name',
             'products.quantity'
         ].join(',');
+
+        // Se não recebeu um cliente, inicializa um novo
+        if (!this.client) {
+            console.warn('[Nuvemshop] Cliente não fornecido para OrderApi, inicializando novo cliente');
+            this.initializeClient();
+        }
     }
 
     // Validações
@@ -65,6 +71,12 @@ class OrderApi extends NuvemshopApiBase {
     // Métodos principais
     async getOrderByNumber(orderNumber) {
         try {
+            // Garante que o cliente está inicializado
+            if (!this.client) {
+                console.warn('[Nuvemshop] Cliente não inicializado em OrderApi.getOrderByNumber, inicializando novo cliente');
+                this.initializeClient();
+            }
+
             const cleanNumber = String(orderNumber).replace(/[^\d]/g, '');
             const cacheKey = `nuvemshop:order:number:${cleanNumber}`;
 

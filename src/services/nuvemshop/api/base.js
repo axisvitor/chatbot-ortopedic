@@ -8,14 +8,16 @@ class NuvemshopApiBase {
     constructor(client = null, cacheService = null) {
         this.cacheService = cacheService || new CacheService();
         this.client = client;
-        if (!this.client) {
-            this.initializeClient();
-        }
         this.retryDelay = 1000; // Delay inicial de 1 segundo
         this.maxRetries = 3; // Máximo de 3 tentativas
         this.requestCount = 0;
         this.lastRequestTime = 0;
         this.minRequestInterval = 1000; // Mínimo de 1 segundo entre requisições
+
+        // Se não recebeu um cliente, inicializa um novo
+        if (!this.client) {
+            this.initializeClient();
+        }
     }
 
     sleep(ms) {
@@ -30,32 +32,9 @@ class NuvemshopApiBase {
             headers: {
                 'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'Content-Type': 'application/json',
-                'User-Agent': NUVEMSHOP_CONFIG.api.userAgent
+                'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
             }
         });
-
-        // Interceptor para tratar erros de autenticação
-        this.client.interceptors.response.use(
-            response => response,
-            async error => {
-                if (error.response?.status === 401) {
-                    console.error('[Nuvemshop] Erro de autenticação:', {
-                        erro: error.message,
-                        config: {
-                            url: error.config.url,
-                            method: error.config.method,
-                            params: error.config.params,
-                            headers: {
-                                ...error.config.headers,
-                                'Authentication': 'bearer [REDACTED]'
-                            }
-                        },
-                        timestamp: new Date().toISOString()
-                    });
-                }
-                throw error;
-            }
-        );
 
         // Configuração de retry
         axiosRetry(this.client, {
@@ -87,11 +66,45 @@ class NuvemshopApiBase {
             }
         });
 
-        // Configuração de rate limit
-        this.client = rateLimit(this.client, { 
-            maxRequests: NUVEMSHOP_CONFIG.api.rateLimit.maxRequests,
-            perMilliseconds: NUVEMSHOP_CONFIG.api.rateLimit.perMilliseconds
+        // Adiciona interceptors para logs
+        this.client.interceptors.request.use(request => {
+            console.log('[Nuvemshop] Request:', {
+                url: request.url,
+                method: request.method,
+                params: request.params,
+                headers: {
+                    ...request.headers,
+                    'Authentication': 'bearer [REDACTED]'
+                }
+            });
+            return request;
         });
+
+        this.client.interceptors.response.use(
+            response => {
+                console.log('[Nuvemshop] Response Success:', {
+                    status: response.status,
+                    url: response.config.url,
+                    data: response.data
+                });
+                return response;
+            },
+            error => {
+                console.error('[Nuvemshop] Response Error:', {
+                    status: error.response?.status,
+                    url: error.config?.url,
+                    message: error.message,
+                    data: error.response?.data,
+                    headers: error.response?.headers
+                });
+                throw error;
+            }
+        );
+
+        // Configuração de rate limit
+        const rateLimitedClient = rateLimit(this.client, NUVEMSHOP_CONFIG.api.rateLimit);
+
+        this.client = rateLimitedClient;
     }
 
     sanitizeConfig(config) {
