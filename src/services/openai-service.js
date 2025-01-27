@@ -682,17 +682,13 @@ class OpenAIService {
             currentContext.conversation.lastOpenAIMessageId = openaiMessage.id;
             await this.contextManager.saveContext(threadId, currentContext);
 
-            // Executa o assistente
-            const response = await this.runAssistant(threadId);
-            this.lastAssistantResponse = response;
-
-            // Registra sucesso
-            logger.info('MessageProcessed', {
-                threadId,
-                messageId: message.messageId,
-                customerId: message.customerId,
-                timestamp: new Date().toISOString()
+            // Cria um novo run
+            const run = await this.client.beta.threads.runs.create(threadId, {
+                assistant_id: this.assistantId
             });
+
+            // Aguarda a resposta do assistant
+            const response = await this.waitForResponse(threadId, run.id);
 
             return response;
 
