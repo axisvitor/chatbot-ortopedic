@@ -272,7 +272,7 @@ class WhatsAppService {
             const phoneNumber = this._validatePhoneNumber(to);
             const messageText = String(text);
 
-            console.log(' Enviando mensagem:', {
+            console.log('[WhatsAppService] sendText - Enviando mensagem:', {
                 para: phoneNumber,
                 texto: messageText,
                 messageId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

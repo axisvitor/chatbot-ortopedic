@@ -133,10 +133,13 @@ class AIServices {
 
     async handleMessage(message) {
         try {
+            console.log('[AIServices] handleMessage - type:', message.type);
             // Se for mensagem de imagem
             if (message.type === 'image') {
+                console.log('[AIServices] handleMessage - handling image message');
                 const result = await this.handleImageMessage(message);
                 if (result?.response) {
+                    console.log('[AIServices] handleMessage - sending image response');
                     await this.whatsAppService.sendText(result.from, result.response);
                 }
                 return result;
