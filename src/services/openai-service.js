@@ -733,7 +733,8 @@ class OpenAIService {
                 if (messages.data && messages.data.length > 0) {
                     const lastMessage = messages.data[0];
                     if (lastMessage.role === 'assistant' && lastMessage.content && lastMessage.content.length > 0) {
-                        const content = lastMessage.content[0]?.text?.value;
+                        const contentParts = lastMessage.content.map(part => part.text?.value || '').filter(Boolean);
+                        const content = contentParts.join(' ').trim();
                         if (content) {
                             logger.info('AssistantResponse', { threadId, response: content });
                             return content;
