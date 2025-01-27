@@ -603,8 +603,15 @@ class OpenAIService {
                 content: message.content
             });
 
+            if (!run || !run.id) {
+                throw new Error('Run não foi criado corretamente');
+            }
+
             // Aguarda a resposta completa
             const response = await this.waitForResponse(threadId, run.id);
+
+            // Remove o run ativo após obter a resposta
+            await this.removeActiveRun(threadId);
 
             return response;
 
@@ -645,16 +652,25 @@ class OpenAIService {
                 }
             );
 
-            // Executa o assistant
+            // Cancela qualquer run ativo anterior
+            await this.cancelActiveRun(threadId);
+
+            // Executa o assistant e aguarda criação do run
             const run = await this.runAssistant(threadId);
             
-            // Aguarda a resposta
-            const response = await this.waitForResponse(threadId, run.id);
-            
-            // Remove o run ativo após obter a resposta
-            await this.removeActiveRun(threadId);
-            
-            return response;
+            // Verifica se o run foi criado corretamente
+            if (!run || !run.id) {
+                throw new Error('Run não foi criado corretamente');
+            }
+
+            // Aguarda o registro ser confirmado
+            const hasRun = await this.hasActiveRun(threadId);
+            if (!hasRun) {
+                throw new Error('Falha ao registrar run ativo');
+            }
+
+            return run;
+
         } catch (error) {
             logger.error('ErrorAddingMessageAndRun', {
                 error: {
@@ -662,7 +678,6 @@ class OpenAIService {
                     stack: error.stack
                 },
                 threadId,
-                messageId: message?.messageId,
                 timestamp: new Date().toISOString()
             });
             throw error;
