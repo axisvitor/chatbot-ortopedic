@@ -227,7 +227,8 @@ class AIServices {
 
                     // Envia a resposta
                     if (response?.response) {
-                        await this.whatsAppService.sendText(messageData.customerId, response.response);
+                        const responseText = typeof response.response === 'string' ? response.response : JSON.stringify(response.response);
+                        await this.whatsAppService.sendText(messageData.customerId, responseText);
                     }
 
                     return {
