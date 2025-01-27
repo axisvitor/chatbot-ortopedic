@@ -1028,8 +1028,18 @@ class OpenAIService {
                 { assistant_id: this.assistantId }
             );
 
-            // Registra o run ativo
+            if (!run || !run.id) {
+                throw new Error('Run não foi criado corretamente');
+            }
+
+            // Registra o run ativo e aguarda o registro
             await this.registerActiveRun(threadId, run.id);
+
+            // Verifica se o registro foi bem sucedido
+            const hasRun = await this.hasActiveRun(threadId);
+            if (!hasRun) {
+                throw new Error('Falha ao registrar run ativo');
+            }
 
             return run;
 
