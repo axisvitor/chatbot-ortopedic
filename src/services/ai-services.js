@@ -54,10 +54,14 @@ class AIServices {
             `;
 
             // Gera resposta personalizada via Assistant
-            const response = await this.openAIService.processCustomerMessage(from, {
-                role: 'user',
-                content: context
-            });
+            const response = await this.openAIService.processCustomerMessageWithImage(
+                from,
+                context,
+                [{
+                    mimetype: imageData.mimetype,
+                    base64: imageData.buffer.toString('base64')
+                }]
+            );
 
             return {
                 type: 'image_analysis',
@@ -199,9 +203,11 @@ class AIServices {
                     console.log('AudioTranscribed', { transcription });
                     
                     // Processa com o OpenAI Assistant
-                    const response = await this.openAIService.processCustomerMessage(message.from, {
-                        role: 'user',
-                        content: transcription
+                    const response = await this.openAIService.processMessage({
+                        customerId: message.from,
+                        messageId: message.messageId,
+                        messageText: transcription,
+                        timestamp: new Date().toISOString()
                     });
 
                     if (response) {
