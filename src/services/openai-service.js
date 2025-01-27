@@ -596,7 +596,7 @@ class OpenAIService {
             const response = await this.addMessageAndRun(threadId, message);
 
             // Retorna apenas o texto da resposta
-            return response.content || response;
+            return response?.content || response?.response;
 
         } catch (error) {
             // Registra erro
