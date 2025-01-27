@@ -1514,6 +1514,26 @@ class OpenAIService {
     setDepartmentService(departmentService) {
         this.departmentService = departmentService;
     }
+
+    async runAssistant(threadId) {
+        if (!threadId) {
+            throw new Error('ThreadId é obrigatório');
+        }
+        
+        try {
+            return await this.client.beta.threads.runs.create(
+                threadId,
+                { assistant_id: this.assistantId }
+            );
+        } catch (error) {
+            logger.error('ErrorRunningAssistant', {
+                threadId,
+                error: error.message,
+                stack: error.stack
+            });
+            throw error;
+        }
+    }
 }
 
 module.exports = { OpenAIService };
