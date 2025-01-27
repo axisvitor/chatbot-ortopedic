@@ -1250,6 +1250,99 @@ class OpenAIService {
 
         return toolOutputs;
     }
+
+    /**
+     * Aguarda a resposta do assistant
+     * @param {string} threadId - ID da thread
+     * @param {string} runId - ID do run
+     * @returns {Promise<string>} Resposta do assistant
+     */
+    async waitForResponse(threadId, runId) {
+        try {
+            let run = await this.checkRunStatus(threadId, runId);
+            
+            while (run.status === 'queued' || run.status === 'in_progress') {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                run = await this.checkRunStatus(threadId, runId);
+            }
+
+            if (run.status === 'requires_action') {
+                logger.info('RunRequiresAction', { threadId, runId });
+                console.log('[OpenAI] Ação requerida, processando tool calls...');
+                
+                if (run.required_action?.type === 'submit_tool_outputs') {
+                    const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+                    logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
+                    console.log('[OpenAI] Processando tool calls:', toolCalls.map(t => t.function.name));
+                    
+                    const toolOutputs = await this.handleToolCalls(run, threadId);
+                    
+                    await this.client.beta.threads.runs.submitToolOutputs(
+                        threadId,
+                        runId,
+                        { tool_outputs: toolOutputs }
+                    );
+                    
+                    return await this.waitForResponse(threadId, runId);
+                }
+            }
+
+            if (run.status === 'completed') {
+                const messages = await this.client.beta.threads.messages.list(threadId);
+                if (messages.data && messages.data.length > 0) {
+                    const lastMessage = messages.data[0];
+                    if (lastMessage.role === 'assistant' && lastMessage.content && lastMessage.content.length > 0) {
+                        const contentParts = lastMessage.content.map(part => part.text?.value || '').filter(Boolean);
+                        const content = contentParts.join(' ').trim();
+                        if (content) {
+                            logger.info('AssistantResponse', { threadId, response: content });
+                            return content;
+                        }
+                    }
+                    logger.error('ErrorExtractingAssistantResponse', { threadId, error: 'Unexpected message structure' });
+                    throw new Error('Não foi possível extrair a resposta do assistente');
+                }
+                logger.error('NoMessagesFound', { threadId });
+                throw new Error('Nenhuma mensagem encontrada na thread');
+            }
+
+            if (run.status === 'failed') {
+                logger.error('RunFailed', { threadId, runId, error: run.last_error });
+                console.error('[OpenAI] Run falhou:', run.last_error);
+                throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
+            }
+
+            if (run.status === 'cancelled' || run.status === 'expired') {
+                logger.error('RunCancelledOrExpired', { threadId, runId, status: run.status });
+                console.error('[OpenAI] Run cancelado ou expirado:', run.status);
+                throw new Error(`Run cancelado ou expirado: ${run.status}`);
+            }
+
+            throw new Error(`Run terminou com status inesperado: ${run.status}`);
+            
+        } catch (error) {
+            logger.error('ErrorWaitingForResponse', { threadId, runId, error });
+            console.error('[OpenAI] Erro ao aguardar resposta:', error);
+            await this.removeActiveRun(threadId); // Garante remoção do run em caso de erro
+            throw error;
+        }
+    }
+
+    /**
+     * Verifica o status de um run
+     * @param {string} threadId - ID do thread
+     * @param {string} runId - ID do run
+     * @returns {Promise<Object>} Status do run
+     */
+    async checkRunStatus(threadId, runId) {
+        try {
+            return await this.client.beta.threads.runs.retrieve(threadId, runId);
+        } catch (error) {
+            logger.error('ErrorCheckingRunStatus', { threadId, runId, error });
+            console.error('[OpenAI] Erro ao verificar status:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = { OpenAIService };
