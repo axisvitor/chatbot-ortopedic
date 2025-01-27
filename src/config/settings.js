@@ -60,7 +60,7 @@ const WHATSAPP_CONFIG = {
     messageDelay: 3000, // delay padrão entre mensagens em ms
     retryAttempts: 3,
     retryDelay: 1000,
-    connectionTimeout: 30000,
+    connectionTimeout: 60000,
     qrTimeout: 60000,
     reconnectInterval: 5000,
     maxReconnectAttempts: 5,
