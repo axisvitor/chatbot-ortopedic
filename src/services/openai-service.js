@@ -582,48 +582,45 @@ class OpenAIService {
      */
     async processMessage(messageData) {
         try {
+            // Valida os dados da mensagem
             if (!messageData?.customerId || !messageData?.messageText) {
                 throw new Error('CustomerId e messageText são obrigatórios');
             }
 
+            // Verifica se já existe um thread para o cliente
             const threadId = await this.getOrCreateThreadForCustomer(messageData.customerId);
             
+            // Prepara a mensagem para o OpenAI
             const message = {
                 role: 'user',
                 content: messageData.messageText
             };
 
-            const response = await this.addMessageAndRun(threadId, message);
-
-            // Registra sucesso
-            logger.info('MessageProcessed', {
-                threadId,
-                messageId: messageData.messageId,
-                customerId: messageData.customerId,
-                timestamp: new Date().toISOString()
+            // Adiciona a mensagem e executa o assistente
+            const run = await this.addMessageAndRun(threadId, {
+                ...messageData,
+                role: message.role,
+                content: message.content
             });
 
-            // Retorna a resposta formatada
-            return {
-                type: 'text',
-                response: response,
-                from: messageData.customerId
-            };
+            // Aguarda a resposta completa
+            const response = await this.waitForResponse(threadId, run.id);
+
+            return response;
 
         } catch (error) {
             // Registra erro
             logger.error('ErrorProcessingMessage', {
                 error: {
-                    message: error.message,
-                    stack: error.stack,
-                    code: error.code
-                },
-                threadId,
-                messageId: messageData?.messageId,
-                customerId: messageData?.customerId,
-                timestamp: new Date().toISOString()
+                    customerId: messageData?.customerId,
+                    messageId: messageData?.messageId,
+                    error: {
+                        message: error.message,
+                        stack: error.stack
+                    },
+                    timestamp: new Date().toISOString()
+                }
             });
-
             throw error;
         }
     }
@@ -635,28 +632,84 @@ class OpenAIService {
                 throw new Error('ThreadId e message são obrigatórios');
             }
 
-            // Adiciona a mensagem ao thread
-            await this.client.beta.threads.messages.create(
+            if (!message.messageText) {
+                throw new Error('Mensagem não pode estar vazia');
+            }
+
+            // Recupera o contexto atual
+            let currentContext = await this.contextManager.getContext(threadId);
+            
+            // Prepara os dados da mensagem
+            const messageData = {
+                role: 'user',
+                content: message.messageText
+            };
+
+            // Adiciona metadados ao contexto
+            const metadata = {
+                customerId: message.customerId,
+                timestamp: new Date().toISOString(),
+                messageId: message.messageId
+            };
+
+            // Adiciona a mensagem ao histórico
+            if (!currentContext.history) {
+                currentContext.history = [];
+            }
+            currentContext.history.push({
+                ...messageData,
+                metadata
+            });
+
+            // Atualiza dados da conversa
+            if (!currentContext.conversation) {
+                currentContext.conversation = {};
+            }
+            currentContext.conversation.lastMessage = messageData;
+            currentContext.conversation.interactionCount = (currentContext.conversation.interactionCount || 0) + 1;
+            currentContext.conversation.lastUpdate = new Date().toISOString();
+
+            // Salva o contexto antes de adicionar a mensagem
+            await this.contextManager.saveContext(threadId, currentContext);
+
+            // Adiciona a mensagem ao thread do OpenAI
+            const openaiMessage = await this.client.beta.threads.messages.create(
                 threadId,
-                { role: 'user', content: message.content }
+                messageData
             );
 
-            // Executa o assistant
-            const run = await this.runAssistant(threadId);
-            
-            // Aguarda e retorna a resposta
-            const responseText = await this.waitForResponse(threadId, run.id);
-            return responseText;
+            // Atualiza o contexto com o ID da mensagem do OpenAI
+            currentContext.conversation.lastOpenAIMessageId = openaiMessage.id;
+            await this.contextManager.saveContext(threadId, currentContext);
 
-        } catch (error) {
-            logger.error('ErrorAddingMessageAndRun', {
-                error: {
-                    message: error.message,
-                    stack: error.stack
-                },
+            // Executa o assistente
+            const response = await this.runAssistant(threadId);
+            this.lastAssistantResponse = response;
+
+            // Registra sucesso
+            logger.info('MessageProcessed', {
                 threadId,
+                messageId: message.messageId,
+                customerId: message.customerId,
                 timestamp: new Date().toISOString()
             });
+
+            return response;
+
+        } catch (error) {
+            // Registra erro
+            logger.error('ErrorProcessingMessage', {
+                error: {
+                    message: error.message,
+                    stack: error.stack,
+                    code: error.code
+                },
+                threadId,
+                messageId: message?.messageId,
+                customerId: message?.customerId,
+                timestamp: new Date().toISOString()
+            });
+
             throw error;
         }
     }
@@ -776,352 +829,30 @@ class OpenAIService {
                 throw new Error('ThreadId e message são obrigatórios');
             }
 
-            if (!message.messageText) {
-                throw new Error('Mensagem não pode estar vazia');
-            }
-
-            // Recupera o contexto atual
-            let currentContext = await this.contextManager.getContext(threadId);
-            
-            // Prepara os dados da mensagem
-            const messageData = {
-                role: 'user',
-                content: message.messageText
-            };
-
-            // Adiciona metadados ao contexto
-            const metadata = {
-                customerId: message.customerId,
-                timestamp: new Date().toISOString(),
-                messageId: message.messageId
-            };
-
-            // Adiciona a mensagem ao histórico
-            if (!currentContext.history) {
-                currentContext.history = [];
-            }
-            currentContext.history.push({
-                ...messageData,
-                metadata
-            });
-
-            // Atualiza dados da conversa
-            if (!currentContext.conversation) {
-                currentContext.conversation = {};
-            }
-            currentContext.conversation.lastMessage = messageData;
-            currentContext.conversation.interactionCount = (currentContext.conversation.interactionCount || 0) + 1;
-            currentContext.conversation.lastUpdate = new Date().toISOString();
-
-            // Salva o contexto antes de adicionar a mensagem
-            await this.contextManager.saveContext(threadId, currentContext);
-
-            // Adiciona a mensagem ao thread do OpenAI
-            const openaiMessage = await this.client.beta.threads.messages.create(
+            // Adiciona a mensagem ao thread
+            await this.client.beta.threads.messages.create(
                 threadId,
-                messageData
+                { role: 'user', content: message.content }
             );
 
-            // Atualiza o contexto com o ID da mensagem do OpenAI
-            currentContext.conversation.lastOpenAIMessageId = openaiMessage.id;
-            await this.contextManager.saveContext(threadId, currentContext);
-
-            // Executa o assistente
-            const response = await this.runAssistant(threadId);
-            this.lastAssistantResponse = response;
-
-            // Registra sucesso
-            logger.info('MessageProcessed', {
-                threadId,
-                messageId: message.messageId,
-                customerId: message.customerId,
-                timestamp: new Date().toISOString()
-            });
-
-            return response;
+            // Executa o assistant
+            const run = await this.runAssistant(threadId);
+            
+            // Aguarda e retorna a resposta
+            const responseText = await this.waitForResponse(threadId, run.id);
+            return responseText;
 
         } catch (error) {
-            // Registra erro
-            logger.error('ErrorProcessingMessage', {
+            logger.error('ErrorAddingMessageAndRun', {
                 error: {
                     message: error.message,
-                    stack: error.stack,
-                    code: error.code
+                    stack: error.stack
                 },
                 threadId,
-                messageId: message?.messageId,
-                customerId: message?.customerId,
                 timestamp: new Date().toISOString()
             });
-
             throw error;
         }
-    }
-
-    /**
-     * Processa mensagem do cliente
-     * @param {Object} messageData - Dados da mensagem
-     * @returns {Promise<Object>} Resposta do processamento
-     */
-    async processMessage(messageData) {
-        try {
-            // Valida os dados da mensagem
-            if (!messageData?.customerId || !messageData?.messageText) {
-                throw new Error('CustomerId e messageText são obrigatórios');
-            }
-
-            // Verifica se já existe um thread para o cliente
-            const threadId = await this.getOrCreateThreadForCustomer(messageData.customerId);
-            
-            // Prepara a mensagem para o OpenAI
-            const message = {
-                role: 'user',
-                content: messageData.messageText
-            };
-
-            // Adiciona a mensagem e executa o assistente
-            const response = await this.addMessageAndRun(threadId, {
-                ...messageData,
-                role: message.role,
-                content: message.content
-            });
-
-            // Retorna a resposta formatada
-            return {
-                type: 'text',
-                response: response,
-                from: messageData.customerId
-            };
-
-        } catch (error) {
-            // Registra erro
-            logger.error('ErrorProcessingMessage', {
-                error: {
-                    customerId: messageData?.customerId,
-                    messageId: messageData?.messageId,
-                    error: {
-                        message: error.message,
-                        stack: error.stack
-                    },
-                    timestamp: new Date().toISOString()
-                }
-            });
-            throw error;
-        }
-    }
-
-    async handleToolCalls(run, threadId) {
-        if (!run?.required_action?.submit_tool_outputs?.tool_calls) {
-            logger.warn('NoToolCalls', { threadId });
-            return [];
-        }
-
-        const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
-        logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
-        
-        const toolOutputs = [];
-        const context = {};
-
-        for (const toolCall of toolCalls) {
-            const { name, arguments: args } = toolCall.function;
-            logger.info('ExecutingTool', { threadId, tool: name, args });
-            
-            let parsedArgs;
-            try {
-                parsedArgs = JSON.parse(args);
-            } catch (error) {
-                logger.error('ErrorParsingToolArguments', { threadId, tool: name, error });
-                continue;
-            }
-
-            let output;
-            try {
-                switch (name) {
-                    case 'check_order':
-                        output = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
-                        if (!output) {
-                            output = { error: true, message: 'Pedido não encontrado' };
-                        } else {
-                            // Salva informações do pedido no contexto
-                            context.order = output;
-                            // Adiciona tracking_code ao output para facilitar o check_tracking
-                            output.tracking_code = output.shipping_tracking_number;
-                            
-                            // Formata a saída usando o template de pedido
-                            const formattedOutput = `🛍️ Detalhes do Pedido #${output.number}\n\n` +
-                                `📦 Status: ${output.status}\n` +
-                                `💰 Status Pagamento: ${output.payment_status}\n` +
-                                `📬 Status Envio: ${output.shipping_status}\n\n` +
-                                `Produtos:\n${output.products.map(p => 
-                                    `▫️ ${p.quantity}x ${p.name} - R$ ${p.price}`
-                                ).join('\n')}`;
-                            
-                            output = {
-                                ...output,
-                                shipping_tracking_number: output.shipping_tracking_number,
-                                formatted: formattedOutput,
-                                message: formattedOutput // Para compatibilidade
-                            };
-                        }
-                        break;
-
-                    case 'check_tracking':
-                        // Verifica se é um placeholder
-                        if (parsedArgs.tracking_code.includes('[código de rastreio')) {
-                            // Tenta usar o código do pedido do contexto
-                            if (context.order?.shipping_tracking_number) {
-                                parsedArgs.tracking_code = context.order.shipping_tracking_number;
-                            } else {
-                                output = { error: true, message: 'Código de rastreio inválido' };
-                                break;
-                            }
-                        }
-                        
-                        // Remove caracteres especiais e espaços
-                        const cleanTrackingCode = parsedArgs.tracking_code.trim().replace(/[^a-zA-Z0-9]/g, '');
-                        
-                        try {
-                            // Força atualização do rastreamento
-                            const trackingInfo = await this.trackingService.getTrackingInfo(cleanTrackingCode, true);
-                            
-                            // Formata a saída usando o template de rastreamento
-                            const statusEmoji = this.trackingService.STATUS_EMOJIS[trackingInfo.status] || '📦';
-                            const formattedTracking = `📦 Status do Rastreamento ${statusEmoji}\n\n` +
-                                `🔍 Status: ${trackingInfo.status}\n` +
-                                `📝 Detalhes: ${trackingInfo.sub_status || 'N/A'}\n` +
-                                `📅 Última Atualização: ${trackingInfo.last_event?.time || 'N/A'}`;
-                            
-                            output = {
-                                ...trackingInfo,
-                                tracking_code: cleanTrackingCode,
-                                status_emoji: statusEmoji,
-                                formatted: formattedTracking,
-                                message: formattedTracking // Para compatibilidade
-                            };
-                            
-                        } catch (error) {
-                            console.error('[OpenAI] Erro ao consultar rastreamento:', error);
-                            output = { 
-                                error: true, 
-                                message: 'Erro ao consultar rastreamento',
-                                details: error.message
-                            };
-                        }
-                        break;
-
-                    case 'get_business_hours':
-                        output = parsedArgs.type === 'full' ? 
-                            await this.businessHoursService.getAllHours() :
-                            await this.businessHoursService.getCurrentStatus();
-                        break;
-
-                    case 'extract_order_number':
-                        const orderNumber = await this.orderValidationService.extractOrderNumber(
-                            parsedArgs.text,
-                            parsedArgs.strict || false
-                        );
-                        output = { order_number: orderNumber };
-                        break;
-
-                    case 'request_payment_proof':
-                        switch (parsedArgs.action) {
-                            case 'request':
-                                await this.redisStore.set(`openai:waiting_order:${threadId}`, 'payment_proof');
-                                await this.redisStore.set(`openai:pending_order:${threadId}`, parsedArgs.order_number);
-                                output = { status: 'waiting', message: 'Aguardando comprovante' };
-                                break;
-                            
-                            case 'validate':
-                                const orderStatus = await this.nuvemshopService.getOrderPaymentStatus(parsedArgs.order_number);
-                                output = {
-                                    valid: orderStatus === 'paid',
-                                    status: orderStatus,
-                                    message: orderStatus === 'paid' ? 
-                                        'Pagamento confirmado' : 
-                                        'Pagamento pendente'
-                                };
-                                break;
-
-                            case 'cancel':
-                                await this.redisStore.del(`openai:waiting_order:${threadId}`);
-                                await this.redisStore.del(`openai:pending_order:${threadId}`);
-                                output = { status: 'cancelled', message: 'Solicitação cancelada' };
-                                break;
-
-                            default:
-                                throw new Error(`Ação inválida: ${parsedArgs.action}`);
-                        }
-                        break;
-
-                    case 'forward_to_financial':
-                        const caseData = {
-                            reason: parsedArgs.reason,
-                            order_number: parsedArgs.order_number,
-                            tracking_code: parsedArgs.tracking_code,
-                            customer_message: parsedArgs.customer_message,
-                            priority: parsedArgs.priority || 'medium',
-                            additional_info: parsedArgs.additional_info
-                        };
-                        
-                        const success = await this.financialService.forwardCase(caseData);
-                        output = { 
-                            status: success ? 'forwarded' : 'error',
-                            message: success ? 'Caso encaminhado para análise' : 'Erro ao encaminhar caso',
-                            priority: caseData.priority
-                        };
-                        break;
-
-                    case 'forward_to_department':
-                        const departmentData = {
-                            department: parsedArgs.department,
-                            reason: parsedArgs.reason,
-                            order_number: parsedArgs.order_number,
-                            tracking_code: parsedArgs.tracking_code,
-                            customer_message: parsedArgs.customer_message,
-                            priority: parsedArgs.priority || 'medium',
-                            additional_info: parsedArgs.additional_info
-                        };
-                        
-                        const deptSuccess = await this.departmentService.forwardCase(departmentData);
-                        output = { 
-                            status: deptSuccess ? 'forwarded' : 'error',
-                            message: deptSuccess ? 'Caso encaminhado para análise' : 'Erro ao encaminhar caso',
-                            priority: departmentData.priority,
-                            department: parsedArgs.department
-                        };
-                        break;
-
-                    default:
-                        throw new Error(`Função desconhecida: ${name}`);
-                }
-
-                toolOutputs.push({
-                    tool_call_id: toolCall.id,
-                    output: JSON.stringify({
-                        ...output,
-                        // Garante que a formatação seja incluída na resposta
-                        formatted_response: output.formatted || output.message
-                    })
-                });
-
-            } catch (error) {
-                logger.error('ErrorExecutingTool', { 
-                    threadId, 
-                    tool: name, 
-                    error: error.message 
-                });
-
-                toolOutputs.push({
-                    tool_call_id: toolCall.id,
-                    output: JSON.stringify({ 
-                        error: true, 
-                        message: 'Erro ao processar solicitação'
-                    })
-                });
-            }
-        }
-
-        return toolOutputs;
     }
 
     /**
@@ -1472,23 +1203,244 @@ class OpenAIService {
     }
 
     async runAssistant(threadId) {
-        if (!threadId) {
-            throw new Error('ThreadId é obrigatório');
-        }
-        
         try {
-            return await this.client.beta.threads.runs.create(
+            if (!threadId) {
+                throw new Error('ThreadId é obrigatório');
+            }
+
+            // Inicia o run
+            const run = await this.client.beta.threads.runs.create(
                 threadId,
                 { assistant_id: this.assistantId }
             );
+
+            // Registra o run ativo
+            await this.registerActiveRun(threadId, run.id);
+
+            // Aguarda e retorna a resposta
+            const response = await this.waitForResponse(threadId, run.id);
+            
+            // Remove o run ativo
+            await this.removeActiveRun(threadId);
+
+            return response;
+
         } catch (error) {
             logger.error('ErrorRunningAssistant', {
+                error: {
+                    message: error.message,
+                    stack: error.stack
+                },
                 threadId,
-                error: error.message,
-                stack: error.stack
+                timestamp: new Date().toISOString()
             });
             throw error;
         }
+    }
+
+    async handleToolCalls(run, threadId) {
+        if (!run?.required_action?.submit_tool_outputs?.tool_calls) {
+            logger.warn('NoToolCalls', { threadId });
+            return [];
+        }
+
+        const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+        logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
+        
+        const toolOutputs = [];
+        const context = {};
+
+        for (const toolCall of toolCalls) {
+            const { name, arguments: args } = toolCall.function;
+            logger.info('ExecutingTool', { threadId, tool: name, args });
+            
+            let parsedArgs;
+            try {
+                parsedArgs = JSON.parse(args);
+            } catch (error) {
+                logger.error('ErrorParsingToolArguments', { threadId, tool: name, error });
+                continue;
+            }
+
+            let output;
+            try {
+                switch (name) {
+                    case 'check_order':
+                        output = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
+                        if (!output) {
+                            output = { error: true, message: 'Pedido não encontrado' };
+                        } else {
+                            context.order = output;
+                            output.tracking_code = output.shipping_tracking_number;
+                            
+                            const formattedOutput = `🛍️ Detalhes do Pedido #${output.number}\n\n` +
+                                `📦 Status: ${output.status}\n` +
+                                `💰 Status Pagamento: ${output.payment_status}\n` +
+                                `📬 Status Envio: ${output.shipping_status}\n\n` +
+                                `Produtos:\n${output.products.map(p => 
+                                    `▫️ ${p.quantity}x ${p.name} - R$ ${p.price}`
+                                ).join('\n')}`;
+                            
+                            output = {
+                                ...output,
+                                shipping_tracking_number: output.shipping_tracking_number,
+                                formatted: formattedOutput,
+                                message: formattedOutput
+                            };
+                        }
+                        break;
+
+                    case 'check_tracking':
+                        if (parsedArgs.tracking_code.includes('[código de rastreio')) {
+                            if (context.order?.shipping_tracking_number) {
+                                parsedArgs.tracking_code = context.order.shipping_tracking_number;
+                            } else {
+                                output = { error: true, message: 'Código de rastreio inválido' };
+                                break;
+                            }
+                        }
+                        
+                        const cleanTrackingCode = parsedArgs.tracking_code.trim().replace(/[^a-zA-Z0-9]/g, '');
+                        
+                        try {
+                            const trackingInfo = await this.trackingService.getTrackingInfo(cleanTrackingCode, true);
+                            
+                            const statusEmoji = this.trackingService.STATUS_EMOJIS[trackingInfo.status] || '📦';
+                            const formattedTracking = `📦 Status do Rastreamento ${statusEmoji}\n\n` +
+                                `🔍 Status: ${trackingInfo.status}\n` +
+                                `📝 Detalhes: ${trackingInfo.sub_status || 'N/A'}\n` +
+                                `📅 Última Atualização: ${trackingInfo.last_event?.time || 'N/A'}`;
+                            
+                            output = {
+                                ...trackingInfo,
+                                tracking_code: cleanTrackingCode,
+                                status_emoji: statusEmoji,
+                                formatted: formattedTracking,
+                                message: formattedTracking
+                            };
+                            
+                        } catch (error) {
+                            console.error('[OpenAI] Erro ao consultar rastreamento:', error);
+                            output = { 
+                                error: true, 
+                                message: 'Erro ao consultar rastreamento',
+                                details: error.message
+                            };
+                        }
+                        break;
+
+                    case 'get_business_hours':
+                        output = parsedArgs.type === 'full' ? 
+                            await this.businessHoursService.getAllHours() :
+                            await this.businessHoursService.getCurrentStatus();
+                        break;
+
+                    case 'extract_order_number':
+                        const orderNumber = await this.orderValidationService.extractOrderNumber(
+                            parsedArgs.text,
+                            parsedArgs.strict || false
+                        );
+                        output = { order_number: orderNumber };
+                        break;
+
+                    case 'request_payment_proof':
+                        switch (parsedArgs.action) {
+                            case 'request':
+                                await this.redisStore.set(`openai:waiting_order:${threadId}`, 'payment_proof');
+                                await this.redisStore.set(`openai:pending_order:${threadId}`, parsedArgs.order_number);
+                                output = { status: 'waiting', message: 'Aguardando comprovante' };
+                                break;
+                            
+                            case 'validate':
+                                const orderStatus = await this.nuvemshopService.getOrderPaymentStatus(parsedArgs.order_number);
+                                output = {
+                                    valid: orderStatus === 'paid',
+                                    status: orderStatus,
+                                    message: orderStatus === 'paid' ? 
+                                        'Pagamento confirmado' : 
+                                        'Pagamento pendente'
+                                };
+                                break;
+
+                            case 'cancel':
+                                await this.redisStore.del(`openai:waiting_order:${threadId}`);
+                                await this.redisStore.del(`openai:pending_order:${threadId}`);
+                                output = { status: 'cancelled', message: 'Solicitação cancelada' };
+                                break;
+
+                            default:
+                                throw new Error(`Ação inválida: ${parsedArgs.action}`);
+                        }
+                        break;
+
+                    case 'forward_to_financial':
+                        const caseData = {
+                            reason: parsedArgs.reason,
+                            order_number: parsedArgs.order_number,
+                            tracking_code: parsedArgs.tracking_code,
+                            customer_message: parsedArgs.customer_message,
+                            priority: parsedArgs.priority || 'medium',
+                            additional_info: parsedArgs.additional_info
+                        };
+                        
+                        const success = await this.financialService.forwardCase(caseData);
+                        output = { 
+                            status: success ? 'forwarded' : 'error',
+                            message: success ? 'Caso encaminhado para análise' : 'Erro ao encaminhar caso',
+                            priority: caseData.priority
+                        };
+                        break;
+
+                    case 'forward_to_department':
+                        const departmentData = {
+                            department: parsedArgs.department,
+                            reason: parsedArgs.reason,
+                            order_number: parsedArgs.order_number,
+                            tracking_code: parsedArgs.tracking_code,
+                            customer_message: parsedArgs.customer_message,
+                            priority: parsedArgs.priority || 'medium',
+                            additional_info: parsedArgs.additional_info
+                        };
+                        
+                        const deptSuccess = await this.departmentService.forwardCase(departmentData);
+                        output = { 
+                            status: deptSuccess ? 'forwarded' : 'error',
+                            message: deptSuccess ? 'Caso encaminhado para análise' : 'Erro ao encaminhar caso',
+                            priority: departmentData.priority,
+                            department: parsedArgs.department
+                        };
+                        break;
+
+                    default:
+                        throw new Error(`Função desconhecida: ${name}`);
+                }
+
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: JSON.stringify({
+                        ...output,
+                        formatted_response: output.formatted || output.message
+                    })
+                });
+
+            } catch (error) {
+                logger.error('ErrorExecutingTool', { 
+                    threadId, 
+                    tool: name, 
+                    error: error.message 
+                });
+
+                toolOutputs.push({
+                    tool_call_id: toolCall.id,
+                    output: JSON.stringify({ 
+                        error: true, 
+                        message: 'Erro ao processar solicitação'
+                    })
+                });
+            }
+        }
+
+        return toolOutputs;
     }
 }
 

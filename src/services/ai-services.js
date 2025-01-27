@@ -54,14 +54,10 @@ class AIServices {
             `;
 
             // Gera resposta personalizada via Assistant
-            const response = await this.openAIService.processCustomerMessageWithImage(
-                from,
-                context,
-                [{
-                    mimetype: imageData.mimetype,
-                    base64: imageData.buffer.toString('base64')
-                }]
-            );
+            const response = await this.openAIService.processCustomerMessage(from, {
+                role: 'user',
+                content: context
+            });
 
             return {
                 type: 'image_analysis',
@@ -134,6 +130,45 @@ class AIServices {
     async handleMessage(message) {
         try {
             console.log('[AIServices] handleMessage - type:', message.type);
+
+            // Se for mensagem de texto
+            if (message.type === 'text') {
+                const messageData = await this.extractMessageText(message);
+                
+                console.log('📝 [AIServices] Dados básicos extraídos:', {
+                    de: messageData.customerId,
+                    timestamp: messageData.timestamp,
+                    texto: messageData.messageText,
+                    temAudio: false,
+                    temDocumento: false
+                });
+
+                if (!messageData.customerId || !messageData.messageText) {
+                    throw new Error('Dados da mensagem inválidos');
+                }
+
+                console.log('ProcessingTextMessage', {
+                    messageId: messageData.messageId,
+                    customerId: messageData.customerId,
+                    messageLength: messageData.messageText.length,
+                    timestamp: messageData.timestamp
+                });
+
+                // Processa a mensagem
+                const response = await this.openAIService.processMessage(messageData);
+
+                // Envia a resposta
+                if (response) {
+                    await this.whatsAppService.sendText(messageData.customerId, response);
+                }
+
+                return {
+                    type: 'text',
+                    response: response,
+                    from: messageData.customerId
+                };
+            }
+
             // Se for mensagem de imagem
             if (message.type === 'image') {
                 console.log('[AIServices] handleMessage - handling image message');
@@ -166,7 +201,7 @@ class AIServices {
                     // Processa com o OpenAI Assistant
                     const response = await this.openAIService.processCustomerMessage(message.from, {
                         role: 'user',
-                        transcription: transcription
+                        content: transcription
                     });
 
                     if (response) {
@@ -193,67 +228,22 @@ class AIServices {
                 }
             }
 
-            // Se for mensagem de texto
-            if (message.type === 'text') {
-                const messageData = await this.extractMessageText(message);
-                
-                if (messageData && messageData.type === 'text') {
-                    console.log('📝 [AIServices] Dados básicos extraídos:', {
-                        de: messageData.customerId,
-                        timestamp: messageData.timestamp,
-                        texto: messageData.messageText,
-                        temAudio: false,
-                        temDocumento: false
-                    });
-
-                    if (!messageData.customerId || !messageData.messageText) {
-                        throw new Error('Dados da mensagem inválidos');
-                    }
-
-                    console.log('ProcessingTextMessage', {
-                        messageId: messageData.messageId,
-                        customerId: messageData.customerId,
-                        messageLength: messageData.messageText.length,
-                        timestamp: messageData.timestamp
-                    });
-
-                    // Processa a mensagem
-                    const response = await this.openAIService.processMessage({
-                        messageId: messageData.messageId,
-                        customerId: messageData.customerId,
-                        messageText: messageData.messageText,
-                        timestamp: messageData.timestamp
-                    });
-
-                    // Envia a resposta
-                    if (response?.response) {
-                        const responseText = typeof response.response === 'string' ? response.response : JSON.stringify(response.response);
-                        await this.whatsAppService.sendText(messageData.customerId, responseText);
-                    }
-
-                    return {
-                        type: 'text',
-                        response: response?.response,
-                        from: messageData.customerId
-                    };
-                }
-            }
-
             throw new Error(`Tipo de mensagem não suportado: ${message.type}`);
+
         } catch (error) {
             console.error('ErrorHandlingMessage', {
                 error: {
                     message: error.message,
-                    stack: error.stack,
-                    code: error.code
+                    stack: error.stack
                 },
                 messageId: message?.messageId || message?.key?.id,
                 timestamp: new Date().toISOString()
             });
 
-            // Envia mensagem de erro para o usuário
-            const errorMessage = '❌ Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.';
-            await this.whatsAppService.sendText(message.from || message.key?.remoteJid?.split('@')[0], errorMessage);
+            // Tenta enviar mensagem de erro para o usuário
+            if (message?.from) {
+                await this.sendErrorMessage(message.from, error);
+            }
 
             throw error;
         }
