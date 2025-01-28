@@ -1,6 +1,6 @@
 const axios = require('axios');
 const moment = require('moment-timezone');
-const logger = require('../../../utils/logger');
+const logger = require('../../utils/logger');
 const { NUVEMSHOP_CONFIG } = require('./config/settings');
 const { NuvemshopHttpClient } = require('./utils/http-client');
 const { NuvemshopCache } = require('./utils/cache');
