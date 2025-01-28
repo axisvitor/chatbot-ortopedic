@@ -1,4 +1,4 @@
-const logger = require('../../../utils/logger');
+const logger = require('../../utils/logger');
 const moment = require('moment-timezone');
 const { NuvemshopBase } = require('./base');
 const { OrderService } = require('./services/order');
