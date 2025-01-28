@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
-const logger = require('../../../../utils/logger');
+const logger = require('../../../utils/logger');
 
 class WebhookValidator {
     constructor() {
