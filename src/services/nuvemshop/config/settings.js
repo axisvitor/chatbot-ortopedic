@@ -1,12 +1,15 @@
+const { validateEnvVar } = require('../../../config/settings');
+
 const NUVEMSHOP_CONFIG = {
     // Configurações da API
-    apiUrl: process.env.NUVEMSHOP_API_URL || 'https://api.nuvemshop.com.br/v1',
-    accessToken: process.env.NUVEMSHOP_ACCESS_TOKEN,
-    userId: process.env.NUVEMSHOP_USER_ID,
-    
+    apiUrl: validateEnvVar('NUVEMSHOP_API_URL'),
+    accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN'),
+    userId: validateEnvVar('NUVEMSHOP_USER_ID'),
+    scope: validateEnvVar('NUVEMSHOP_SCOPE').split(','),
+
     // Configurações do webhook
     webhook: {
-        secret: process.env.NUVEMSHOP_WEBHOOK_SECRET,
+        secret: validateEnvVar('NUVEMSHOP_WEBHOOK_SECRET'),
         topics: [
             'orders/created',
             'orders/paid',
@@ -71,7 +74,7 @@ const NUVEMSHOP_CONFIG = {
 
     // Configurações de segurança
     security: {
-        allowedIps: process.env.NUVEMSHOP_ALLOWED_IPS?.split(',') || [],
+        allowedIps: validateEnvVar('NUVEMSHOP_ALLOWED_IPS').split(','),
         rateLimitWindow: 60000, // 1 minuto
         maxRequestsPerWindow: 100
     }

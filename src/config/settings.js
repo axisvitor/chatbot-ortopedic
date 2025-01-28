@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { NUVEMSHOP_CONFIG } = require('../services/nuvemshop/config/settings');
 
 function validateEnvVar(name) {
     if (!process.env[name]) {
@@ -13,8 +14,8 @@ const OPENAI_CONFIG = {
     assistantId: validateEnvVar('ASSISTANT_ID'),
     baseUrl: 'https://api.openai.com/v1',
     models: {
-        chat: 'gpt-4-turbo-preview',
-        vision: 'gpt-4-vision-preview'
+        chat: 'gpt-4o',
+        vision: 'gpt-4o'
     },
     visionConfig: {
         max_tokens: 1024,
@@ -217,63 +218,6 @@ const MEDIA_CONFIG = {
         enabled: true,
         retention: 30 * 24 * 60 * 60, // 30 dias
         prefix: 'media_metrics:'
-    }
-};
-
-// Nuvemshop Configuration
-const NUVEMSHOP_CONFIG = {
-    accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN'),
-    userId: validateEnvVar('NUVEMSHOP_USER_ID'),
-    scope: validateEnvVar('NUVEMSHOP_SCOPE').split(','),
-    apiUrl: validateEnvVar('NUVEMSHOP_API_URL'),
-    api: {
-        timeout: 30000,          // 30 segundos
-        retryAttempts: 3,
-        retryDelays: [1000, 3000, 5000], // 1s, 3s, 5s
-        rateLimit: {
-            maxRequests: 10,     // 10 requisições
-            perMilliseconds: 1000, // por segundo
-            maxRPS: 10
-        },
-        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
-    },
-    cache: {
-        prefix: 'nuvemshop:',
-        ttl: {
-            default: 3600,        // 1 hora
-            products: 3600,       // 1 hora
-            categories: 86400,    // 24 horas
-            orders: {
-                recent: 300,      // 5 minutos para pedidos recentes
-                old: 3600,        // 1 hora para pedidos antigos
-                details: 1800     // 30 minutos para detalhes do pedido
-            },
-            customers: 1800,      // 30 minutos
-            inventory: 300,       // 5 minutos
-            shipping: 1800,       // 30 minutos
-            payments: 1800        // 30 minutos
-        }
-    },
-    webhook: {
-        retryAttempts: 18,       // Conforme documentação
-        retryDelays: [0, 300, 600, 900], // 0s, 5min, 10min, 15min
-        timeout: 10000,          // 10 segundos conforme documentação
-        events: {
-            app: ['uninstalled', 'suspended', 'resumed'],
-            category: ['created', 'updated', 'deleted'],
-            order: [
-                'created', 'updated', 'paid', 'packed', 
-                'fulfilled', 'cancelled', 'custom_fields_updated', 
-                'edited', 'pending', 'voided'
-            ],
-            product: ['created', 'updated', 'deleted'],
-            productVariant: ['custom_fields_updated'],
-            domain: ['updated'],
-            orderCustomField: ['created', 'updated', 'deleted'],
-            productVariantCustomField: ['created', 'updated', 'deleted'],
-            store: ['redact'],
-            customers: ['redact', 'data_request']
-        }
     }
 };
 
