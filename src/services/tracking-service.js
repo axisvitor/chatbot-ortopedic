@@ -3,7 +3,7 @@
 const https = require('https');
 const { TRACKING_CONFIG } = require('../config/settings');
 const { RedisStore } = require('../store/redis-store');
-const { NuvemshopService } = require('./nuvemshop-service');
+const { NuvemshopService } = require('./nuvemshop');
 
 class TrackingService {
     constructor(whatsAppService = null) {
