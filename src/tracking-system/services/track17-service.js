@@ -1,14 +1,14 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const { CacheService } = require('./cache-service');
+const { TRACKING_CONFIG } = require('../../config/settings');
 
 class Track17Service {
     constructor() {
-        this.baseUrl = process.env.TRACK17_API_URL || 'https://api.17track.net/track/v2';
-        this.apiKey = process.env.TRACK17_API_KEY;
+        this.config = TRACKING_CONFIG;
         this.cache = new CacheService();
         
-        if (!this.apiKey) {
+        if (!this.config.apiKey) {
             logger.error('API Key do 17track não configurada!');
             throw new Error('TRACK17_API_KEY é obrigatório');
         }
@@ -96,22 +96,20 @@ class Track17Service {
         }
     }
 
-    async _makeRequest(endpoint, data, attempt = 1) {
+    async _makeRequest(path, data, attempt = 1) {
         const maxAttempts = 3;
         const backoffTime = Math.pow(2, attempt) * 1000;
 
         try {
-            const response = await axios.post(
-                `${this.baseUrl}${endpoint}`,
-                data,
-                {
-                    headers: {
-                        '17token': this.apiKey,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 10000 // 10 segundos
-                }
-            );
+            const url = `${this.config.endpoint}${path}`;
+            
+            const response = await axios.post(url, data, {
+                headers: {
+                    '17token': this.config.apiKey,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 30000
+            });
 
             if (response.data.ret !== 0) {
                 throw new Error(`Erro na API 17track: ${response.data.msg}`);
@@ -122,7 +120,7 @@ class Track17Service {
             if (attempt < maxAttempts && this._isRetryableError(error)) {
                 logger.warn(`Tentativa ${attempt} falhou, tentando novamente em ${backoffTime}ms`);
                 await new Promise(resolve => setTimeout(resolve, backoffTime));
-                return this._makeRequest(endpoint, data, attempt + 1);
+                return this._makeRequest(path, data, attempt + 1);
             }
             throw error;
         }

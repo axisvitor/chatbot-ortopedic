@@ -267,10 +267,12 @@ const WHATSAPP_CONFIG = {
 // 17Track Configuration
 const TRACKING_CONFIG = {
     apiKey: validateEnvVar('TRACK17_API_KEY'),
-    endpoint: 'api.17track.net',
+    endpoint: validateEnvVar('TRACK17_API_URL'),
     paths: {
-        register: '/track/v2.2/register',
-        status: '/track/v2.2/gettrackinfo'
+        register: validateEnvVar('TRACK17_REGISTER_PATH'),
+        status: validateEnvVar('TRACK17_STATUS_PATH'),
+        track: validateEnvVar('TRACK17_TRACK_PATH'),
+        push: validateEnvVar('TRACK17_PUSH_PATH')
     },
     updateInterval: 3600000, // 1 hora em ms
     carriers: ['correios', 'jadlog', 'fedex', 'dhl']
@@ -433,7 +435,12 @@ const REQUIRED_ENV_VARS = [
     'NUVEMSHOP_API_URL',
     
     // Tracking
-    'TRACK17_API_KEY'
+    'TRACK17_API_KEY',
+    'TRACK17_API_URL',
+    'TRACK17_REGISTER_PATH',
+    'TRACK17_STATUS_PATH',
+    'TRACK17_TRACK_PATH',
+    'TRACK17_PUSH_PATH'
 ];
 
 module.exports = {

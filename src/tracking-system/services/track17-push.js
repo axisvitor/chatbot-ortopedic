@@ -1,12 +1,12 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const { RedisStore } = require('../utils/redis-store');
+const { TRACKING_CONFIG } = require('../../config/settings');
 
 class Track17PushService {
     constructor() {
         this.redis = new RedisStore();
-        this.apiKey = process.env.TRACK17_API_KEY;
-        this.pushUrl = 'https://api.17track.net/track/v2.2/push';
+        this.config = TRACKING_CONFIG;
     }
 
     async requestUpdates(trackingNumbers) {
@@ -23,12 +23,16 @@ class Track17PushService {
                 }))
             };
 
-            const response = await axios.post(this.pushUrl, payload, {
-                headers: {
-                    '17token': this.apiKey,
-                    'Content-Type': 'application/json'
+            const response = await axios.post(
+                `${this.config.endpoint}${this.config.paths.push}`,
+                payload,
+                {
+                    headers: {
+                        '17token': this.config.apiKey,
+                        'Content-Type': 'application/json'
+                    }
                 }
-            });
+            );
 
             logger.info('Solicitação de atualizações enviada com sucesso', {
                 total: trackingNumbers.length,
