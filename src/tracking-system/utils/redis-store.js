@@ -49,23 +49,19 @@ class RedisStore {
         this.client.on('reconnecting', () => {
             logger.info('[Redis] Tentando reconectar...');
         });
-
-        this.client.on('end', () => {
-            logger.info('[Redis] Conexão encerrada');
-        });
-
-        // Conecta ao Redis
-        this.connect();
     }
 
+    /**
+     * Conecta ao Redis
+     */
     async connect() {
         try {
             if (!this.client.isOpen) {
                 await this.client.connect();
             }
         } catch (error) {
-            logger.error('[Redis] Erro ao conectar ao Redis:', {
-                erro: error.message,
+            logger.error('[Redis] Erro ao conectar:', {
+                error: error.message,
                 stack: error.stack,
                 timestamp: new Date().toISOString()
             });
@@ -73,298 +69,259 @@ class RedisStore {
         }
     }
 
+    /**
+     * Verifica conexão com Redis
+     */
     async checkConnection() {
         try {
-            await this.ping();
-            logger.info('[Redis] Conexão com Redis OK');
+            await this.connect();
+            await this.client.ping();
             return true;
         } catch (error) {
-            logger.error('[Redis] Erro na conexão com Redis:', error);
+            logger.error('[Redis] Erro ao verificar conexão:', {
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
             return false;
         }
     }
 
+    /**
+     * Obtém valor do Redis
+     */
     async get(key) {
         try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            const value = await this.client.get(key);
-            return JSON.parse(value);
+            await this.connect();
+            return await this.client.get(key);
         } catch (error) {
-            logger.error('[Redis] Erro ao buscar do cache:', {
+            logger.error('[Redis] Erro ao obter valor:', {
                 key,
-                error: error.message
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
             });
-            return null;
+            throw error;
         }
     }
 
-    async set(key, value, ttl = this.config.ttl.tracking.default) {
+    /**
+     * Define valor no Redis
+     */
+    async set(key, value, ttl = null) {
         try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            await this.client.set(key, JSON.stringify(value));
+            await this.connect();
             if (ttl) {
-                await this.client.expire(key, ttl);
+                await this.client.set(key, value, { EX: ttl });
+            } else {
+                await this.client.set(key, value);
             }
             return true;
         } catch (error) {
-            logger.error('[Redis] Erro ao salvar no cache:', {
+            logger.error('[Redis] Erro ao definir valor:', {
                 key,
-                error: error.message
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
             });
-            return false;
+            throw error;
         }
     }
 
+    /**
+     * Remove valor do Redis
+     */
     async del(key) {
         try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
+            await this.connect();
             await this.client.del(key);
-            logger.info('[Redis] Chave deletada com sucesso:', {
+            return true;
+        } catch (error) {
+            logger.error('[Redis] Erro ao remover valor:', {
                 key,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Adiciona valor ao final da lista
+     */
+    async rpush(key, value) {
+        try {
+            await this.connect();
+            return await this.client.rPush(key, value);
+        } catch (error) {
+            logger.error('[Redis] Erro ao adicionar à lista:', {
+                key,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Remove valor da lista
+     */
+    async lrem(key, count, value) {
+        try {
+            await this.connect();
+            return await this.client.lRem(key, count, value);
+        } catch (error) {
+            logger.error('[Redis] Erro ao remover da lista:', {
+                key,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Obtém intervalo da lista
+     */
+    async lrange(key, start, stop) {
+        try {
+            await this.connect();
+            return await this.client.lRange(key, start, stop);
+        } catch (error) {
+            logger.error('[Redis] Erro ao obter intervalo da lista:', {
+                key,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Salva código de rastreio
+     */
+    async saveTrackingCode(code, data) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.tracking}code:${code}`;
+            await this.set(key, JSON.stringify(data), REDIS_CONFIG.ttl.tracking.status);
+            logger.info('[Redis] Código de rastreio salvo:', {
+                code,
                 timestamp: new Date().toISOString()
             });
             return true;
         } catch (error) {
-            logger.error('[Redis] Erro ao deletar do cache:', {
-                key,
+            logger.error('[Redis] Erro ao salvar código de rastreio:', {
+                code,
                 error: error.message,
-                stack: error.stack
+                stack: error.stack,
+                timestamp: new Date().toISOString()
             });
-            return false;
-        }
-    }
-
-    async keys(pattern) {
-        try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            return await this.client.keys(pattern);
-        } catch (error) {
-            logger.error('[Redis] Erro ao buscar chaves:', {
-                pattern,
-                error: error.message
-            });
-            return [];
-        }
-    }
-
-    async exists(key) {
-        try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            return await this.client.exists(key);
-        } catch (error) {
-            logger.error('[Redis] Erro ao verificar existência:', {
-                key,
-                error: error.message
-            });
-            return false;
-        }
-    }
-
-    async ttl(key) {
-        try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            return await this.client.ttl(key);
-        } catch (error) {
-            logger.error('[Redis] Erro ao buscar TTL:', {
-                key,
-                error: error.message
-            });
-            return -1;
-        }
-    }
-
-    async hgetall(key) {
-        try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            return await this.client.hGetAll(key);
-        } catch (error) {
-            logger.error('[Redis] Erro ao buscar todos os campos do hash:', {
-                key,
-                error: error.message
-            });
-            return {};
-        }
-    }
-
-    async smembers(key) {
-        try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            return await this.client.sMembers(key);
-        } catch (error) {
-            logger.error('[Redis] Erro ao listar membros do set:', {
-                key,
-                error: error.message
-            });
-            return [];
-        }
-    }
-
-    async ping() {
-        try {
-            if (!this.client.isOpen) {
-                await this.connect();
-            }
-            const result = await this.client.ping();
-            return result === 'PONG';
-        } catch (error) {
-            logger.error('[Redis] Erro ao fazer ping:', error);
             throw error;
         }
     }
 
-    async disconnect() {
+    /**
+     * Obtém código de rastreio
+     */
+    async getTrackingCode(code) {
         try {
-            if (this.client.isOpen) {
-                await this.client.quit();
-                logger.info('[Redis] Desconectado com sucesso');
-            }
+            const key = `${REDIS_CONFIG.prefix.tracking}code:${code}`;
+            const data = await this.get(key);
+            return data ? JSON.parse(data) : null;
         } catch (error) {
-            logger.error('[Redis] Erro ao desconectar:', error);
+            logger.error('[Redis] Erro ao obter código de rastreio:', {
+                code,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }
 
-    // Métodos para gerenciamento de códigos de rastreio
-    async saveTrackingCode(orderId, trackingData) {
-        try {
-            const key = `${this.config.prefix.tracking}order:${orderId}`;
-            const data = {
-                orderId,
-                code: trackingData.code,
-                carrier: trackingData.carrier,
-                status: trackingData.status,
-                lastUpdate: trackingData.lastUpdate || new Date().toISOString(),
-                lastCheck: new Date().toISOString(),
-                location: trackingData.location || 'N/A',
-                events: trackingData.events || [],
-                statusDetails: trackingData.statusDetails || null,
-                estimatedDelivery: trackingData.estimatedDelivery || null,
-                daysInTransit: trackingData.daysInTransit || 0,
-                registered17track: trackingData.registered17track || false
-            };
-            
-            await this.client.hSet(key, data);
-            logger.info(`[Redis] Código de rastreio salvo para pedido ${orderId}`);
-            return true;
-        } catch (error) {
-            logger.error(`[Redis] Erro ao salvar código de rastreio: ${error.message}`);
-            return false;
-        }
-    }
-
-    async getTrackingCode(orderId) {
-        try {
-            const key = `${this.config.prefix.tracking}order:${orderId}`;
-            const data = await this.client.hGetAll(key);
-            
-            if (Object.keys(data).length === 0) {
-                return null;
-            }
-            
-            return data;
-        } catch (error) {
-            logger.error(`[Redis] Erro ao buscar código de rastreio: ${error.message}`);
-            return null;
-        }
-    }
-
-    async listAllTrackingCodes() {
-        try {
-            const keys = await this.keys(`${this.config.prefix.tracking}order:*`);
-            const trackingData = [];
-            
-            for (const key of keys) {
-                const orderId = key.split(':')[2];
-                const data = await this.getTrackingCode(orderId);
-                if (data) {
-                    trackingData.push({ orderId, ...data });
-                }
-            }
-            
-            return trackingData;
-        } catch (error) {
-            logger.error(`[Redis] Erro ao listar códigos de rastreio: ${error.message}`);
-            return [];
-        }
-    }
-
-    async deleteTrackingCode(orderId) {
-        try {
-            const key = `${this.config.prefix.tracking}order:${orderId}`;
-            await this.client.del(key);
-            logger.info(`[Redis] Código de rastreio deletado para pedido ${orderId}`);
-            return true;
-        } catch (error) {
-            logger.error(`[Redis] Erro ao deletar código de rastreio: ${error.message}`);
-            return false;
-        }
-    }
-
-    async getUnregisteredTrackingCodes() {
-        try {
-            const keys = await this.client.keys(`${this.config.prefix.tracking}order:*`);
-            const unregistered = [];
-
-            for (const key of keys) {
-                const data = await this.client.hGetAll(key);
-                if (data && data.code && !data.registered17track) {
-                    unregistered.push(data.code);
-                }
-            }
-
-            return unregistered;
-        } catch (error) {
-            logger.error('[Redis] Erro ao buscar códigos não registrados:', error);
-            return [];
-        }
-    }
-
+    /**
+     * Marca códigos como registrados no 17track
+     */
     async markCodesAsRegistered(codes) {
         try {
-            const keys = await this.client.keys(`${this.config.prefix.tracking}order:*`);
-            
-            for (const key of keys) {
-                const data = await this.client.hGetAll(key);
-                if (data && data.code && codes.includes(data.code)) {
-                    await this.client.hSet(key, {
-                        ...data,
-                        registered17track: true,
-                        lastCheck: new Date().toISOString()
-                    });
+            for (const code of codes) {
+                const key = `${REDIS_CONFIG.prefix.tracking}code:${code}`;
+                const data = await this.get(key);
+                if (data) {
+                    const trackingData = JSON.parse(data);
+                    trackingData.meta.registered17track = true;
+                    await this.set(key, JSON.stringify(trackingData), REDIS_CONFIG.ttl.tracking.status);
                 }
             }
-
+            logger.info('[Redis] Códigos marcados como registrados:', {
+                codes,
+                timestamp: new Date().toISOString()
+            });
             return true;
         } catch (error) {
-            logger.error('[Redis] Erro ao marcar códigos como registrados:', error);
-            return false;
+            logger.error('[Redis] Erro ao marcar códigos como registrados:', {
+                codes,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
         }
     }
 
-    async updateLastCheck(orderId) {
+    /**
+     * Obtém todos os códigos de rastreio
+     */
+    async getAllTrackingCodes() {
         try {
-            const key = `${this.config.prefix.tracking}order:${orderId}`;
-            await this.client.hSet(key, 'lastCheck', new Date().toISOString());
+            const pattern = `${REDIS_CONFIG.prefix.tracking}code:*`;
+            const keys = await this.client.keys(pattern);
+            const codes = [];
+            
+            for (const key of keys) {
+                const data = await this.get(key);
+                if (data) {
+                    codes.push(JSON.parse(data));
+                }
+            }
+
+            return codes;
+        } catch (error) {
+            logger.error('[Redis] Erro ao obter todos os códigos:', {
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Limpa cache de rastreio
+     */
+    async clearTrackingCache() {
+        try {
+            const pattern = `${REDIS_CONFIG.prefix.tracking}code:*`;
+            const keys = await this.client.keys(pattern);
+            if (keys.length > 0) {
+                await this.client.del(keys);
+            }
+            logger.info('[Redis] Cache de rastreio limpo:', {
+                keysRemoved: keys.length,
+                timestamp: new Date().toISOString()
+            });
             return true;
         } catch (error) {
-            logger.error(`[Redis] Erro ao atualizar lastCheck: ${error.message}`);
-            return false;
+            logger.error('[Redis] Erro ao limpar cache:', {
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
         }
     }
 }
