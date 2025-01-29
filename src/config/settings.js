@@ -1,5 +1,89 @@
 require('dotenv').config();
-const { NUVEMSHOP_CONFIG } = require('../services/nuvemshop/config/settings');
+const { NUVEMSHOP_CONFIG } = {
+    // Configurações da API
+    apiUrl: process.env.NUVEMSHOP_API_URL || 'https://api.nuvemshop.com.br/v1',
+    accessToken: process.env.NUVEMSHOP_ACCESS_TOKEN,
+    userId: process.env.NUVEMSHOP_USER_ID,
+    scope: process.env.NUVEMSHOP_SCOPE?.split(','),
+    
+    // Configurações do webhook
+    webhook: {
+        secret: process.env.NUVEMSHOP_WEBHOOK_SECRET,
+        topics: [
+            'orders/created',
+            'orders/paid',
+            'orders/fulfilled',
+            'orders/cancelled',
+            'products/created',
+            'products/updated',
+            'products/deleted',
+            'customers/created',
+            'customers/updated'
+        ]
+    },
+
+    // Configurações de cache
+    cache: {
+        prefix: 'nuvemshop:',
+        ttl: {
+            default: 3600,        // 1 hora
+            products: 3600,       // 1 hora
+            categories: 86400,    // 24 horas
+            orders: {
+                recent: 300,      // 5 minutos para pedidos recentes
+                old: 3600,        // 1 hora para pedidos antigos
+                details: 1800     // 30 minutos para detalhes do pedido
+            },
+            customers: 1800,      // 30 minutos
+            inventory: 300,       // 5 minutos
+            shipping: 1800,       // 30 minutos
+            payments: 1800        // 30 minutos
+        }
+    },
+
+    // Configurações de API
+    api: {
+        timeout: 30000,          // 30 segundos
+        retryAttempts: 3,
+        retryDelays: [1000, 3000, 5000], // 1s, 3s, 5s
+        rateLimit: {
+            maxRequests: 10,     // 10 requisições
+            perMilliseconds: 1000, // por segundo
+            maxRPS: 10
+        },
+        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
+    },
+
+    // Configurações de formatação
+    formatting: {
+        dateFormat: 'DD/MM/YYYY HH:mm:ss',
+        priceFormat: {
+            locale: 'pt-BR',
+            currency: 'BRL'
+        }
+    },
+
+    // Configurações de internacionalização
+    i18n: {
+        defaultLanguage: 'pt',
+        supportedLanguages: ['pt', 'es', 'en']
+    },
+
+    // Configurações de validação
+    validation: {
+        maxProductsPerPage: 200,
+        maxOrdersPerPage: 200,
+        maxCustomersPerPage: 200,
+        minSearchLength: 3
+    },
+
+    // Configurações de segurança
+    security: {
+        allowedIps: process.env.NUVEMSHOP_ALLOWED_IPS?.split(',') || [],
+        rateLimitWindow: 60000, // 1 minuto
+        maxRequestsPerWindow: 100
+    }
+};
 
 function validateEnvVar(name) {
     if (!process.env[name]) {
