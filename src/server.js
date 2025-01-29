@@ -15,22 +15,16 @@ const {
     WebhookService,
     WhatsAppImageService,
     OpenAIService,
-    CacheService,
     BusinessHoursService,
-    OpenAIVisionService
+    OpenAIVisionService,
+    FinancialService
 } = require('./services');
 
 // Configurações
 const { 
     RATE_LIMIT_CONFIG,
-    REDIS_CONFIG,
     PORT
 } = require('./config/settings');
-
-// Lista de variáveis de ambiente requeridas
-let requiredEnvVars = [
-    'PORT'
-];
 
 // Declaração dos serviços
 let redisStore;
@@ -47,7 +41,6 @@ let orderValidationService;
 let nuvemshopService;
 let openAIService;
 let financialService;
-let cacheService;
 let openAIVisionService;
 
 // Configuração do rate limiter
@@ -94,7 +87,7 @@ const app = express();
 app.set('trust proxy', req => {
     return req.path === '/health';
 });
-const port = process.env.PORT || 8080;
+const port = process.env.PORT || PORT;
 
 console.log(`📝 Porta configurada: ${port}`);
 
@@ -115,20 +108,14 @@ async function initializeServices() {
             console.log('🔄 Iniciando serviços...');
             
             // Verifica variáveis de ambiente
-            for (const envVar of requiredEnvVars) {
-                if (!process.env[envVar]) {
-                    throw new Error(`Variável de ambiente ${envVar} não definida`);
-                }
+            if (!process.env.PORT) {
+                throw new Error('Variável de ambiente PORT não definida');
             }
 
             // Inicializa serviços base primeiro
             redisStore = new RedisStore();
             await redisStore.connect();
             console.log('✅ RedisStore conectado');
-
-            // Inicializa Cache Service que depende do Redis
-            cacheService = new CacheService();
-            console.log('✅ CacheService inicializado');
 
             // Serviços independentes
             businessHoursService = new BusinessHoursService();
@@ -170,13 +157,29 @@ async function initializeServices() {
             mediaManagerService.setAudioService(audioService);
             console.log('✅ MediaManager atualizado com AudioService');
 
-            // OpenAI precisa de vários serviços
+            // Inicializa serviços interdependentes
+            whatsappService = new WhatsAppService();
+            console.log('✅ WhatsAppService inicializado');
+
+            trackingService = new TrackingService(whatsappService);
+            console.log('✅ TrackingService inicializado');
+
+            businessHoursService = new BusinessHoursService();
+            console.log('✅ BusinessHoursService inicializado');
+
+            orderValidationService = new OrderValidationService(nuvemshopService, whatsappService);
+            console.log('✅ OrderValidationService inicializado');
+
+            financialService = new FinancialService(whatsappService);
+            console.log('✅ FinancialService inicializado');
+
+            // Inicializa OpenAI
             openAIService = new OpenAIService(
                 nuvemshopService,
                 trackingService,
                 businessHoursService,
                 orderValidationService,
-                null, // financialService será injetado depois
+                financialService,
                 null  // whatsappService será injetado depois
             );
             console.log('✅ OpenAIService inicializado');
@@ -463,21 +466,21 @@ async function startServer(maxRetries = 3) {
             isInitializing = false;
             lastError = null;
             
-            const server = app.listen(port, () => {
-                console.log(`🚀 Servidor rodando na porta ${port}`);
+            app.listen(PORT, () => {
+                console.log(`🚀 Servidor rodando na porta ${PORT}`);
                 console.log('✅ Todos os serviços inicializados com sucesso');
             });
 
             // Graceful shutdown
             process.on('SIGTERM', () => {
                 console.log('Recebido SIGTERM. Iniciando shutdown graceful...');
-                server.close(() => {
+                app.close(() => {
                     console.log('Servidor HTTP fechado.');
                     process.exit(0);
                 });
             });
             
-            return server;
+            return app;
         } catch (error) {
             retries++;
             lastError = error;

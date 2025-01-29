@@ -15,9 +15,9 @@ const { NuvemshopService } = require('./nuvemshop');
 const { OrderValidationService } = require('./order-validation-service');
 const { OpenAIService } = require('./openai-service');
 const { WebhookService } = require('./webhook-service');
-const { CacheService } = require('./cache-service');
 const { MediaManagerService } = require('./media-manager-service');
 const { OpenAIVisionService } = require('./openai-vision-service');
+const { FinancialService } = require('./financial-service');
 
 // Nuvemshop APIs
 const { 
@@ -45,9 +45,9 @@ module.exports = {
     OrderValidationService,
     OpenAIService,
     WebhookService,
-    CacheService,
     MediaManagerService,
     OpenAIVisionService,
+    FinancialService,
     
     // Nuvemshop APIs
     NuvemshopAPIBase,

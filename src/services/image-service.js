@@ -3,7 +3,6 @@ const sharp = require('sharp');
 const crypto = require('crypto');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const settings = require('../config/settings');
-const { validateImage } = require('../utils/image-validator');
 const { OpenAIVisionService } = require('./openai-vision-service');
 
 class ImageService {

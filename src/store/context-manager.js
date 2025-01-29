@@ -1,5 +1,10 @@
+const moment = require('moment');
 const logger = require('../utils/logger');
 
+/**
+ * Gerencia o contexto das conversas, salvando e recuperando dados do Redis
+ * com suporte a TTL, locks e transações.
+ */
 class ContextManager {
     constructor(redisStore) {
         this.redisStore = redisStore;

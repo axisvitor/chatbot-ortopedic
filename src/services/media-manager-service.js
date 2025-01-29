@@ -1,6 +1,5 @@
 const crypto = require('crypto');
 const { RedisStore } = require('../store/redis-store');
-const { WhatsAppService } = require('./whatsapp-service');
 const { OpenAIVisionService } = require('./openai-vision-service');
 const { REDIS_CONFIG } = require('../config/settings');
 

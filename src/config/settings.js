@@ -1,11 +1,39 @@
 require('dotenv').config();
 
+// Função para validar variáveis de ambiente
 function validateEnvVar(name) {
     if (!process.env[name]) {
         throw new Error(`Environment variable ${name} is required`);
     }
     return process.env[name];
 }
+
+// Validar variáveis de ambiente obrigatórias
+const REQUIRED_ENV_VARS = [
+    'NODE_ENV',
+    'PORT',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'REDIS_PASSWORD',
+    'OPENAI_API_KEY',
+    'ASSISTANT_ID',
+    'WAPI_URL',
+    'WAPI_TOKEN',
+    'WAPI_CONNECTION_KEY',
+    'NUVEMSHOP_ACCESS_TOKEN',
+    'NUVEMSHOP_API_URL',
+    'NUVEMSHOP_STORE_ID',
+    'FINANCIAL_DEPT_NUMBER',
+    'TRACK17_API_KEY',
+    'TRACK17_API_URL',
+    'TRACK17_REGISTER_PATH',
+    'TRACK17_STATUS_PATH',
+    'TRACK17_TRACK_PATH',
+    'TRACK17_PUSH_PATH'
+];
+
+// Validar todas as variáveis obrigatórias
+REQUIRED_ENV_VARS.forEach(validateEnvVar);
 
 // Redis Configuration
 const REDIS_CONFIG = {
@@ -461,37 +489,6 @@ const CACHE_CONFIG = {
     productTTL: 24 * 60 * 60, // 24 horas em segundos
     trackingTTL: 12 * 60 * 60 // 12 horas em segundos
 };
-
-// Required Environment Variables
-const REQUIRED_ENV_VARS = [
-    // OpenAI
-    'OPENAI_API_KEY',
-    'ASSISTANT_ID',
-    
-    // Redis
-    'REDIS_HOST',
-    'REDIS_PORT',
-    'REDIS_PASSWORD',
-    
-    // WhatsApp
-    'WAPI_URL',
-    'WAPI_TOKEN',
-    'WAPI_CONNECTION_KEY',
-    
-    // Nuvemshop
-    'NUVEMSHOP_ACCESS_TOKEN',
-    'NUVEMSHOP_USER_ID',
-    'NUVEMSHOP_SCOPE',
-    'NUVEMSHOP_API_URL',
-    
-    // Tracking
-    'TRACK17_API_KEY',
-    'TRACK17_API_URL',
-    'TRACK17_REGISTER_PATH',
-    'TRACK17_STATUS_PATH',
-    'TRACK17_TRACK_PATH',
-    'TRACK17_PUSH_PATH'
-];
 
 module.exports = {
     REDIS_CONFIG,

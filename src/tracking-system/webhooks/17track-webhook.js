@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const crypto = require('crypto');
 const { RedisStore } = require('../utils/redis-store');
-const { REDIS_CONFIG, WHATSAPP_CONFIG, TRACKING_CONFIG } = require('../../config/settings');
+const { WHATSAPP_CONFIG, TRACKING_CONFIG } = require('../../config/settings');
 const logger = require('../utils/logger');
 
 const redis = new RedisStore();

@@ -8,8 +8,8 @@ const { TrackingService } = require('./tracking-service');
 const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
 const { NuvemshopService } = require('./nuvemshop');
-const { FinancialService } = require('./financial-service');
 const { DepartmentService } = require('./department-service');
+const { FinancialService } = require('./financial-service');
 
 class OpenAIService {
     /**
@@ -287,48 +287,6 @@ class OpenAIService {
                 parameters: {
                     type: "object",
                     properties: {}
-                }
-            },
-            {
-                name: "forward_to_financial",
-                description: "Encaminha casos para análise do setor financeiro (pagamento, reembolso, taxação, etc)",
-                parameters: {
-                    type: "object",
-                    required: ["message", "priority", "userContact"],
-                    properties: {
-                        message: {
-                            type: "string",
-                            description: "Mensagem original do cliente"
-                        },
-                        userContact: {
-                            type: "string",
-                            description: "Contato do cliente (WhatsApp)"
-                        },
-                        priority: {
-                            type: "string",
-                            enum: ["low", "normal", "high", "urgent"],
-                            description: "Nível de urgência"
-                        },
-                        reason: {
-                            type: "string",
-                            enum: [
-                                "payment_proof",     // Comprovante de pagamento
-                                "refund",            // Solicitação de reembolso
-                                "payment_issue",     // Problema com pagamento
-                                "invoice",           // Nota fiscal
-                                "general"            // Outros assuntos
-                            ],
-                            description: "Motivo do encaminhamento"
-                        },
-                        orderNumber: {
-                            type: "string",
-                            description: "Número do pedido (se disponível)"
-                        },
-                        trackingCode: {
-                            type: "string",
-                            description: "Código de rastreio (se disponível)"
-                        }
-                    }
                 }
             },
             {
@@ -905,7 +863,7 @@ class OpenAIService {
             }
 
             // Processar o comprovante
-            const result = await this.financialService.processPaymentProof({
+            const result = await this.nuvemshopService.processPaymentProof({
                 orderId: order.id,
                 orderNumber: orderNumber,
                 image: image,
@@ -916,7 +874,7 @@ class OpenAIService {
             // Limpar o comprovante pendente após processamento
             await this.redisStore.del(`openai:pending_proof:${threadId}`);
 
-            return ' Comprovante recebido! Nosso time financeiro irá analisar e confirmar o pagamento em breve.';
+            return ' Comprovante recebido! Nosso time irá analisar e confirmar o pagamento em breve.';
         } catch (error) {
             logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber, error });
             throw error;
@@ -1002,19 +960,19 @@ class OpenAIService {
     }
 
     /**
-     * Define o serviço Financeiro após inicialização
-     * @param {Object} financialService - Serviço Financeiro
-     */
-    setFinancialService(financialService) {
-        this.financialService = financialService;
-    }
-
-    /**
      * Define o serviço de Departamentos após inicialização
      * @param {Object} departmentService - Serviço de Departamentos
      */
     setDepartmentService(departmentService) {
         this.departmentService = departmentService;
+    }
+
+    /**
+     * Define o serviço Financeiro após inicialização
+     * @param {Object} financialService - Serviço Financeiro
+     */
+    setFinancialService(financialService) {
+        this.financialService = financialService;
     }
 
     async runAssistant(threadId) {
@@ -1429,134 +1387,9 @@ class OpenAIService {
                         }
                         break;
 
-                    case 'forward_to_financial':
-                        try {
-                            const { message: userMessage, userContact, priority, reason } = parsedArgs;
-                            
-                            // Validações básicas
-                            if (!userMessage) {
-                                output = {
-                                    error: true,
-                                    message: 'É necessário fornecer a mensagem para encaminhar ao financeiro.'
-                                };
-                                break;
-                            }
-
-                            if (!userContact) {
-                                output = {
-                                    error: true,
-                                    message: 'É necessário fornecer o contato do usuário.'
-                                };
-                                break;
-                            }
-
-                            // Normaliza a prioridade
-                            const normalizedPriority = priority?.toLowerCase() || 'normal';
-                            if (!['low', 'normal', 'high', 'urgent'].includes(normalizedPriority)) {
-                                output = {
-                                    error: true,
-                                    message: 'Prioridade inválida. Use: low, normal, high ou urgent.'
-                                };
-                                break;
-                            }
-
-                            // Normaliza o motivo
-                            const normalizedReason = reason?.toLowerCase() || 'general';
-                            const validReasons = [
-                                'payment_proof',
-                                'refund',
-                                'payment_issue',
-                                'invoice',
-                                'general'
-                            ];
-
-                            if (!validReasons.includes(normalizedReason)) {
-                                output = {
-                                    error: true,
-                                    message: `Motivo inválido. Use um dos seguintes: ${validReasons.join(', ')}`
-                                };
-                                break;
-                            }
-
-                            // Prepara os dados para encaminhamento
-                            const caseData = {
-                                timestamp: moment().format(),
-                                contact: {
-                                    phone: userContact,
-                                    type: 'whatsapp'
-                                },
-                                message: userMessage,
-                                priority: normalizedPriority,
-                                reason: normalizedReason,
-                                source: 'chatbot',
-                                withinBusinessHours: this.businessHoursService.isWithinBusinessHours(),
-                                metadata: {
-                                    threadId: threadId || null,
-                                    aiConfidence: parsedArgs.confidence || 1.0
-                                }
-                            };
-
-                            // Encaminha para o financeiro
-                            await this.financialService.forwardCase(caseData);
-
-                            // Prepara resposta para o usuário
-                            const responses = {
-                                payment_proof: '✅ Recebemos seu comprovante com sucesso! Nossa equipe financeira já foi notificada e irá analisar e confirmar o pagamento em breve.',
-                                refund: '✅ Entendi sua solicitação de reembolso. Nossa equipe financeira foi notificada e irá cuidar do seu caso com toda atenção que você merece.',
-                                payment_issue: '✅ Compreendo sua preocupação com o pagamento. Nossa equipe financeira especializada já foi notificada e irá analisar sua situação cuidadosamente.',
-                                invoice: '✅ Recebemos sua solicitação sobre a nota fiscal. Nossa equipe dedicada já foi notificada e irá providenciar a documentação necessária.',
-                                general: '✅ Sua mensagem foi recebida com sucesso! Nossa equipe financeira foi notificada e irá analisar sua solicitação com toda atenção necessária.'
-                            };
-
-                            // Adiciona tempo de resposta estimado baseado na prioridade
-                            const slaMessages = {
-                                urgent: 'Pode ficar tranquilo(a), sua solicitação receberá prioridade máxima de nossa equipe. 🚀',
-                                high: 'Sua solicitação será tratada com prioridade por nossa equipe especializada. ⭐',
-                                normal: 'Nossa equipe retornará o contato em até 24 horas úteis para te ajudar. 📅',
-                                low: 'Nossa equipe retornará o contato em até 48 horas úteis para auxiliar você. 📅'
-                            };
-
-                            const responseMessage = [
-                                responses[normalizedReason],
-                                '',
-                                slaMessages[normalizedPriority],
-                                '',
-                                '💫 Fique tranquilo(a)! Nossa equipe está comprometida em resolver sua solicitação da melhor forma possível.',
-                                '🤝 Estamos aqui para ajudar e garantir sua satisfação.'
-                            ].join('\n');
-
-                            output = {
-                                success: true,
-                                caseId: caseData.id,
-                                priority: normalizedPriority,
-                                reason: normalizedReason,
-                                message: responseMessage
-                            };
-
-                        } catch (error) {
-                            logger.error('ErrorForwardingToFinancial', {
-                                error: error.message,
-                                stack: error.stack,
-                                args: parsedArgs
-                            });
-                            output = {
-                                error: true,
-                                message: 'Desculpe, ocorreu um erro ao encaminhar sua mensagem. Por favor, tente novamente em alguns instantes.'
-                            };
-                        }
-                        break;
-
                     case 'forward_to_department':
                         try {
-                            const { 
-                                message: userMessage, 
-                                department, 
-                                userContact,
-                                priority,
-                                reason,
-                                orderNumber,
-                                trackingCode
-                            } = parsedArgs;
+                            const { message: userMessage, department, userContact, priority, reason } = parsedArgs;
                             
                             // Validações básicas
                             if (!userMessage) {
@@ -1622,8 +1455,6 @@ class OpenAIService {
                                 message: userMessage,
                                 priority: normalizedPriority,
                                 reason: reason || 'general',
-                                orderNumber,
-                                trackingCode,
                                 source: 'chatbot',
                                 withinBusinessHours: this.businessHoursService.isWithinBusinessHours(),
                                 metadata: {
