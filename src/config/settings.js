@@ -280,19 +280,28 @@ const CACHE_CONFIG = {
 
 // Required Environment Variables
 const REQUIRED_ENV_VARS = [
+    // OpenAI
     'OPENAI_API_KEY',
     'ASSISTANT_ID',
+    
+    // Redis
     'REDIS_HOST',
     'REDIS_PORT',
     'REDIS_PASSWORD',
+    
+    // WhatsApp
     'WAPI_URL',
     'WAPI_TOKEN',
     'WAPI_CONNECTION_KEY',
+    
+    // Nuvemshop
     'NUVEMSHOP_ACCESS_TOKEN',
     'NUVEMSHOP_USER_ID',
     'NUVEMSHOP_SCOPE',
     'NUVEMSHOP_API_URL',
-    'TRACK17_API_KEY'  // Adicionando TRACK17_API_KEY
+    
+    // Tracking
+    'TRACK17_API_KEY'
 ];
 
 module.exports = {
@@ -305,6 +314,7 @@ module.exports = {
     WHATSAPP_CONFIG,
     TRACKING_CONFIG,
     REQUIRED_ENV_VARS,
+    validateEnvVar,
     settings: {
         ...OPENAI_CONFIG,
         ...REDIS_CONFIG,
