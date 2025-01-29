@@ -1,17 +1,27 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const { CacheService } = require('./cache-service');
-const { TRACKING_CONFIG } = require('../../config/settings');
+const { TRACKING_CONFIG, REDIS_CONFIG } = require('../../config/settings');
 
 class Track17Service {
     constructor() {
         this.config = TRACKING_CONFIG;
         this.cache = new CacheService();
         
-        if (!this.config.apiKey) {
-            logger.error('API Key do 17track não configurada!');
-            throw new Error('TRACK17_API_KEY é obrigatório');
+        if (!this.config.apiKey || !this.config.endpoint) {
+            logger.error('Configurações do 17track incompletas!');
+            throw new Error('Configurações obrigatórias não encontradas');
         }
+
+        // Cliente HTTP
+        this.client = axios.create({
+            baseURL: this.config.endpoint,
+            timeout: 30000,
+            headers: {
+                '17token': this.config.apiKey,
+                'Content-Type': 'application/json'
+            }
+        });
 
         // Configuração do rate limiting
         this.rateLimiter = {
@@ -22,6 +32,11 @@ class Track17Service {
         };
     }
 
+    /**
+     * Obtém informações de rastreamento
+     * @param {string|string[]} trackingNumbers - Código(s) de rastreio
+     * @returns {Promise<Array>} Informações de rastreamento
+     */
     async getTrackingInfo(trackingNumbers) {
         if (!Array.isArray(trackingNumbers)) {
             trackingNumbers = [trackingNumbers];
@@ -36,28 +51,42 @@ class Track17Service {
         }
 
         // Verifica cache primeiro
-        const cached = await this.cache.get(trackingNumbers);
+        const cacheKey = `${REDIS_CONFIG.prefix.tracking}info`;
+        const cached = await this.cache.get(cacheKey);
         if (cached) {
-            logger.info('Usando dados em cache para:', trackingNumbers);
+            logger.info('Usando dados em cache para:', {
+                trackingNumbers,
+                timestamp: new Date().toISOString()
+            });
             return cached;
         }
 
         // Limita a 40 números por requisição (limite da API)
         if (trackingNumbers.length > 40) {
-            logger.warn('Mais de 40 códigos de rastreio fornecidos, dividindo em lotes');
+            logger.warn('Mais de 40 códigos de rastreio fornecidos, dividindo em lotes', {
+                total: trackingNumbers.length,
+                lotes: Math.ceil(trackingNumbers.length / 40)
+            });
             return this._processBatches(trackingNumbers);
         }
 
         await this._checkRateLimit();
 
         try {
-            logger.info('Consultando 17track para códigos:', trackingNumbers);
+            logger.info('Consultando 17track:', {
+                trackingNumbers,
+                path: this.config.paths.track
+            });
             
-            const response = await this._makeRequest('/track/get', { numbers: trackingNumbers });
+            const response = await this._makeRequest(this.config.paths.track, { numbers: trackingNumbers });
             const formattedResponse = this._formatResponse(response.data);
 
-            // Salva no cache
-            await this.cache.set(trackingNumbers, formattedResponse);
+            // Salva no cache com TTL configurável
+            await this.cache.set(
+                cacheKey,
+                formattedResponse,
+                REDIS_CONFIG.ttl.tracking.status
+            );
 
             return formattedResponse;
         } catch (error) {
@@ -66,6 +95,11 @@ class Track17Service {
         }
     }
 
+    /**
+     * Registra códigos para rastreamento
+     * @param {string|string[]} trackingNumbers - Código(s) de rastreio
+     * @returns {Promise<Object>} Resultado do registro
+     */
     async registerForTracking(trackingNumbers) {
         if (!Array.isArray(trackingNumbers)) {
             trackingNumbers = [trackingNumbers];
@@ -82,34 +116,43 @@ class Track17Service {
         await this._checkRateLimit();
 
         try {
-            logger.info('Registrando códigos no 17track:', trackingNumbers);
+            logger.info('Registrando códigos no 17track:', {
+                trackingNumbers,
+                path: this.config.paths.register
+            });
             
-            const response = await this._makeRequest('/track/register', { numbers: trackingNumbers });
+            const response = await this._makeRequest(this.config.paths.register, { numbers: trackingNumbers });
             
-            return {
+            const result = {
                 success: response.data.data.accepted || [],
                 failed: response.data.data.rejected || []
             };
+
+            // Registra sucesso/falha no cache
+            const cacheKey = `${REDIS_CONFIG.prefix.tracking}register_status`;
+            await this.cache.set(
+                cacheKey,
+                result,
+                REDIS_CONFIG.ttl.tracking.status
+            );
+
+            return result;
         } catch (error) {
             this._handleError(error, 'registerForTracking', { trackingNumbers });
             throw error;
         }
     }
 
+    /**
+     * Faz uma requisição para a API
+     * @private
+     */
     async _makeRequest(path, data, attempt = 1) {
         const maxAttempts = 3;
         const backoffTime = Math.pow(2, attempt) * 1000;
 
         try {
-            const url = `${this.config.endpoint}${path}`;
-            
-            const response = await axios.post(url, data, {
-                headers: {
-                    '17token': this.config.apiKey,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 30000
-            });
+            const response = await this.client.post(path, data);
 
             if (response.data.ret !== 0) {
                 throw new Error(`Erro na API 17track: ${response.data.msg}`);
@@ -118,7 +161,12 @@ class Track17Service {
             return response;
         } catch (error) {
             if (attempt < maxAttempts && this._isRetryableError(error)) {
-                logger.warn(`Tentativa ${attempt} falhou, tentando novamente em ${backoffTime}ms`);
+                logger.warn('RetryingRequest', {
+                    attempt,
+                    backoffTime,
+                    path,
+                    error: error.message
+                });
                 await new Promise(resolve => setTimeout(resolve, backoffTime));
                 return this._makeRequest(path, data, attempt + 1);
             }
@@ -126,9 +174,13 @@ class Track17Service {
         }
     }
 
+    /**
+     * Valida um código de rastreio
+     * @private
+     */
     _validateTrackingNumber(code) {
         if (!code || typeof code !== 'string') {
-            logger.warn('Código de rastreio inválido:', code);
+            logger.warn('Código de rastreio inválido:', { code });
             return false;
         }
 
@@ -138,18 +190,38 @@ class Track17Service {
         const validFormat = /^[A-Z0-9]+$/i;
 
         if (code.length < minLength || code.length > maxLength) {
-            logger.warn(`Código ${code} tem tamanho inválido`);
+            logger.warn('Código com tamanho inválido:', {
+                code,
+                length: code.length,
+                minLength,
+                maxLength
+            });
             return false;
         }
 
         if (!validFormat.test(code)) {
-            logger.warn(`Código ${code} contém caracteres inválidos`);
+            logger.warn('Código com formato inválido:', { code });
+            return false;
+        }
+
+        // Verifica se é uma transportadora suportada
+        const carrier = this._detectCarrier(code);
+        if (!this.config.carriers.includes(carrier)) {
+            logger.warn('Transportadora não suportada:', {
+                code,
+                carrier,
+                supported: this.config.carriers
+            });
             return false;
         }
 
         return true;
     }
 
+    /**
+     * Verifica limites de requisição
+     * @private
+     */
     async _checkRateLimit() {
         const now = Date.now();
         
@@ -161,15 +233,22 @@ class Track17Service {
 
         if (this.rateLimiter.currentRequests >= this.rateLimiter.maxRequests) {
             const waitTime = this.rateLimiter.interval - (now - this.rateLimiter.lastReset);
-            logger.error('Rate limit excedido, aguarde:', Math.ceil(waitTime / 1000), 'segundos');
+            logger.error('Rate limit excedido:', {
+                currentRequests: this.rateLimiter.currentRequests,
+                maxRequests: this.rateLimiter.maxRequests,
+                waitTime: Math.ceil(waitTime / 1000)
+            });
             throw new Error('Rate limit exceeded');
         }
 
         this.rateLimiter.currentRequests++;
     }
 
+    /**
+     * Verifica se o erro pode ser retentado
+     * @private
+     */
     _isRetryableError(error) {
-        // Erros que podem ser resolvidos com retry
         return (
             error.code === 'ECONNRESET' ||
             error.code === 'ETIMEDOUT' ||
@@ -178,6 +257,10 @@ class Track17Service {
         );
     }
 
+    /**
+     * Trata erros do serviço
+     * @private
+     */
     _handleError(error, method, params) {
         const errorInfo = {
             method,
@@ -193,95 +276,55 @@ class Track17Service {
         logger.error('Erro no serviço 17track:', errorInfo);
     }
 
+    /**
+     * Formata resposta da API
+     * @private
+     */
     _formatResponse(apiResponse) {
         const accepted = apiResponse.data?.accepted || [];
         const rejected = apiResponse.data?.rejected || [];
 
         if (rejected.length > 0) {
-            logger.warn('Alguns códigos foram rejeitados pelo 17track:', rejected);
+            logger.warn('Códigos rejeitados:', {
+                rejected,
+                reason: apiResponse.data?.rejectedReason
+            });
         }
 
-        return accepted.map(track => ({
-            code: track.number,
-            carrier: {
-                code: track.carrier,
-                name: track.carrier_name || 'Desconhecido'
-            },
-            status: this._mapStatus(track.status),
-            lastUpdate: track.track_info?.latest?.time || null,
-            location: {
-                country: track.track_info?.latest?.country || null,
-                city: track.track_info?.latest?.city || null,
-                postal_code: track.track_info?.latest?.postal_code || null
-            },
-            events: this._formatEvents(track.track_info?.events || []),
-            estimatedDelivery: track.track_info?.estimated_delivery || null,
-            daysInTransit: track.track_info?.transit_time || 0,
-            statusDetails: track.track_info?.latest?.description || null
+        return accepted.map(tracking => ({
+            code: tracking.number,
+            carrier: this._detectCarrier(tracking.number),
+            status: this._normalizeStatus(tracking.status),
+            lastUpdate: tracking.lastUpdateTime,
+            history: tracking.events || []
         }));
     }
 
-    _formatEvents(events) {
-        return events.map(event => ({
-            date: event.time,
-            status: event.description,
-            location: {
-                country: event.country || null,
-                city: event.city || null,
-                postal_code: event.postal_code || null
-            },
-            statusCode: event.status
-        }));
+    /**
+     * Detecta a transportadora pelo código
+     * @private
+     */
+    _detectCarrier(code) {
+        // Implementar lógica de detecção de transportadora
+        // Por enquanto retorna correios como padrão
+        return 'correios';
     }
 
-    _mapStatus(status) {
+    /**
+     * Normaliza status do rastreio
+     * @private
+     */
+    _normalizeStatus(status) {
         const statusMap = {
-            0: { code: 0, text: 'pendente', details: 'Aguardando atualização' },
-            10: { code: 10, text: 'postado', details: 'Objeto postado' },
-            20: { code: 20, text: 'em_transito', details: 'Em trânsito' },
-            30: { code: 30, text: 'entregue', details: 'Entregue ao destinatário' },
-            35: { code: 35, text: 'falha', details: 'Tentativa de entrega falhou' },
-            40: { code: 40, text: 'problema', details: 'Problema no transporte' },
-            50: { code: 50, text: 'expirado', details: 'Rastreamento expirado' }
+            'pending': 'pendente',
+            'in_transit': 'em_transito',
+            'delivered': 'entregue',
+            'exception': 'problema',
+            'expired': 'expirado',
+            'returning': 'retornando'
         };
-        return statusMap[status] || { code: -1, text: 'desconhecido', details: 'Status desconhecido' };
-    }
 
-    async _processBatches(trackingNumbers) {
-        const batchSize = 40;
-        const batches = [];
-        
-        // Divide em lotes de 40
-        for (let i = 0; i < trackingNumbers.length; i += batchSize) {
-            const batch = trackingNumbers.slice(i, i + batchSize);
-            
-            // Verifica cache para cada lote
-            const cached = await this.cache.get(batch);
-            if (cached) {
-                batches.push({ cached: true, data: cached });
-            } else {
-                batches.push({ cached: false, codes: batch });
-            }
-        }
-
-        // Processa cada lote
-        const results = [];
-        for (const batch of batches) {
-            if (batch.cached) {
-                results.push(...batch.data);
-                continue;
-            }
-
-            const batchResults = await this.getTrackingInfo(batch.codes);
-            results.push(...batchResults);
-            
-            // Aguarda entre lotes para não sobrecarregar a API
-            if (batches.indexOf(batch) < batches.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-        }
-
-        return results;
+        return statusMap[status] || status;
     }
 }
 

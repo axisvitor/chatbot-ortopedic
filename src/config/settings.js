@@ -264,18 +264,69 @@ const WHATSAPP_CONFIG = {
     whatsappNumber: process.env.WHATSAPP_NUMBER || '',  
 };
 
-// 17Track Configuration
+// 17track Configuration
 const TRACKING_CONFIG = {
+    // API Configuration
+    endpoint: process.env.TRACK17_API_URL || 'https://api.17track.net/track/v2',
     apiKey: validateEnvVar('TRACK17_API_KEY'),
-    endpoint: validateEnvVar('TRACK17_API_URL'),
+    
+    // API Paths
     paths: {
-        register: validateEnvVar('TRACK17_REGISTER_PATH'),
-        status: validateEnvVar('TRACK17_STATUS_PATH'),
-        track: validateEnvVar('TRACK17_TRACK_PATH'),
-        push: validateEnvVar('TRACK17_PUSH_PATH')
+        track: '/track/get',
+        register: '/track/register',
+        push: '/push/get',
+        webhook: '/webhook'
     },
-    updateInterval: 3600000, // 1 hora em ms
-    carriers: ['correios', 'jadlog', 'fedex', 'dhl']
+
+    // Supported Carriers
+    carriers: [
+        'correios',
+        'jadlog',
+        'sequoia',
+        'total',
+        'fedex',
+        'dhl',
+        'ups'
+    ],
+
+    // API Limits
+    limits: {
+        maxTrackingNumbers: 40,
+        maxRequestsPerHour: 1000,
+        maxWebhooksPerDay: 10000
+    },
+
+    // Webhook Configuration
+    webhook: {
+        secret: process.env.TRACK17_WEBHOOK_SECRET,
+        events: [
+            'tracking.created',
+            'tracking.updated',
+            'tracking.delivered',
+            'tracking.exception'
+        ]
+    },
+
+    // Cache Configuration
+    cache: {
+        prefix: 'track17:',
+        ttl: {
+            tracking: 300,       // 5 minutos
+            register: 3600,      // 1 hora
+            push: 300,          // 5 minutos
+            webhook: 86400      // 24 horas
+        }
+    },
+
+    // Retry Configuration
+    retry: {
+        attempts: 3,
+        backoff: {
+            min: 1000,          // 1 segundo
+            max: 5000,          // 5 segundos
+            factor: 2
+        }
+    }
 };
 
 // Business Hours Configuration
@@ -444,20 +495,11 @@ const REQUIRED_ENV_VARS = [
 ];
 
 module.exports = {
+    REDIS_CONFIG,
+    NUVEMSHOP_CONFIG,
     OPENAI_CONFIG,
     GROQ_CONFIG,
-    REDIS_CONFIG,
-    RATE_LIMIT_CONFIG,
-    BUSINESS_HOURS,
-    NUVEMSHOP_CONFIG,
     WHATSAPP_CONFIG,
-    TRACKING_CONFIG,
-    REQUIRED_ENV_VARS,
-    validateEnvVar,
-    settings: {
-        ...OPENAI_CONFIG,
-        ...REDIS_CONFIG,
-        ...MEDIA_CONFIG,
-        whatsappNumber: process.env.WHATSAPP_NUMBER || '',
-    }
+    MEDIA_CONFIG,
+    TRACKING_CONFIG
 };

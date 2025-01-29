@@ -2,13 +2,16 @@ require('dotenv').config({ path: '../../../.env' });
 const { RedisStore } = require('./utils/redis-store');
 const axios = require('axios');
 const logger = require('./utils/logger');
+const { NUVEMSHOP_CONFIG } = require('../config/settings');
 
 class NuvemshopTrackingSync {
     constructor() {
         this.redis = new RedisStore();
-        this.apiKey = process.env.NUVEMSHOP_ACCESS_TOKEN;
-        this.userId = process.env.NUVEMSHOP_USER_ID;
-        this.baseUrl = process.env.NUVEMSHOP_API_URL;
+        this.config = NUVEMSHOP_CONFIG;
+        
+        if (!this.config.accessToken || !this.config.userId || !this.config.apiUrl) {
+            throw new Error('Configurações da Nuvemshop incompletas');
+        }
     }
 
     async getOrdersFromLastMonth() {
@@ -21,12 +24,13 @@ class NuvemshopTrackingSync {
             const thirtyDaysAgo = new Date(now);
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             
-            console.log('Data inicial:', thirtyDaysAgo.toISOString());
-            console.log('Fazendo requisição para:', this.baseUrl);
-            console.log('Token:', this.apiKey);
+            logger.info('Sincronizando pedidos da Nuvemshop:', {
+                dataInicial: thirtyDaysAgo.toISOString(),
+                apiUrl: this.config.apiUrl
+            });
             
             const headers = {
-                'Authentication': `bearer ${this.apiKey}`,
+                'Authentication': `bearer ${this.config.accessToken}`,
                 'Content-Type': 'application/json',
                 'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)',
                 'Accept': 'application/json'
@@ -38,8 +42,8 @@ class NuvemshopTrackingSync {
 
             while (hasMore) {
                 try {
-                    console.log(`\nBuscando página ${page}...`);
-                    const response = await axios.get(`${this.baseUrl}/orders`, {
+                    logger.info(`Buscando página ${page} de pedidos`);
+                    const response = await axios.get(`${this.config.apiUrl}/orders`, {
                         headers,
                         params: {
                             updated_at_min: thirtyDaysAgo.toISOString(),
@@ -52,88 +56,96 @@ class NuvemshopTrackingSync {
                     if (orders && orders.length > 0) {
                         allOrders = allOrders.concat(orders);
                         page++;
+                        
+                        // Cache dos pedidos com TTL configurável
+                        await this.redis.set(
+                            `${this.config.cache.prefix}orders:page:${page}`,
+                            orders,
+                            this.config.cache.ttl.orders.recent
+                        );
                     } else {
                         hasMore = false;
                     }
+
+                    // Aguarda 1 segundo entre as requisições para evitar rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+
                 } catch (error) {
-                    if (error.response && error.response.status === 404) {
-                        // Não há mais páginas
-                        hasMore = false;
-                    } else {
-                        throw error;
-                    }
+                    logger.error('Erro ao buscar página de pedidos:', {
+                        page,
+                        error: error.message
+                    });
+                    hasMore = false;
                 }
             }
 
-            console.log(`Total de pedidos encontrados: ${allOrders.length}`);
+            logger.info(`Total de pedidos encontrados: ${allOrders.length}`);
             return allOrders;
+
         } catch (error) {
-            console.error('Erro ao buscar pedidos:', error.message);
-            return [];
+            logger.error('Erro ao buscar pedidos:', {
+                error: error.message,
+                stack: error.stack
+            });
+            throw error;
         }
     }
 
     async syncTrackingCodes() {
         try {
-            console.log('Iniciando sincronização dos códigos de rastreio...');
-            
-            // Busca os pedidos dos últimos 30 dias
+            logger.info('Iniciando sincronização de códigos de rastreio');
             const orders = await this.getOrdersFromLastMonth();
-            console.log(`Encontrados ${orders.length} pedidos nos últimos 30 dias`);
-
-            let syncCount = 0;
-            let noTrackingCount = 0;
             
-            // Para cada pedido, verifica e salva o código de rastreio
+            const trackingCodes = new Set();
+            let totalProcessed = 0;
+            
             for (const order of orders) {
-                console.log(`\nAnalisando pedido #${order.number}:`);
-                
-                // Procura por um fulfillment com código de rastreio
-                const fulfillment = order.fulfillments?.find(f => f.tracking_info?.code);
-                
-                if (fulfillment?.tracking_info?.code) {
-                    const trackingData = {
-                        code: fulfillment.tracking_info.code,
-                        carrier: fulfillment.shipping?.carrier?.name || 'Correios',
-                        status: fulfillment.status || 'pendente',
-                        lastUpdate: order.updated_at,
-                        estimatedDelivery: 'N/A',
-                        orderStatus: order.status,
-                        customerName: order.customer?.name || 'N/A',
-                        orderTotal: order.total?.toString() || '0',
-                        shippingAddress: JSON.stringify({
-                            address: order.shipping_address?.address,
-                            number: order.shipping_address?.number,
-                            complement: order.shipping_address?.floor,
-                            neighborhood: order.shipping_address?.locality,
-                            city: order.shipping_address?.city,
-                            state: order.shipping_address?.province,
-                            zipcode: order.shipping_address?.zipcode
-                        })
-                    };
-
-                    await this.redis.saveTrackingCode(order.number.toString(), trackingData);
-                    console.log(`✓ Código de rastreio salvo: ${trackingData.code}`);
-                    syncCount++;
-                } else {
-                    noTrackingCount++;
-                    console.log('✗ Sem código de rastreio');
+                if (order.shipping_tracking) {
+                    trackingCodes.add(order.shipping_tracking);
+                    totalProcessed++;
+                    
+                    // Cache do código de rastreio com TTL configurável
+                    await this.redis.set(
+                        `${this.config.cache.prefix}tracking:${order.shipping_tracking}`,
+                        {
+                            orderId: order.number,
+                            status: order.status,
+                            tracking: order.shipping_tracking,
+                            updatedAt: new Date().toISOString()
+                        },
+                        this.config.cache.ttl.orders.details
+                    );
                 }
             }
-
-            console.log(`\nSincronização concluída!`);
-            console.log(`- ${syncCount} códigos de rastreio salvos no Redis`);
-            console.log(`- ${noTrackingCount} pedidos sem código de rastreio`);
+            
+            logger.info('Sincronização finalizada:', {
+                totalOrders: orders.length,
+                totalProcessed,
+                uniqueTrackingCodes: trackingCodes.size
+            });
+            
+            return Array.from(trackingCodes);
+            
         } catch (error) {
-            console.error('Erro durante a sincronização:', error.message);
-        } finally {
-            await this.redis.disconnect();
+            logger.error('Erro na sincronização:', {
+                error: error.message,
+                stack: error.stack
+            });
+            throw error;
         }
     }
 }
 
 // Executar a sincronização
-const sync = new NuvemshopTrackingSync();
-sync.syncTrackingCodes().then(() => {
-    console.log('Processo de sincronização finalizado');
-});
+if (require.main === module) {
+    const sync = new NuvemshopTrackingSync();
+    sync.syncTrackingCodes()
+        .then(() => {
+            logger.info('Processo de sincronização finalizado com sucesso');
+            process.exit(0);
+        })
+        .catch(error => {
+            logger.error('Erro no processo de sincronização:', error);
+            process.exit(1);
+        });
+}

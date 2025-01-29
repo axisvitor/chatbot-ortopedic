@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 const { RedisStore } = require('../utils/redis-store');
-const { REDIS_CONFIG, WHATSAPP_CONFIG } = require('../../config/settings');
+const { REDIS_CONFIG, WHATSAPP_CONFIG, TRACKING_CONFIG } = require('../../config/settings');
 const logger = require('../utils/logger');
 
 const redis = new RedisStore();
@@ -11,7 +11,7 @@ const redis = new RedisStore();
 const verifyWebhook = (req, res, next) => {
     try {
         const signature = req.headers['17token'];
-        const expectedToken = process.env.TRACK17_API_KEY;
+        const expectedToken = TRACKING_CONFIG.webhook.secret;
 
         if (!signature || signature !== expectedToken) {
             logger.warn('[17Track] Tentativa de acesso ao webhook com token inválido:', {
@@ -34,7 +34,7 @@ const verifyWebhook = (req, res, next) => {
 };
 
 // Endpoint para receber atualizações do 17track
-router.post('/push', verifyWebhook, async (req, res) => {
+router.post(TRACKING_CONFIG.paths.webhook, verifyWebhook, async (req, res) => {
     const startTime = Date.now();
     
     try {
@@ -47,7 +47,10 @@ router.post('/push', verifyWebhook, async (req, res) => {
             return res.status(400).json({ error: 'Invalid payload' });
         }
 
-        logger.info(`[17Track] Recebidas ${updates.length} atualizações`);
+        logger.info('[17Track] Recebidas atualizações:', {
+            count: updates.length,
+            timestamp: new Date().toISOString()
+        });
 
         let successCount = 0;
         let errorCount = 0;
@@ -55,7 +58,7 @@ router.post('/push', verifyWebhook, async (req, res) => {
 
         for (const update of updates) {
             try {
-                const trackingKey = `${REDIS_CONFIG.prefix.tracking}code:${update.number}`;
+                const trackingKey = `${TRACKING_CONFIG.cache.prefix}${update.number}`;
                 const trackingData = {
                     code: update.number,
                     carrier: update.carrier || 'Desconhecido',
@@ -68,7 +71,8 @@ router.post('/push', verifyWebhook, async (req, res) => {
                     lastUpdate: new Date().toISOString(),
                     meta: {
                         webhookReceived: true,
-                        updateTimestamp: startTime
+                        updateTimestamp: startTime,
+                        source: '17track'
                     }
                 };
 
@@ -87,24 +91,30 @@ router.post('/push', verifyWebhook, async (req, res) => {
                             orderId: parsed.orderId,
                             oldStatus: parsed.status?.text,
                             newStatus: trackingData.status.text,
-                            customerName: parsed.customerName
+                            customerName: parsed.customerName,
+                            carrier: trackingData.carrier
                         });
                     }
                 }
 
                 // Salva atualização no Redis com TTL
-                await redis.set(trackingKey, JSON.stringify(trackingData), REDIS_CONFIG.ttl.tracking.status);
+                await redis.set(
+                    trackingKey,
+                    JSON.stringify(trackingData),
+                    TRACKING_CONFIG.cache.ttl.webhook
+                );
                 successCount++;
 
-                logger.info(`[17Track] Atualização processada:`, {
+                logger.info('[17Track] Atualização processada:', {
                     code: update.number,
+                    carrier: trackingData.carrier,
                     status: trackingData.status.text,
                     location: trackingData.status.location,
                     timestamp: new Date().toISOString()
                 });
             } catch (error) {
                 errorCount++;
-                logger.error(`[17Track] Erro ao processar atualização:`, {
+                logger.error('[17Track] Erro ao processar atualização:', {
                     code: update.number,
                     error: error.message,
                     stack: error.stack,
@@ -158,7 +168,7 @@ router.post('/push', verifyWebhook, async (req, res) => {
 
 // Processa notificações importantes
 async function processNotifications(notifications) {
-    if (!WHATSAPP_CONFIG.notifications.tracking) {
+    if (!WHATSAPP_CONFIG.notifications?.tracking) {
         logger.info('[17Track] Notificações WhatsApp desativadas');
         return;
     }
@@ -170,6 +180,7 @@ async function processNotifications(notifications) {
             logger.info('[17Track] Notificação enviada:', {
                 code: notif.code,
                 orderId: notif.orderId,
+                carrier: notif.carrier,
                 timestamp: new Date().toISOString()
             });
         } catch (error) {
@@ -185,13 +196,12 @@ async function processNotifications(notifications) {
 // Formata mensagem de notificação
 function formatNotificationMessage(notification) {
     const statusEmojis = {
-        'InTransit': '📫',
-        'Delivered': '✅',
-        'Pickup': '🚚',
-        'CustomsHold': '📦',
-        'NotFound': '❓',
-        'Exception': '⚠️',
-        'Expired': '⏰'
+        'pending': '📫',
+        'em_transito': '🚚',
+        'entregue': '✅',
+        'problema': '⚠️',
+        'expirado': '⏰',
+        'retornando': '↩️'
     };
 
     const emoji = statusEmojis[notification.newStatus] || '📦';
@@ -199,16 +209,15 @@ function formatNotificationMessage(notification) {
     return `*Atualização de Rastreio* ${emoji}\n\n` +
            `*Pedido:* #${notification.orderId}\n` +
            `*Rastreio:* ${notification.code}\n` +
-           `*Cliente:* ${notification.customerName}\n` +
-           `*Status Anterior:* ${notification.oldStatus}\n` +
-           `*Novo Status:* ${notification.newStatus}`;
+           `*Transportadora:* ${notification.carrier}\n` +
+           `*Status:* ${notification.newStatus}\n\n` +
+           `*Cliente:* ${notification.customerName}`;
 }
 
 // Envia notificação via WhatsApp
 async function sendWhatsAppNotification(message) {
     // Implementar integração com WhatsApp
-    // TODO: Integrar com serviço de WhatsApp quando disponível
-    logger.info('[17Track] Simulando envio de notificação:', message);
+    logger.info('[17Track] Mensagem para enviar:', message);
 }
 
 module.exports = router;

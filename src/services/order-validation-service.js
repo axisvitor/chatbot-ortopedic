@@ -679,65 +679,138 @@ class OrderValidationService {
     }
 
     validatePaymentInfo(order, proofAnalysis) {
-        const validation = {
-            isValid: true,
+        const result = {
+            isValid: false,
             errors: [],
-            warnings: []
+            warnings: [],
+            details: {
+                value: {
+                    expected: order.total,
+                    found: proofAnalysis.value,
+                    matches: false
+                },
+                date: {
+                    order: null,
+                    payment: null,
+                    isValid: false
+                },
+                customer: {
+                    matches: false,
+                    similarity: 0
+                }
+            }
         };
 
-        // Extrai valor do pedido
-        const orderAmount = parseFloat(order.total);
-
-        // Extrai valor do comprovante usando regex
-        const amountMatch = proofAnalysis.match(/R\$\s*(\d+(?:\.\d{2})?)/);
-        const proofAmount = amountMatch ? parseFloat(amountMatch[1]) : null;
-
-        // 1. Valida valor
-        if (!proofAmount) {
-            validation.errors.push('Não foi possível identificar o valor no comprovante');
-            validation.isValid = false;
-        } else if (proofAmount < orderAmount) {
-            validation.errors.push(`Valor do comprovante (R$ ${proofAmount}) é menor que o valor do pedido (R$ ${orderAmount})`);
-            validation.isValid = false;
-        } else if (proofAmount > orderAmount) {
-            validation.warnings.push(`Valor do comprovante (R$ ${proofAmount}) é maior que o valor do pedido (R$ ${orderAmount})`);
+        // Valida valor do pagamento
+        const tolerance = 0.01; // 1% de tolerância
+        const valueDiff = Math.abs(order.total - proofAnalysis.value);
+        const valuePercentDiff = valueDiff / order.total;
+        
+        result.details.value.matches = valuePercentDiff <= tolerance;
+        if (!result.details.value.matches) {
+            result.errors.push(`Valor do pagamento (${proofAnalysis.value}) não corresponde ao valor do pedido (${order.total})`);
         }
 
-        // 2. Valida data
-        const dateMatch = proofAnalysis.match(/\d{2}\/\d{2}\/\d{4}/);
-        if (!dateMatch) {
-            validation.warnings.push('Não foi possível identificar a data no comprovante');
+        // Valida data do pagamento
+        const orderDate = moment(order.created_at, moment.ISO_8601, true);
+        const paymentDate = moment(proofAnalysis.date, [
+            'DD/MM/YYYY HH:mm:ss',
+            'DD/MM/YYYY HH:mm',
+            'DD/MM/YYYY',
+            'YYYY-MM-DD HH:mm:ss',
+            'YYYY-MM-DD HH:mm',
+            'YYYY-MM-DD'
+        ], true);
+
+        result.details.date = {
+            order: orderDate.isValid() ? orderDate.format('DD/MM/YYYY HH:mm:ss') : null,
+            payment: paymentDate.isValid() ? paymentDate.format('DD/MM/YYYY HH:mm:ss') : null,
+            isValid: false
+        };
+
+        if (!paymentDate.isValid()) {
+            result.errors.push('Data do pagamento inválida ou não encontrada');
+        } else if (!orderDate.isValid()) {
+            result.warnings.push('Não foi possível validar a data do pedido');
         } else {
-            const proofDate = new Date(dateMatch[0].split('/').reverse().join('-'));
-            const orderDate = new Date(order.created_at);
+            // Verifica se pagamento é posterior ao pedido
+            const timeDiff = paymentDate.diff(orderDate, 'days');
             
-            // Se comprovante é de antes do pedido
-            if (proofDate < orderDate) {
-                validation.errors.push('Comprovante é anterior à data do pedido');
-                validation.isValid = false;
+            if (timeDiff < 0) {
+                result.errors.push('Data do pagamento é anterior à data do pedido');
+            } else if (timeDiff > 30) {
+                result.warnings.push('Pagamento realizado mais de 30 dias após o pedido');
             }
             
-            // Se comprovante é muito antigo (mais de 24h)
-            const hoursDiff = Math.abs(proofDate - orderDate) / 36e5;
-            if (hoursDiff > 24) {
-                validation.warnings.push('Comprovante tem mais de 24 horas de diferença do pedido');
+            result.details.date.isValid = timeDiff >= 0;
+        }
+
+        // Valida nome do cliente
+        if (order.customer?.name && proofAnalysis.customer) {
+            const similarity = this._calculateStringSimilarity(
+                order.customer.name.toLowerCase(),
+                proofAnalysis.customer.toLowerCase()
+            );
+            
+            result.details.customer = {
+                expected: order.customer.name,
+                found: proofAnalysis.customer,
+                similarity,
+                matches: similarity >= 0.8 // 80% de similaridade
+            };
+
+            if (!result.details.customer.matches) {
+                result.warnings.push('Nome do pagador difere do cliente do pedido');
             }
+        } else {
+            result.warnings.push('Não foi possível validar o nome do pagador');
         }
 
-        // 3. Valida tipo de transação
-        if (!proofAnalysis.match(/pix|ted|doc|transferência|depósito/i)) {
-            validation.warnings.push('Tipo de transação não identificado claramente no comprovante');
-        }
+        // Resultado final
+        result.isValid = result.errors.length === 0;
 
-        // 4. Valida status
-        if (!proofAnalysis.match(/concluíd|aprovad|efetivad|realizada|confirmad/i)) {
-            validation.errors.push('Não foi possível confirmar que a transação foi concluída');
-            validation.isValid = false;
-        }
-
-        return validation;
+        return result;
     }
 
+    /**
+     * Calcula similaridade entre duas strings
+     * @private
+     */
+    _calculateStringSimilarity(str1, str2) {
+        const longer = str1.length > str2.length ? str1 : str2;
+        const shorter = str1.length > str2.length ? str2 : str1;
+        
+        if (longer.length === 0) return 1.0;
+        
+        const costs = new Array();
+        for (let i = 0; i <= longer.length; i++) {
+            let lastValue = i;
+            for (let j = 0; j <= shorter.length; j++) {
+                if (i === 0) {
+                    costs[j] = j;
+                } else if (j > 0) {
+                    let newValue = costs[j - 1];
+                    if (longer.charAt(i - 1) !== shorter.charAt(j - 1)) {
+                        newValue = Math.min(
+                            Math.min(newValue, lastValue),
+                            costs[j]
+                        ) + 1;
+                    }
+                    costs[j - 1] = lastValue;
+                    lastValue = newValue;
+                }
+            }
+            if (i > 0) costs[shorter.length] = lastValue;
+        }
+        
+        return (longer.length - costs[shorter.length]) / longer.length;
+    }
+
+    /**
+     * Notifica o setor financeiro sobre o pagamento
+     * @param {Object} order - Pedido da Nuvemshop
+     * @param {Object} proofAnalysis - Análise do comprovante
+     */
     async notifyFinancialDepartment(order, proofAnalysis) {
         const message = `💰 *Novo Comprovante de Pagamento*\n\n` +
                        `📦 Pedido: #${order.number}\n` +

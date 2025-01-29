@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { RedisStore } = require('../utils/redis-store');
 const { Track17Service } = require('../services/track17-service');
-const { REDIS_CONFIG, WHATSAPP_CONFIG } = require('../../config/settings');
+const { REDIS_CONFIG, WHATSAPP_CONFIG, NUVEMSHOP_CONFIG } = require('../../config/settings');
 const logger = require('../utils/logger');
 
 const redis = new RedisStore();
@@ -11,7 +11,7 @@ const track17 = new Track17Service();
 // Middleware para verificar autenticidade do webhook
 const verifyWebhook = (req, res, next) => {
     const token = req.headers['x-nuvemshop-token'];
-    const expectedToken = process.env.NUVEMSHOP_WEBHOOK_TOKEN;
+    const expectedToken = NUVEMSHOP_CONFIG.webhook.secret;
 
     if (!token || token !== expectedToken) {
         logger.warn('[Nuvemshop] Tentativa de acesso ao webhook com token inválido:', {
@@ -19,7 +19,7 @@ const verifyWebhook = (req, res, next) => {
             token: token ? 'presente mas inválido' : 'ausente',
             timestamp: new Date().toISOString()
         });
-        return res.status(401).json({ error: 'Unauthorized' });
+        return res.status(401).json({ error: 'Token inválido' });
     }
 
     next();
@@ -38,7 +38,17 @@ router.post('/order-update', verifyWebhook, async (req, res) => {
                 body: req.body,
                 timestamp: new Date().toISOString()
             });
-            return res.status(400).json({ error: 'Invalid payload' });
+            return res.status(400).json({ error: 'Payload inválido' });
+        }
+
+        // Verifica se é um evento suportado
+        if (!NUVEMSHOP_CONFIG.webhook.topics.includes(event)) {
+            logger.info('[Nuvemshop] Evento não suportado:', {
+                event,
+                supportedEvents: NUVEMSHOP_CONFIG.webhook.topics,
+                timestamp: new Date().toISOString()
+            });
+            return res.status(200).json({ message: 'Evento não suportado' });
         }
 
         // Verifica se é um evento relacionado a pedido

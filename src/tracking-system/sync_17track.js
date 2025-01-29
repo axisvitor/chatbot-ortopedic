@@ -2,19 +2,24 @@ const { Track17Service } = require('./services/track17-service');
 const { Track17PushService } = require('./services/track17-push-service');
 const { RedisStore } = require('./utils/redis-store');
 const logger = require('./utils/logger');
+const { TRACKING_CONFIG, REDIS_CONFIG } = require('../config/settings');
 
 class Track17Sync {
     constructor() {
         this.track17 = new Track17Service();
         this.track17Push = new Track17PushService();
         this.redis = new RedisStore();
-        this.batchSize = 40;
-        this.syncInterval = 60 * 60 * 1000; // 60 minutos
+        this.batchSize = 40; // Limite da API do 17track
+        this.syncInterval = TRACKING_CONFIG.updateInterval;
+        this.config = TRACKING_CONFIG;
     }
 
     async start() {
         try {
-            logger.info('Iniciando sincronização com 17track');
+            logger.info('Iniciando sincronização com 17track', {
+                batchSize: this.batchSize,
+                syncInterval: this.syncInterval
+            });
             
             // 1. Registrar novos códigos
             await this.registerNewTrackingCodes();
@@ -27,7 +32,10 @@ class Track17Sync {
             
             logger.info('Sincronização com 17track concluída');
         } catch (error) {
-            logger.error('Erro na sincronização com 17track:', error);
+            logger.error('Erro na sincronização com 17track:', {
+                error: error.message,
+                stack: error.stack
+            });
             throw error;
         }
     }
@@ -52,12 +60,19 @@ class Track17Sync {
                     const result = await this.track17.registerForTracking(batch);
                     
                     if (result.success.length > 0) {
-                        await this.redis.markCodesAsRegistered(result.success);
+                        // Salva no Redis com TTL configurável
+                        await this.redis.markCodesAsRegistered(
+                            result.success,
+                            REDIS_CONFIG.ttl.tracking.default
+                        );
                         logger.info(`${result.success.length} códigos registrados com sucesso`);
                     }
                     
                     if (result.failed.length > 0) {
-                        logger.warn(`${result.failed.length} códigos falharam ao registrar:`, result.failed);
+                        logger.warn(`${result.failed.length} códigos falharam ao registrar:`, {
+                            failed: result.failed,
+                            reasons: result.failed.map(f => f.reason)
+                        });
                     }
 
                     // Aguarda entre lotes para não sobrecarregar a API
@@ -67,13 +82,17 @@ class Track17Sync {
                 } catch (error) {
                     logger.error(`Erro ao registrar lote de códigos:`, {
                         batch,
-                        error: error.message
+                        error: error.message,
+                        stack: error.stack
                     });
                     // Continua com próximo lote mesmo se houver erro
                 }
             }
         } catch (error) {
-            logger.error('Erro ao registrar novos códigos:', error);
+            logger.error('Erro ao registrar novos códigos:', {
+                error: error.message,
+                stack: error.stack
+            });
             throw error;
         }
     }
@@ -92,71 +111,76 @@ class Track17Sync {
             for (let i = 0; i < codes.length; i += this.batchSize) {
                 const batch = codes.slice(i, i + this.batchSize);
                 await this.track17Push.requestUpdates(batch);
-                logger.info(`Solicitadas atualizações para lote ${i/this.batchSize + 1}`, {
-                    total: batch.length
+                
+                // Atualiza timestamp da última solicitação com TTL configurável
+                await this.redis.set(
+                    `${REDIS_CONFIG.prefix.tracking}last_push_request`,
+                    new Date().toISOString(),
+                    REDIS_CONFIG.ttl.tracking.updates
+                );
+                
+                logger.info(`Solicitadas atualizações para lote ${Math.floor(i/this.batchSize) + 1}`, {
+                    total: batch.length,
+                    remaining: codes.length - (i + batch.length)
                 });
+
+                // Aguarda entre lotes
+                if (i + this.batchSize < codes.length) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
             }
         } catch (error) {
-            logger.error('Erro ao solicitar atualizações push:', error);
+            logger.error('Erro ao solicitar atualizações push:', {
+                error: error.message,
+                stack: error.stack
+            });
+            throw error;
         }
     }
 
     async updateExistingTrackings() {
         try {
-            // Busca códigos registrados que precisam de atualização
-            const trackingsToUpdate = await this.redis.getTrackingsForUpdate();
-            
-            if (trackingsToUpdate.length === 0) {
-                logger.info('Nenhum código para atualizar');
+            const trackingCodes = await this.redis.getAllTrackingCodes();
+            if (!trackingCodes || trackingCodes.length === 0) {
+                logger.info('Nenhum código para atualizar status');
                 return;
             }
 
-            logger.info(`Atualizando ${trackingsToUpdate.length} códigos de rastreio`);
+            for (let i = 0; i < trackingCodes.length; i += this.batchSize) {
+                const batch = trackingCodes.slice(i, i + this.batchSize);
+                const codes = batch.map(t => t.code);
 
-            // Processa em lotes
-            for (let i = 0; i < trackingsToUpdate.length; i += this.batchSize) {
-                const batch = trackingsToUpdate.slice(i, i + this.batchSize);
-                const trackingCodes = batch.map(t => t.code);
-                
                 try {
-                    const updates = await this.track17.getTrackingInfo(trackingCodes);
+                    const updates = await this.track17.getTrackingInfo(codes);
                     
+                    // Atualiza no Redis com TTL configurável
                     for (const update of updates) {
-                        const tracking = batch.find(t => t.code === update.code);
-                        if (!tracking) continue;
-
-                        // Verifica se houve mudança de status
-                        if (tracking.status?.text !== update.status.text) {
-                            logger.info(`Status alterado para código ${update.code}:`, {
-                                old: tracking.status?.text,
-                                new: update.status.text
-                            });
-                        }
-
-                        // Atualiza no Redis
-                        await this.redis.saveTrackingCode(tracking.orderId, {
-                            ...update,
-                            orderId: tracking.orderId
-                        });
+                        await this.redis.set(
+                            `${REDIS_CONFIG.prefix.tracking}status:${update.code}`,
+                            update,
+                            REDIS_CONFIG.ttl.tracking.status
+                        );
                     }
 
-                    // Atualiza timestamp da última verificação
-                    await this.redis.updateLastCheck(trackingCodes);
+                    logger.info(`Atualizados ${updates.length} códigos do lote ${Math.floor(i/this.batchSize) + 1}`);
 
                     // Aguarda entre lotes
-                    if (i + this.batchSize < trackingsToUpdate.length) {
+                    if (i + this.batchSize < trackingCodes.length) {
                         await new Promise(resolve => setTimeout(resolve, 1000));
                     }
                 } catch (error) {
                     logger.error(`Erro ao atualizar lote de códigos:`, {
-                        codes: trackingCodes,
+                        batch: codes,
                         error: error.message
                     });
                     // Continua com próximo lote mesmo se houver erro
                 }
             }
         } catch (error) {
-            logger.error('Erro ao atualizar códigos existentes:', error);
+            logger.error('Erro ao atualizar status dos códigos:', {
+                error: error.message,
+                stack: error.stack
+            });
             throw error;
         }
     }
@@ -165,10 +189,18 @@ class Track17Sync {
 // Executa a sincronização
 if (require.main === module) {
     const sync = new Track17Sync();
-    sync.start().catch(error => {
-        logger.error('Falha na sincronização:', error);
-        process.exit(1);
-    });
+    sync.start()
+        .then(() => {
+            logger.info('Processo de sincronização finalizado com sucesso');
+            process.exit(0);
+        })
+        .catch(error => {
+            logger.error('Erro no processo de sincronização:', {
+                error: error.message,
+                stack: error.stack
+            });
+            process.exit(1);
+        });
 }
 
 module.exports = { Track17Sync };
