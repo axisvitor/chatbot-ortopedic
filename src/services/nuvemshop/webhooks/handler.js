@@ -4,7 +4,7 @@ const { WebhookValidator } = require('./validator');
 const { OrderService } = require('../services/order');
 const { ProductService } = require('../services/product');
 const { CustomerService } = require('../services/customer');
-const { NUVEMSHOP_CONFIG } = require('../config/settings');
+const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 
 class WebhookHandler {
     constructor(cacheService) {

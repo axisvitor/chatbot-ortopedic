@@ -1,4 +1,4 @@
-const { NUVEMSHOP_CONFIG } = require('../config/settings');
+const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 
 class NuvemshopFormatter {
     constructor() {

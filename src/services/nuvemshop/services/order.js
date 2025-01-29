@@ -1,7 +1,7 @@
 const moment = require('moment-timezone');
 const logger = require('../../../utils/logger');
 const { NuvemshopBase } = require('../base');
-const { NUVEMSHOP_CONFIG } = require('../config/settings');
+const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 
 class OrderService extends NuvemshopBase {
     constructor(cacheService) {

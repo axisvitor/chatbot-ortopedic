@@ -10,7 +10,7 @@ const { NuvemshopFormatter } = require('./utils/formatter');
 const { NuvemshopI18n } = require('./utils/i18n');
 const { NuvemshopCache } = require('./utils/cache');
 const { NuvemshopHttpClient } = require('./utils/http-client');
-const { NUVEMSHOP_CONFIG } = require('./config/settings');
+const { NUVEMSHOP_CONFIG } = require('../../config/settings');
 
 class NuvemshopService {
     constructor(cacheService) {
