@@ -34,6 +34,11 @@ value = "production"
 key = "TZ"
 value = "America/Sao_Paulo"
 
+# Permissões para volume
+[[services.environment]]
+key = "RAILWAY_RUN_UID"
+value = "0"
+
 # Redis
 [[services.environment]]
 key = "REDIS_HOST"
@@ -47,11 +52,8 @@ value = "${{REDIS.PORT}}"
 key = "REDIS_PASSWORD"
 value = "${{REDIS.PASSWORD}}"
 
-# Volumes para armazenamento persistente
-[[services.volumes]]
-path = "/app/logs"
-mount_path = "/data/logs"
-
-[[services.volumes]]
-path = "/app/temp"
-mount_path = "/data/temp"
+# Volume único para armazenamento persistente
+[[volumes]]
+name = "data"
+mount_path = "/data"
+size = "5GB"

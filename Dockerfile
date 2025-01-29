@@ -36,8 +36,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Criar diretórios necessários
-RUN mkdir -p /data/logs /data/temp && \
-    chown -R node:node /data
+RUN mkdir -p /data/logs /data/temp
 
 # Copiar arquivos do builder
 COPY --from=builder /app/node_modules ./node_modules
@@ -48,14 +47,8 @@ COPY --from=builder /app/docs ./docs
 # Verificar se o FFmpeg tem suporte a OPUS
 RUN ffmpeg -formats | grep opus
 
-# Usar usuário não-root
-USER node
-
 # Expor a porta que a aplicação usa
 EXPOSE 3000
-
-# Configurar volumes
-VOLUME ["/data/logs", "/data/temp"]
 
 # Healthcheck
 HEALTHCHECK --interval=45s --timeout=30s --start-period=120s --retries=5 \
