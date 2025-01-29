@@ -294,40 +294,39 @@ class OpenAIService {
                 description: "Encaminha casos para análise do setor financeiro (pagamento, reembolso, taxação, etc)",
                 parameters: {
                     type: "object",
-                    required: ["reason", "customer_message", "priority"],
+                    required: ["message", "priority", "userContact"],
                     properties: {
-                        order_number: {
+                        message: {
                             type: "string",
-                            description: "Número do pedido (se disponível)"
+                            description: "Mensagem original do cliente"
                         },
-                        tracking_code: {
+                        userContact: {
                             type: "string",
-                            description: "Código de rastreio (se disponível)"
+                            description: "Contato do cliente (WhatsApp)"
+                        },
+                        priority: {
+                            type: "string",
+                            enum: ["low", "normal", "high", "urgent"],
+                            description: "Nível de urgência"
                         },
                         reason: {
                             type: "string",
                             enum: [
-                                "payment",           // Problema com pagamento
-                                "refund",            // Solicitação de reembolso
-                                "taxation",          // Questões de impostos
-                                "customs",           // Retenção na alfândega
                                 "payment_proof",     // Comprovante de pagamento
-                                "other"              // Outros motivos
+                                "refund",            // Solicitação de reembolso
+                                "payment_issue",     // Problema com pagamento
+                                "invoice",           // Nota fiscal
+                                "general"            // Outros assuntos
                             ],
                             description: "Motivo do encaminhamento"
                         },
-                        customer_message: {
+                        orderNumber: {
                             type: "string",
-                            description: "Mensagem original do cliente"
+                            description: "Número do pedido (se disponível)"
                         },
-                        priority: {
+                        trackingCode: {
                             type: "string",
-                            enum: ["high", "medium", "low"],
-                            description: "Nível de urgência"
-                        },
-                        additional_info: {
-                            type: "string",
-                            description: "Informações adicionais relevantes"
+                            description: "Código de rastreio (se disponível)"
                         }
                     }
                 }
@@ -337,37 +336,38 @@ class OpenAIService {
                 description: "Encaminha casos para outros departamentos da Loja Ortopedic",
                 parameters: {
                     type: "object",
-                    required: ["department", "reason", "customer_message", "priority"],
+                    required: ["message", "department", "userContact"],
                     properties: {
+                        message: {
+                            type: "string",
+                            description: "Mensagem original do cliente"
+                        },
                         department: {
                             type: "string",
-                            enum: ["support", "technical", "logistics", "commercial"],
+                            enum: ["support", "sales", "technical", "shipping", "quality"],
                             description: "Departamento para encaminhamento"
                         },
-                        order_number: {
+                        userContact: {
                             type: "string",
-                            description: "Número do pedido (se disponível)"
+                            description: "Contato do cliente (WhatsApp)"
                         },
-                        tracking_code: {
+                        priority: {
                             type: "string",
-                            description: "Código de rastreio (se disponível)"
+                            enum: ["low", "normal", "high", "urgent"],
+                            default: "normal",
+                            description: "Nível de urgência do caso"
                         },
                         reason: {
                             type: "string",
                             description: "Motivo do encaminhamento"
                         },
-                        customer_message: {
+                        orderNumber: {
                             type: "string",
-                            description: "Mensagem original do cliente"
+                            description: "Número do pedido (se disponível)"
                         },
-                        priority: {
+                        trackingCode: {
                             type: "string",
-                            enum: ["high", "medium", "low"],
-                            description: "Nível de urgência do caso"
-                        },
-                        additional_info: {
-                            type: "string",
-                            description: "Informações adicionais relevantes"
+                            description: "Código de rastreio (se disponível)"
                         }
                     }
                 }

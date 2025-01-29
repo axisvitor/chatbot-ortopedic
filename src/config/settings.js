@@ -190,6 +190,12 @@ const WHATSAPP_CONFIG = {
     apiUrl: validateEnvVar('WAPI_URL'),
     token: validateEnvVar('WAPI_TOKEN'),
     connectionKey: validateEnvVar('WAPI_CONNECTION_KEY'),
+    departments: {
+        financial: validateEnvVar('FINANCIAL_DEPT_NUMBER'),
+        support: validateEnvVar('SUPPORT_DEPT_NUMBER'),
+        sales: validateEnvVar('SALES_DEPT_NUMBER'),
+        technical: validateEnvVar('TECHNICAL_DEPT_NUMBER')
+    },
     messageDelay: 3000, // delay padrão entre mensagens em ms
     retryAttempts: 3,
     retryDelay: 1000,
@@ -250,15 +256,6 @@ const WHATSAPP_CONFIG = {
         connection: {
             path: 'instance/info',
             method: 'GET'
-        }
-    },
-    departments: {
-        financial: {
-            number: validateEnvVar('FINANCIAL_DEPT_NUMBER'),
-            paymentProofs: {
-                allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
-                maxSize: 5 * 1024 * 1024 // 5MB
-            }
         }
     },
     whatsappNumber: process.env.WHATSAPP_NUMBER || '',  

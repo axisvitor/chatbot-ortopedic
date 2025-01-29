@@ -1,6 +1,7 @@
 const { RedisStore } = require('../store/redis-store');
 const logger = require('../utils/logger');
 const { v4: uuidv4 } = require('uuid');
+const { WHATSAPP_CONFIG } = require('../config/settings');
 
 class ForwardingService {
     constructor() {
@@ -66,6 +67,7 @@ class ForwardingService {
                 orderNumber,
                 reason,
                 department: 'financial',
+                departmentNumber: WHATSAPP_CONFIG.departments.financial,
                 meta: {
                     financialReason: reason
                 }
@@ -99,7 +101,8 @@ class ForwardingService {
                 ticketId: ticket.id,
                 customerId,
                 orderNumber,
-                reason
+                reason,
+                priority
             });
 
             return {
@@ -119,6 +122,10 @@ class ForwardingService {
      */
     async forwardToDepartment({ customerId, department, orderNumber, reason, priority, message }) {
         try {
+            if (!WHATSAPP_CONFIG.departments[department]) {
+                throw new Error(`Departamento ${department} não configurado`);
+            }
+
             // Valida o departamento
             const validDepartments = ['support', 'technical', 'logistics', 'commercial'];
             if (!validDepartments.includes(department)) {
@@ -132,6 +139,7 @@ class ForwardingService {
                 department,
                 orderNumber,
                 reason,
+                departmentNumber: WHATSAPP_CONFIG.departments[department],
                 meta: {
                     departmentSpecific: {
                         category: this._getDepartmentCategory(department, reason)
@@ -168,7 +176,8 @@ class ForwardingService {
                 department,
                 customerId,
                 orderNumber,
-                reason
+                reason,
+                priority
             });
 
             return {
