@@ -185,6 +185,15 @@ const GROQ_CONFIG = {
     get audioUrl() { return `${this.baseUrl}/audio/transcriptions` }
 };
 
+// Rate Limit Configuration
+const RATE_LIMIT_CONFIG = {
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 100, // limite de 100 requisições por windowMs
+    message: 'Muitas requisições deste IP, por favor tente novamente mais tarde.',
+    standardHeaders: true,
+    legacyHeaders: false
+};
+
 // WhatsApp Configuration
 const WHATSAPP_CONFIG = {
     apiUrl: validateEnvVar('WAPI_URL'),
@@ -414,13 +423,6 @@ const FFMPEG_CONFIG = {
     }
 };
 
-// Rate Limit Configuration
-const RATE_LIMIT_CONFIG = {
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // Limite de 100 requisiç��es por janela
-    message: "Muitas requisições, por favor, tente novamente mais tarde."
-};
-
 // Logging Configuration
 const LOGGING_CONFIG = {
     enabled: true,
@@ -498,5 +500,6 @@ module.exports = {
     GROQ_CONFIG,
     WHATSAPP_CONFIG,
     MEDIA_CONFIG,
-    TRACKING_CONFIG
+    TRACKING_CONFIG,
+    RATE_LIMIT_CONFIG
 };

@@ -52,11 +52,11 @@ let openAIVisionService;
 
 // Configuração do rate limiter
 const limiter = rateLimit({
-    windowMs: RATE_LIMIT_CONFIG.windowMs || 15 * 60 * 1000,
-    max: RATE_LIMIT_CONFIG.max || 100,
-    message: 'Muitas requisições deste IP, por favor tente novamente mais tarde.',
-    standardHeaders: true,
-    legacyHeaders: false,
+    windowMs: RATE_LIMIT_CONFIG?.windowMs || 15 * 60 * 1000, // 15 minutos
+    max: RATE_LIMIT_CONFIG?.max || 100,
+    message: RATE_LIMIT_CONFIG?.message || 'Muitas requisições deste IP, por favor tente novamente mais tarde.',
+    standardHeaders: RATE_LIMIT_CONFIG?.standardHeaders || true,
+    legacyHeaders: RATE_LIMIT_CONFIG?.legacyHeaders || false,
 });
 
 // Tratamento de erros não capturados
