@@ -712,7 +712,7 @@ class OpenAIService {
     async deleteThread(threadId) {
         try {
             // Busca thread existente usando o prefixo correto
-            const threadKey = `${REDIS_CONFIG.prefix.openai}customer_threads:${threadId}`;
+            const threadKey = `${REDIS_CONFIG.prefix.openai}thread_meta:${threadId}`;
             let threadId = await this.redisStore.getThreadForCustomer(threadId);
             let shouldCreateNewThread = false;
 
@@ -1085,57 +1085,141 @@ class OpenAIService {
             try {
                 switch (name) {
                     case 'check_order':
-                        output = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
-                        if (!output) {
-                            output = { error: true, message: 'Pedido não encontrado' };
-                        } else {
-                            context.order = output;
-                            output.tracking_code = output.shipping_tracking_number;
+                        try {
+                            output = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
                             
-                            const formattedOutput = `🛍️ Detalhes do Pedido #${output.number}\n\n` +
-                                `📦 Status: ${output.status}\n` +
-                                `💰 Status Pagamento: ${output.payment_status}\n` +
-                                `📬 Status Envio: ${output.shipping_status}\n\n` +
-                                `Produtos:\n${output.products.map(p => 
-                                    `▫️ ${p.quantity}x ${p.name} - R$ ${p.price}`
-                                ).join('\n')}`;
-                            
-                            output = {
-                                ...output,
-                                shipping_tracking_number: output.shipping_tracking_number,
-                                formatted: formattedOutput,
-                                message: formattedOutput
+                            if (!output) {
+                                output = { 
+                                    error: true, 
+                                    message: `Pedido ${parsedArgs.order_number} não foi encontrado. Por favor, verifique se o número está correto.` 
+                                };
+                            } else {
+                                // Salva pedido no contexto para uso futuro
+                                context.order = output;
+                                
+                                // Formata a saída para melhor visualização
+                                const statusEmoji = {
+                                    pending: '⏳',
+                                    paid: '✅',
+                                    canceled: '❌',
+                                    refunded: '↩️'
+                                };
+
+                                const shippingEmoji = {
+                                    pending: '📦',
+                                    ready: '🚚',
+                                    shipped: '✈️',
+                                    delivered: '📬'
+                                };
+
+                                const paymentStatus = output.payment_status.toLowerCase();
+                                const shippingStatus = output.shipping_status.toLowerCase();
+
+                                output = {
+                                    success: true,
+                                    message: `🛍️ Detalhes do Pedido #${output.number}\n\n` +
+                                        `${statusEmoji[paymentStatus] || '❓'} Pagamento: ${output.payment_status}\n` +
+                                        `${shippingEmoji[shippingStatus] || '❓'} Envio: ${output.shipping_status}\n` +
+                                        (output.shipping_tracking_number ? 
+                                            `📌 Rastreio: ${output.shipping_tracking_number}\n` : '') +
+                                        `\n💰 Total: R$ ${(output.total/100).toFixed(2)}\n\n` +
+                                        `📝 Produtos:\n${output.products.map(p => 
+                                            `▫️ ${p.quantity}x ${p.name} - R$ ${p.price}`
+                                        ).join('\n')}`
+                                };
+                            }
+                        } catch (error) {
+                            logger.error('ErrorCheckingOrder', {
+                                error: error.message,
+                                orderNumber: parsedArgs.order_number
+                            });
+                            output = { 
+                                error: true, 
+                                message: 'Desculpe, ocorreu um erro ao consultar o pedido. Por favor, tente novamente em alguns instantes.' 
                             };
                         }
                         break;
 
                     case 'check_tracking':
-                        if (parsedArgs.tracking_code.includes('[código de rastreio')) {
-                            if (context.order?.shipping_tracking_number) {
-                                parsedArgs.tracking_code = context.order.shipping_tracking_number;
-                            } else {
-                                output = { error: true, message: 'Código de rastreio inválido' };
+                        try {
+                            // Se o código vier como placeholder e tivermos um pedido no contexto
+                            if (parsedArgs.tracking_code.includes('[código') || parsedArgs.tracking_code.includes('código]')) {
+                                if (context.order?.shipping_tracking_number) {
+                                    parsedArgs.tracking_code = context.order.shipping_tracking_number;
+                                } else {
+                                    output = { 
+                                        error: true, 
+                                        message: 'Não encontrei um código de rastreio válido. Por favor, forneça o código de rastreio do seu pedido.' 
+                                    };
+                                    break;
+                                }
+                            }
+                            
+                            // Limpa o código de rastreio
+                            const cleanTrackingCode = parsedArgs.tracking_code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+                            
+                            if (!cleanTrackingCode || cleanTrackingCode.length < 8) {
+                                output = { 
+                                    error: true, 
+                                    message: 'O código de rastreio fornecido parece ser inválido. Por favor, verifique e tente novamente.' 
+                                };
                                 break;
                             }
-                        }
-                        
-                        const cleanTrackingCode = parsedArgs.tracking_code.trim().replace(/[^a-zA-Z0-9]/g, '');
-                        
-                        try {
-                            const trackingInfo = await this.trackingService.getTrackingInfo(cleanTrackingCode, true);
+
+                            // Busca informações de rastreio
+                            const trackingInfo = await this.trackingService.getTrackingStatus(cleanTrackingCode);
                             
-                            const statusEmoji = this.trackingService.STATUS_EMOJIS[trackingInfo.status] || '📦';
-                            const formattedTracking = `📦 Status do Rastreamento ${statusEmoji}\n\n` +
-                                `🔍 Status: ${trackingInfo.status}\n` +
-                                `📝 Detalhes: ${trackingInfo.sub_status || 'N/A'}\n` +
-                                `📅 Última Atualização: ${trackingInfo.last_event?.time || 'N/A'}`;
+                            if (!trackingInfo) {
+                                output = { 
+                                    error: true, 
+                                    message: 'Não foi possível encontrar informações para este código de rastreio. Verifique se o código está correto ou tente novamente mais tarde.' 
+                                };
+                                break;
+                            }
+
+                            // Formata a data da última atualização
+                            const lastUpdate = trackingInfo.lastUpdate ? 
+                                moment(trackingInfo.lastUpdate).format('DD/MM/YYYY HH:mm') : 
+                                'Não disponível';
+
+                            // Pega o emoji apropriado para o status
+                            const statusEmoji = TrackingService.STATUS_EMOJIS[trackingInfo.status.toLowerCase()] || '📦';
                             
+                            // Monta a mensagem formatada
+                            const formattedMessage = [
+                                `📦 Rastreamento: ${cleanTrackingCode}`,
+                                '',
+                                `${statusEmoji} Status: ${trackingInfo.status}`,
+                                `📍 Local: ${trackingInfo.location || 'Não disponível'}`,
+                                `🕒 Última Atualização: ${lastUpdate}`,
+                                `📝 Descrição: ${trackingInfo.description || 'Sem descrição disponível'}`,
+                                '',
+                                '📋 Histórico:'
+                            ];
+
+                            // Adiciona histórico de eventos se disponível
+                            if (trackingInfo.events && trackingInfo.events.length > 0) {
+                                trackingInfo.events.slice(0, 3).forEach(event => {
+                                    const eventDate = moment(event.date).format('DD/MM/YYYY HH:mm');
+                                    formattedMessage.push(
+                                        `▫️ ${eventDate}`,
+                                        `  ${event.status}`,
+                                        `  📍 ${event.location}`,
+                                        ''
+                                    );
+                                });
+                            } else {
+                                formattedMessage.push('Nenhum histórico disponível');
+                            }
+
                             output = {
-                                ...trackingInfo,
+                                success: true,
                                 tracking_code: cleanTrackingCode,
-                                status_emoji: statusEmoji,
-                                formatted: formattedTracking,
-                                message: formattedTracking
+                                status: trackingInfo.status,
+                                last_update: lastUpdate,
+                                location: trackingInfo.location,
+                                events: trackingInfo.events,
+                                message: formattedMessage.join('\n')
                             };
                             
                         } catch (error) {
@@ -1149,85 +1233,462 @@ class OpenAIService {
                         break;
 
                     case 'get_business_hours':
-                        output = parsedArgs.type === 'full' ? 
-                            await this.businessHoursService.getAllHours() :
-                            await this.businessHoursService.getCurrentStatus();
+                        try {
+                            const businessHours = await this.businessHoursService.getBusinessHours();
+                            const isHoliday = await this.businessHoursService.isHoliday();
+                            
+                            // Monta a mensagem de status atual
+                            const statusMessage = businessHours.isOpen ? 
+                                '🟢 Estamos em horário de atendimento!' : 
+                                '🔴 Estamos fora do horário de atendimento.';
+
+                            // Monta a mensagem com os horários
+                            const scheduleLines = ['📅 Nossos horários de atendimento:'];
+                            
+                            for (const [day, hours] of Object.entries(businessHours.schedule)) {
+                                const emoji = hours === 'Fechado' ? '❌' : '✅';
+                                scheduleLines.push(`${emoji} ${day}: ${hours}`);
+                            }
+
+                            // Adiciona informação de feriado se for o caso
+                            const holidayMessage = isHoliday ? 
+                                '\n⚠️ Hoje é feriado, não teremos atendimento.' : '';
+
+                            // Monta a mensagem completa
+                            const message = [
+                                statusMessage,
+                                holidayMessage,
+                                '',
+                                ...scheduleLines,
+                                '',
+                                `⏰ Horário de Brasília (${businessHours.timezone})`
+                            ].join('\n');
+
+                            output = {
+                                success: true,
+                                isOpen: businessHours.isOpen,
+                                isHoliday,
+                                schedule: businessHours.schedule,
+                                timezone: businessHours.timezone,
+                                message
+                            };
+
+                        } catch (error) {
+                            logger.error('ErrorGettingBusinessHours', {
+                                error: error.message,
+                                stack: error.stack
+                            });
+                            output = {
+                                error: true,
+                                message: 'Desculpe, ocorreu um erro ao consultar nosso horário de atendimento. Por favor, tente novamente em alguns instantes.'
+                            };
+                        }
                         break;
 
                     case 'extract_order_number':
-                        const orderNumber = await this.orderValidationService.extractOrderNumber(
-                            parsedArgs.text,
-                            parsedArgs.strict || false
-                        );
-                        output = { order_number: orderNumber };
+                        try {
+                            const { text } = parsedArgs;
+                            if (!text) {
+                                output = {
+                                    error: true,
+                                    message: 'Por favor, forneça o texto para extrair o número do pedido.'
+                                };
+                                break;
+                            }
+
+                            // Tenta extrair o número do pedido usando o OrderValidationService
+                            const result = await this.orderValidationService.extractOrderNumber(text);
+                            
+                            if (result.error) {
+                                output = {
+                                    error: true,
+                                    message: result.error
+                                };
+                                break;
+                            }
+
+                            if (!result.orderNumber) {
+                                let message = 'Não consegui identificar um número de pedido válido no texto.';
+                                if (result.details?.suggestions?.length > 0) {
+                                    message += '\n\nVocê quis dizer um destes números?\n';
+                                    result.details.suggestions.forEach(suggestion => {
+                                        message += `- #${suggestion}\n`;
+                                    });
+                                } else {
+                                    message += '\n\nUm número de pedido válido deve ter pelo menos 4 dígitos.';
+                                }
+
+                                output = {
+                                    error: true,
+                                    message
+                                };
+                                break;
+                            }
+
+                            output = {
+                                success: true,
+                                orderNumber: result.orderNumber,
+                                isImage: result.isImage || false,
+                                details: result.details || null,
+                                message: `Número do pedido encontrado: #${result.orderNumber}`
+                            };
+
+                        } catch (error) {
+                            logger.error('ErrorExtractingOrderNumber', {
+                                error: error.message,
+                                stack: error.stack
+                            });
+                            output = {
+                                error: true,
+                                message: 'Desculpe, ocorreu um erro ao tentar extrair o número do pedido. Por favor, tente novamente.'
+                            };
+                        }
                         break;
 
                     case 'request_payment_proof':
-                        switch (parsedArgs.action) {
-                            case 'request':
-                                await this.redisStore.set(`openai:waiting_order:${threadId}`, 'payment_proof');
-                                await this.redisStore.set(`openai:pending_order:${threadId}`, parsedArgs.order_number);
-                                output = { status: 'waiting', message: 'Aguardando comprovante' };
-                                break;
-                            
-                            case 'validate':
-                                const orderStatus = await this.nuvemshopService.getOrderPaymentStatus(parsedArgs.order_number);
+                        try {
+                            const { orderNumber } = parsedArgs;
+                            if (!orderNumber) {
                                 output = {
-                                    valid: orderStatus === 'paid',
-                                    status: orderStatus,
-                                    message: orderStatus === 'paid' ? 
-                                        'Pagamento confirmado' : 
-                                        'Pagamento pendente'
+                                    error: true,
+                                    message: 'Por favor, forneça o número do pedido para solicitar o comprovante.'
                                 };
                                 break;
+                            }
 
-                            case 'cancel':
-                                await this.redisStore.del(`openai:waiting_order:${threadId}`);
-                                await this.redisStore.del(`openai:pending_order:${threadId}`);
-                                output = { status: 'cancelled', message: 'Solicitação cancelada' };
+                            // Busca o pedido na Nuvemshop
+                            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+                            if (!order) {
+                                output = {
+                                    error: true,
+                                    message: `Pedido #${orderNumber} não encontrado. Por favor, verifique o número e tente novamente.`
+                                };
                                 break;
+                            }
 
-                            default:
-                                throw new Error(`Ação inválida: ${parsedArgs.action}`);
+                            // Verifica status do pedido
+                            if (order.payment_status === 'paid') {
+                                output = {
+                                    error: true,
+                                    message: `O pedido #${orderNumber} já está marcado como pago. Não é necessário enviar comprovante.`
+                                };
+                                break;
+                            }
+
+                            if (order.status === 'cancelled') {
+                                output = {
+                                    error: true,
+                                    message: `O pedido #${orderNumber} está cancelado. Se deseja reativá-lo, por favor entre em contato com nosso suporte.`
+                                };
+                                break;
+                            }
+
+                            // Formata a mensagem de solicitação
+                            const paymentMethods = order.payment_details?.map(p => p.method)?.join(', ') || 'Pix';
+                            const totalAmount = new Intl.NumberFormat('pt-BR', { 
+                                style: 'currency', 
+                                currency: 'BRL' 
+                            }).format(order.total);
+
+                            const message = [
+                                `📝 Instruções para envio do comprovante do pedido #${orderNumber}:`,
+                                '',
+                                `💰 Valor total: ${totalAmount}`,
+                                `💳 Forma de pagamento: ${paymentMethods}`,
+                                '',
+                                '📱 Como enviar:',
+                                '1. Tire um print ou foto clara do comprovante',
+                                '2. Envie a imagem aqui mesmo neste chat',
+                                '',
+                                '⚠️ Importante:',
+                                '• A imagem deve mostrar claramente o valor e a data',
+                                '• O comprovante deve ser do valor total do pedido',
+                                '• Envie apenas uma imagem por vez',
+                                '',
+                                '✅ Assim que recebermos, nossa equipe irá analisar e confirmar o pagamento.'
+                            ].join('\n');
+
+                            output = {
+                                success: true,
+                                orderNumber,
+                                paymentMethods,
+                                totalAmount: order.total,
+                                message
+                            };
+
+                        } catch (error) {
+                            logger.error('ErrorRequestingPaymentProof', {
+                                error: error.message,
+                                stack: error.stack,
+                                orderNumber: parsedArgs.orderNumber
+                            });
+                            output = {
+                                error: true,
+                                message: 'Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente em alguns instantes.'
+                            };
                         }
                         break;
 
                     case 'forward_to_financial':
-                        const caseData = {
-                            reason: parsedArgs.reason,
-                            order_number: parsedArgs.order_number,
-                            tracking_code: parsedArgs.tracking_code,
-                            customer_message: parsedArgs.customer_message,
-                            priority: parsedArgs.priority || 'medium',
-                            additional_info: parsedArgs.additional_info
-                        };
-                        
-                        const success = await this.financialService.forwardCase(caseData);
-                        output = { 
-                            status: success ? 'forwarded' : 'error',
-                            message: success ? 'Caso encaminhado para análise' : 'Erro ao encaminhar caso',
-                            priority: caseData.priority
-                        };
+                        try {
+                            const { message: userMessage, userContact, priority, reason } = parsedArgs;
+                            
+                            // Validações básicas
+                            if (!userMessage) {
+                                output = {
+                                    error: true,
+                                    message: 'É necessário fornecer a mensagem para encaminhar ao financeiro.'
+                                };
+                                break;
+                            }
+
+                            if (!userContact) {
+                                output = {
+                                    error: true,
+                                    message: 'É necessário fornecer o contato do usuário.'
+                                };
+                                break;
+                            }
+
+                            // Normaliza a prioridade
+                            const normalizedPriority = priority?.toLowerCase() || 'normal';
+                            if (!['low', 'normal', 'high', 'urgent'].includes(normalizedPriority)) {
+                                output = {
+                                    error: true,
+                                    message: 'Prioridade inválida. Use: low, normal, high ou urgent.'
+                                };
+                                break;
+                            }
+
+                            // Normaliza o motivo
+                            const normalizedReason = reason?.toLowerCase() || 'general';
+                            const validReasons = [
+                                'payment_proof',
+                                'refund',
+                                'payment_issue',
+                                'invoice',
+                                'general'
+                            ];
+
+                            if (!validReasons.includes(normalizedReason)) {
+                                output = {
+                                    error: true,
+                                    message: `Motivo inválido. Use um dos seguintes: ${validReasons.join(', ')}`
+                                };
+                                break;
+                            }
+
+                            // Prepara os dados para encaminhamento
+                            const caseData = {
+                                timestamp: moment().format(),
+                                contact: {
+                                    phone: userContact,
+                                    type: 'whatsapp'
+                                },
+                                message: userMessage,
+                                priority: normalizedPriority,
+                                reason: normalizedReason,
+                                source: 'chatbot',
+                                withinBusinessHours: this.businessHoursService.isWithinBusinessHours(),
+                                metadata: {
+                                    threadId: threadId || null,
+                                    aiConfidence: parsedArgs.confidence || 1.0
+                                }
+                            };
+
+                            // Encaminha para o financeiro
+                            await this.financialService.forwardCase(caseData);
+
+                            // Prepara resposta para o usuário
+                            const responses = {
+                                payment_proof: '✅ Recebemos seu comprovante com sucesso! Nossa equipe financeira já foi notificada e irá analisar e confirmar o pagamento em breve.',
+                                refund: '✅ Entendi sua solicitação de reembolso. Nossa equipe financeira foi notificada e irá cuidar do seu caso com toda atenção que você merece.',
+                                payment_issue: '✅ Compreendo sua preocupação com o pagamento. Nossa equipe financeira especializada já foi notificada e irá analisar sua situação cuidadosamente.',
+                                invoice: '✅ Recebemos sua solicitação sobre a nota fiscal. Nossa equipe dedicada já foi notificada e irá providenciar a documentação necessária.',
+                                general: '✅ Sua mensagem foi recebida com sucesso! Nossa equipe financeira foi notificada e irá analisar sua solicitação com toda atenção necessária.'
+                            };
+
+                            // Adiciona tempo de resposta estimado baseado na prioridade
+                            const slaMessages = {
+                                urgent: 'Pode ficar tranquilo(a), sua solicitação receberá prioridade máxima de nossa equipe. 🚀',
+                                high: 'Sua solicitação será tratada com prioridade por nossa equipe especializada. ⭐',
+                                normal: 'Nossa equipe retornará o contato em até 24 horas úteis para te ajudar. 📅',
+                                low: 'Nossa equipe retornará o contato em até 48 horas úteis para auxiliar você. 📅'
+                            };
+
+                            const responseMessage = [
+                                responses[normalizedReason],
+                                '',
+                                slaMessages[normalizedPriority],
+                                '',
+                                '💫 Fique tranquilo(a)! Nossa equipe está comprometida em resolver sua solicitação da melhor forma possível.',
+                                '🤝 Estamos aqui para ajudar e garantir sua satisfação.'
+                            ].join('\n');
+
+                            output = {
+                                success: true,
+                                caseId: caseData.id,
+                                priority: normalizedPriority,
+                                reason: normalizedReason,
+                                message: responseMessage
+                            };
+
+                        } catch (error) {
+                            logger.error('ErrorForwardingToFinancial', {
+                                error: error.message,
+                                stack: error.stack,
+                                args: parsedArgs
+                            });
+                            output = {
+                                error: true,
+                                message: 'Desculpe, ocorreu um erro ao encaminhar sua mensagem. Por favor, tente novamente em alguns instantes.'
+                            };
+                        }
                         break;
 
                     case 'forward_to_department':
-                        const departmentData = {
-                            department: parsedArgs.department,
-                            reason: parsedArgs.reason,
-                            order_number: parsedArgs.order_number,
-                            tracking_code: parsedArgs.tracking_code,
-                            customer_message: parsedArgs.customer_message,
-                            priority: parsedArgs.priority || 'medium',
-                            additional_info: parsedArgs.additional_info
-                        };
-                        
-                        const deptSuccess = await this.departmentService.forwardCase(departmentData);
-                        output = { 
-                            status: deptSuccess ? 'forwarded' : 'error',
-                            message: deptSuccess ? 'Caso encaminhado para análise' : 'Erro ao encaminhar caso',
-                            priority: departmentData.priority,
-                            department: parsedArgs.department
-                        };
+                        try {
+                            const { 
+                                message: userMessage, 
+                                department, 
+                                userContact,
+                                priority,
+                                reason,
+                                orderNumber,
+                                trackingCode
+                            } = parsedArgs;
+                            
+                            // Validações básicas
+                            if (!userMessage) {
+                                output = {
+                                    error: true,
+                                    message: 'É necessário fornecer a mensagem para encaminhar ao departamento.'
+                                };
+                                break;
+                            }
+
+                            if (!department) {
+                                output = {
+                                    error: true,
+                                    message: 'É necessário especificar o departamento.'
+                                };
+                                break;
+                            }
+
+                            if (!userContact) {
+                                output = {
+                                    error: true,
+                                    message: 'É necessário fornecer o contato do usuário.'
+                                };
+                                break;
+                            }
+
+                            // Normaliza o departamento
+                            const validDepartments = [
+                                'support',
+                                'sales',
+                                'technical',
+                                'shipping',
+                                'quality'
+                            ];
+
+                            const normalizedDepartment = department.toLowerCase();
+                            if (!validDepartments.includes(normalizedDepartment)) {
+                                output = {
+                                    error: true,
+                                    message: `Departamento inválido. Use um dos seguintes: ${validDepartments.join(', ')}`
+                                };
+                                break;
+                            }
+
+                            // Normaliza a prioridade
+                            const normalizedPriority = priority?.toLowerCase() || 'normal';
+                            if (!['low', 'normal', 'high', 'urgent'].includes(normalizedPriority)) {
+                                output = {
+                                    error: true,
+                                    message: 'Prioridade inválida. Use: low, normal, high ou urgent.'
+                                };
+                                break;
+                            }
+
+                            // Prepara os dados para encaminhamento
+                            const caseData = {
+                                timestamp: moment().format(),
+                                department: normalizedDepartment,
+                                contact: {
+                                    phone: userContact,
+                                    type: 'whatsapp'
+                                },
+                                message: userMessage,
+                                priority: normalizedPriority,
+                                reason: reason || 'general',
+                                orderNumber,
+                                trackingCode,
+                                source: 'chatbot',
+                                withinBusinessHours: this.businessHoursService.isWithinBusinessHours(),
+                                metadata: {
+                                    threadId: threadId || null,
+                                    aiConfidence: parsedArgs.confidence || 1.0
+                                }
+                            };
+
+                            // Encaminha para o departamento
+                            await this.departmentService.forwardCase(caseData);
+
+                            // Prepara resposta para o usuário
+                            const departmentNames = {
+                                support: 'Suporte',
+                                sales: 'Vendas',
+                                technical: 'Técnico',
+                                shipping: 'Logística',
+                                quality: 'Qualidade'
+                            };
+
+                            const responses = {
+                                support: '✅ Recebemos sua solicitação! Nossa equipe de suporte foi notificada e está pronta para te ajudar da melhor forma possível.',
+                                sales: '✅ Ótimo! Nossa equipe de vendas foi notificada e irá te auxiliar com todas as informações necessárias.',
+                                technical: '✅ Entendi! Nossa equipe técnica especializada foi notificada e irá analisar sua solicitação com todo cuidado.',
+                                shipping: '✅ Recebemos seu contato! Nossa equipe de logística foi notificada e irá cuidar da sua solicitação com prioridade.',
+                                quality: '✅ Agradecemos seu contato! Nossa equipe de qualidade foi notificada e irá analisar sua solicitação detalhadamente.'
+                            };
+
+                            // Adiciona tempo de resposta estimado baseado na prioridade
+                            const slaMessages = {
+                                urgent: 'Pode ficar tranquilo(a), sua solicitação receberá prioridade máxima de nossa equipe. 🚀',
+                                high: 'Sua solicitação será tratada com prioridade por nossa equipe especializada. ⭐',
+                                normal: 'Nossa equipe retornará o contato em até 24 horas úteis para te ajudar. 📅',
+                                low: 'Nossa equipe retornará o contato em até 48 horas úteis para auxiliar você. 📅'
+                            };
+
+                            // Monta a mensagem completa
+                            const responseMessage = [
+                                responses[normalizedDepartment],
+                                '',
+                                slaMessages[normalizedPriority],
+                                '',
+                                '💫 Fique tranquilo(a)! Nossa equipe está comprometida em resolver sua solicitação da melhor forma possível.',
+                                '🤝 Estamos aqui para ajudar e garantir sua satisfação.'
+                            ].join('\n');
+
+                            output = {
+                                success: true,
+                                caseId: caseData.id,
+                                department: departmentNames[normalizedDepartment],
+                                priority: normalizedPriority,
+                                message: responseMessage
+                            };
+
+                        } catch (error) {
+                            logger.error('ErrorForwardingToDepartment', {
+                                error: error.message,
+                                stack: error.stack,
+                                args: parsedArgs
+                            });
+                            output = {
+                                error: true,
+                                message: 'Desculpe, ocorreu um erro ao encaminhar sua mensagem. Por favor, tente novamente em alguns instantes.'
+                            };
+                        }
                         break;
 
                     default:

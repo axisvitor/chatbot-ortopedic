@@ -4,6 +4,42 @@ const { CacheService } = require('./cache-service');
 const { TRACKING_CONFIG } = require('../../config/settings');
 
 class TrackingService {
+    // Status emojis para cada estado do rastreamento
+    static STATUS_EMOJIS = {
+        'pending': '⏳',
+        'in_transit': '🚚',
+        'out_for_delivery': '🚗',
+        'delivered': '✅',
+        'returned': '↩️',
+        'expired': '⚠️',
+        'exception': '❌',
+        'unknown': '❓'
+    };
+
+    // Mapeamento de status do 17track para nossos status padronizados
+    static STATUS_MAPPING = {
+        // Status pendente
+        'pending': ['pending', 'info_received', 'not_found'],
+        
+        // Em trânsito
+        'in_transit': ['in_transit', 'transit', 'pick_up', 'pickup', 'accepted'],
+        
+        // Saiu para entrega
+        'out_for_delivery': ['out_for_delivery', 'delivery', 'delivering'],
+        
+        // Entregue
+        'delivered': ['delivered', 'complete', 'completed'],
+        
+        // Retornado
+        'returned': ['returned', 'return', 'returning'],
+        
+        // Expirado
+        'expired': ['expired', 'timeout'],
+        
+        // Exceção
+        'exception': ['exception', 'failed', 'failure']
+    };
+
     constructor() {
         this.config = TRACKING_CONFIG;
         this.cache = new CacheService();
@@ -48,27 +84,47 @@ class TrackingService {
                 throw new Error('Dados de rastreamento não encontrados ou inválidos');
             }
 
+            // Mapeia o status para nosso padrão
+            const rawStatus = (trackInfo.latest_status?.status || 'unknown').toLowerCase();
+            let normalizedStatus = 'unknown';
+
+            // Encontra o status normalizado
+            for (const [status, patterns] of Object.entries(TrackingService.STATUS_MAPPING)) {
+                if (patterns.some(pattern => rawStatus.includes(pattern))) {
+                    normalizedStatus = status;
+                    break;
+                }
+            }
+
             const result = {
-                status: trackInfo.latest_status?.status || 'Unknown',
+                status: normalizedStatus,
+                rawStatus: trackInfo.latest_status?.status || 'Unknown',
                 lastUpdate: trackInfo.latest_event?.time_iso,
                 location: trackInfo.latest_event?.location,
                 description: trackInfo.latest_event?.description,
+                origin: trackInfo.origin_info?.country || 'BR',
+                destination: trackInfo.destination_info?.country || 'BR',
+                estimatedDelivery: trackInfo.latest_status?.delivery_time,
                 events: trackInfo.tracking?.providers?.[0]?.events?.map(event => ({
                     date: event.time_iso,
                     status: event.description,
-                    location: `${event.address?.city || ''}, ${event.location}`.trim(),
+                    location: event.location ? 
+                        `${event.address?.city ? event.address.city + ', ' : ''}${event.location}`.trim() : 
+                        'Local não informado',
+                    statusCode: event.status_code
                 })) || []
             };
 
-            // Salva no cache
-            await this.cache.set(`tracking:${trackingNumber}`, result, 3600); // 1 hora
+            // Salva no cache por 30 minutos
+            await this.cache.set(`tracking:${trackingNumber}`, result, 1800);
             
             return result;
             
         } catch (error) {
             logger.error(`[Tracking] Erro ao consultar status:`, {
                 trackingNumber,
-                error: error.message
+                error: error.message,
+                stack: error.stack
             });
             throw error;
         }

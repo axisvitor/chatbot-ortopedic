@@ -126,6 +126,78 @@ class NuvemshopService {
             throw error;
         }
     }
+
+    /**
+     * Busca um pedido pelo número
+     * @param {string} orderNumber - Número do pedido (ex: #123456)
+     * @returns {Promise<Object|null>} Dados do pedido ou null se não encontrado
+     */
+    async getOrderByNumber(orderNumber) {
+        try {
+            // Remove # se presente
+            const number = orderNumber.replace('#', '');
+
+            logger.info('BuscandoPedido', {
+                orderNumber: number,
+                timestamp: new Date().toISOString()
+            });
+
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: {
+                    q: number,
+                    fields: [
+                        'id',
+                        'number',
+                        'status',
+                        'payment_status',
+                        'shipping_status',
+                        'shipping_tracking_number',
+                        'shipping_tracking_url',
+                        'total',
+                        'products',
+                        'customer',
+                        'created_at',
+                        'updated_at'
+                    ].join(',')
+                }
+            });
+
+            const orders = response.data;
+            const order = orders.find(o => o.number === number);
+
+            if (!order) {
+                logger.info('PedidoNaoEncontrado', {
+                    orderNumber: number,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
+
+            // Formata produtos para melhor visualização
+            order.products = order.products.map(p => ({
+                name: p.name,
+                quantity: p.quantity,
+                price: (p.price / 100).toFixed(2) // Converte centavos para reais
+            }));
+
+            logger.info('PedidoEncontrado', {
+                orderId: order.id,
+                orderNumber: number,
+                timestamp: new Date().toISOString()
+            });
+
+            return order;
+
+        } catch (error) {
+            logger.error('ErroBuscarPedido', {
+                orderNumber,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
 }
 
 module.exports = { NuvemshopService };

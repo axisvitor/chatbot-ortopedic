@@ -756,7 +756,7 @@ class OrderValidationService {
                 expected: order.customer.name,
                 found: proofAnalysis.customer,
                 similarity,
-                matches: similarity >= 0.8 // 80% de similaridade
+                matches: similarity >= 0.5 // 50% de similaridade
             };
 
             if (!result.details.customer.matches) {
