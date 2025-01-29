@@ -1,6 +1,6 @@
 const cron = require('node-cron');
 const { logger } = require('./utils/logger');
-const NuvemshopService = require('./services/nuvemshop-service');
+const NuvemshopService = require('../services/nuvemshop');
 const TrackingService = require('./services/tracking-service');
 
 class TrackingSystem {

@@ -7,7 +7,7 @@ const { OPENAI_CONFIG } = require('../config/settings');
 const { TrackingService } = require('./tracking-service');
 const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
-const { NuvemshopService } = require('./nuvemshop-service');
+const { NuvemshopService } = require('./nuvemshop');
 const { FinancialService } = require('./financial-service');
 const { DepartmentService } = require('./department-service');
 

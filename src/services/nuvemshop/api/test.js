@@ -1,6 +1,7 @@
 const { OrderApi } = require('./order');
+const { ProductApi } = require('./product');
+const { NuvemshopService } = require('..');
 const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
-const { NuvemshopService } = require('../../nuvemshop-service');
 
 async function testOrderSearch() {
     try {
