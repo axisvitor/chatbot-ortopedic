@@ -1,5 +1,14 @@
 require('dotenv').config();
-const { NUVEMSHOP_CONFIG } = {
+
+function validateEnvVar(name) {
+    if (!process.env[name]) {
+        throw new Error(`Environment variable ${name} is required`);
+    }
+    return process.env[name];
+}
+
+// Nuvemshop Configuration
+const NUVEMSHOP_CONFIG = {
     // Configurações da API
     apiUrl: process.env.NUVEMSHOP_API_URL || 'https://api.nuvemshop.com.br/v1',
     accessToken: process.env.NUVEMSHOP_ACCESS_TOKEN,
@@ -84,13 +93,6 @@ const { NUVEMSHOP_CONFIG } = {
         maxRequestsPerWindow: 100
     }
 };
-
-function validateEnvVar(name) {
-    if (!process.env[name]) {
-        throw new Error(`Environment variable ${name} is required`);
-    }
-    return process.env[name];
-}
 
 // OpenAI Configuration
 const OPENAI_CONFIG = {
