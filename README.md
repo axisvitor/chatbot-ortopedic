@@ -1,109 +1,109 @@
-# Chatbot Ortopédico
+# Chatbot Ortopédico 🤖
 
-Chatbot inteligente para atendimento de clientes de loja de calçados ortopédicos.
+Sistema de atendimento automatizado via WhatsApp para e-commerce ortopédico, utilizando GPT-4 para processamento de linguagem natural.
 
-## Estrutura do Projeto
+## 🌟 Principais Funcionalidades
 
+### Atendimento ao Cliente
+
+- Processamento de mensagens em texto, áudio e imagens
+- Respostas contextualizadas e personalizadas
+- Manutenção de histórico de conversas
+- Encaminhamento inteligente para departamentos
+
+### Rastreamento de Pedidos 📦
+
+- Consulta automática de status em múltiplas transportadoras
+- Notificações proativas de atualizações
+- Tratamento especial para pedidos taxados
+- Alertas automáticos sobre atrasos
+
+### Processamento de Pagamentos 💳
+
+- Análise automática de comprovantes via OCR
+- Confirmação instantânea de recebimento
+- Integração com setor financeiro
+- Histórico de transações
+
+## 🛠️ Tecnologias
+
+- **Backend**: Node.js
+- **IA**: OpenAI GPT-4
+- **Banco de Dados**: Redis
+- **Mensageria**: WhatsApp Business API
+- **E-commerce**: Nuvemshop API
+- **Rastreamento**: APIs de múltiplas transportadoras
+
+## 📦 Instalação
+
+1. Clone o repositório:
+```bash
+git clone https://github.com/axisvitor/chatbot-ortopedic.git
+cd chatbot-ortopedic
 ```
-src/
-├── config/
-│   └── settings.js          # Configurações do projeto
-├── services/
-│   ├── ai-services.js       # Serviços de IA (OpenAI)
-│   ├── audio-service.js     # Processamento de áudio
-│   ├── business-hours.js    # Controle de horário comercial
-│   ├── groq-services.js     # Serviços Groq (áudio e imagem)
-│   ├── image-service.js     # Processamento de imagens
-│   ├── nuvemshop-service.js # Integração com Nuvemshop
-│   ├── redis-store.js       # Cache Redis e histórico
-│   ├── tracking.js          # Serviço de rastreamento
-│   ├── webhook-service.js   # Processamento de webhooks
-│   └── whatsapp.js         # Serviço do WhatsApp
-├── utils/
-│   └── image-validator.js   # Validação de imagens
-└── server.js               # Servidor principal
-```
 
-## Configuração
-
-1. Clone o repositório
 2. Instale as dependências:
-   ```bash
-   npm install
-   ```
-3. Configure as variáveis de ambiente no arquivo `.env`:
-   ```env
-   # OpenAI
-   OPENAI_API_KEY=sua_chave
-   ASSISTANT_ID=seu_assistant_id
+```bash
+npm install
+```
 
-   # Groq
-   GROQ_API_KEY=sua_chave
+3. Configure as variáveis de ambiente:
+```bash
+cp .env.example .env
+# Edite o arquivo .env com suas configurações
+```
 
-   # Redis
-   REDIS_HOST=seu_host
-   REDIS_PORT=sua_porta
-   REDIS_PASSWORD=sua_senha
-
-   # WhatsApp
-   WAPI_URL=sua_url
-   WAPI_TOKEN=seu_token
-   WAPI_CONNECTION_KEY=sua_chave
-
-   # Nuvemshop
-   NUVEMSHOP_ACCESS_TOKEN=seu_token
-   NUVEMSHOP_API_URL=sua_url
-   NUVEMSHOP_STORE_ID=seu_id
-
-   # Outros
-   NODE_ENV=production
-   PORT=8080
-   FINANCIAL_DEPT_NUMBER=numero_whatsapp
-   ```
-
-## Uso
-
-Para iniciar o servidor:
-
+4. Inicie o servidor:
 ```bash
 npm start
 ```
 
-O servidor estará rodando na porta especificada no .env (padrão: 8080).
+## 🚀 Deploy no Railway
 
-## Endpoints
+1. Fork este repositório no GitHub
 
-- `GET /` - Healthcheck
-- `POST /webhook/msg_recebidas_ou_enviadas` - Webhook principal para mensagens do WhatsApp
+2. Crie uma nova conta no [Railway](https://railway.app/) se ainda não tiver
 
-## Recursos
+3. No Railway, crie um novo projeto a partir do GitHub:
+   - Clique em "New Project"
+   - Selecione "Deploy from GitHub repo"
+   - Escolha o repositório forkado
 
-### Processamento de Mensagens
-- ✅ Texto: Processado pelo OpenAI Assistant
-- ✅ Áudio: Transcrito pelo Groq Whisper e processado pelo Assistant
-- ✅ Imagens: Analisadas pelo Groq Vision e processadas pelo Assistant
+4. Configure as variáveis de ambiente:
+   - Vá em "Variables"
+   - Adicione todas as variáveis listadas no `.env.example`
 
-### Integração com E-commerce
-- ✅ Consulta de produtos
-- ✅ Verificação de estoque
-- ✅ Consulta de pedidos
-- ✅ Validação segura de identidade
+5. O deploy será iniciado automaticamente
+   - O Railway usará o Dockerfile para build
+   - A aplicação será iniciada com `npm start`
+   - Healthcheck configurado em `/health`
 
-### Armazenamento e Cache
-- ✅ Cache de contexto
-- ✅ Histórico de conversas (60 dias)
-- ✅ Validação de identidade
+6. Monitore os logs e métricas no dashboard do Railway
 
-### Validações
-- ✅ Formato e tamanho de arquivos
-- ✅ Horário comercial
-- ✅ Segurança de dados
+## 📚 Documentação
 
-### Logs e Monitoramento
-- ✅ Logs detalhados de cada etapa
-- ✅ Tratamento de erros específicos
-- ✅ Métricas de uso
+- [Arquitetura](./docs/architecture.md)
+- [Instalação](./docs/installation.md)
+- [Funções do Assistant](./docs/functions.md)
+- [Serviços](./docs/services.md)
+- [Integrações](./docs/integrations.md)
+- [Armazenamento](./docs/storage.md)
+- [Deploy](./docs/deployment.md)
+- [Contribuindo](./docs/contributing.md)
+- [Segurança](./docs/security.md)
 
-## Licença
+## 🔒 Segurança
 
-Este projeto está licenciado sob a MIT License.
+- Criptografia de ponta a ponta
+- Conformidade com LGPD
+- Validação de entrada de dados
+- Proteção contra injeção
+- Logs seguros
+
+## 📝 Licença
+
+Este projeto é privado e proprietário. Todos os direitos reservados.
+
+## 👥 Suporte
+
+Para suporte, entre em contato através do WhatsApp: (77) 98167-8577

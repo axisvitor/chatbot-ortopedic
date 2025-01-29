@@ -25,6 +25,7 @@ timeout = "30s"
 retries = 5
 start_period = "120s"
 
+# Variáveis de ambiente obrigatórias
 [[services.environment]]
 key = "NODE_ENV"
 value = "production"
@@ -32,3 +33,25 @@ value = "production"
 [[services.environment]]
 key = "TZ"
 value = "America/Sao_Paulo"
+
+# Redis
+[[services.environment]]
+key = "REDIS_HOST"
+value = "${{REDIS.HOST}}"
+
+[[services.environment]]
+key = "REDIS_PORT"
+value = "${{REDIS.PORT}}"
+
+[[services.environment]]
+key = "REDIS_PASSWORD"
+value = "${{REDIS.PASSWORD}}"
+
+# Volumes para armazenamento persistente
+[[services.volumes]]
+path = "/app/logs"
+mount_path = "/data/logs"
+
+[[services.volumes]]
+path = "/app/temp"
+mount_path = "/data/temp"
