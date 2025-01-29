@@ -1,5 +1,5 @@
 const { RedisStore } = require('../store/redis-store');
-const { WHATSAPP_CONFIG } = require('../config/settings');
+const { WHATSAPP_CONFIG, REDIS_CONFIG } = require('../config/settings');
 
 class DepartmentService {
     constructor(whatsAppService = null) {
@@ -13,6 +13,22 @@ class DepartmentService {
      */
     get _whatsAppService() {
         return this.whatsAppService;
+    }
+
+    /**
+     * Gera uma chave única para o caso
+     * @private
+     */
+    _getCaseKey(caseId) {
+        return `${REDIS_CONFIG.prefix.ecommerce}department:case:${caseId}`;
+    }
+
+    /**
+     * Gera uma chave única para a fila do departamento
+     * @private
+     */
+    _getQueueKey(department) {
+        return `${REDIS_CONFIG.prefix.ecommerce}department:${department}:queue`;
     }
 
     /**
@@ -48,84 +64,156 @@ class DepartmentService {
 
             // Gera ID único para o caso
             const caseId = `${data.department.toUpperCase()}${Date.now()}`;
-            const caseKey = `department_case:${caseId}`;
+            const caseKey = this._getCaseKey(caseId);
+            const queueKey = this._getQueueKey(data.department);
 
-            // Traduz o departamento para português
-            const departmentMap = {
-                support: 'Suporte',
-                technical: 'Técnico',
-                logistics: 'Logística',
-                commercial: 'Comercial'
+            // Prepara dados do caso
+            const caseData = {
+                id: caseId,
+                ...data,
+                status: 'pending',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
             };
-
-            // Traduz a prioridade para português
-            const priorityMap = {
-                low: '🟢 Baixa',
-                medium: '🟡 Média',
-                high: '🟠 Alta',
-                urgent: '🔴 Urgente'
-            };
-
-            // Monta mensagem para o departamento
-            const message = `*📋 Novo Caso - ${caseId}*\n\n` +
-                          `*Departamento:* ${departmentMap[data.department]}\n` +
-                          `*Prioridade:* ${priorityMap[data.priority] || '🟡 Média'}\n` +
-                          `*Motivo:* ${data.reason}\n` +
-                          (data.order_number ? `*Pedido:* #${data.order_number}\n` : '') +
-                          (data.tracking_code ? `*Rastreio:* ${data.tracking_code}\n` : '') +
-                          `\n*📱 Mensagem do Cliente:*\n${data.customer_message.replace(/(\r\n|\n|\r)/gm, '\n')}\n` +
-                          (data.additional_info ? `\n*ℹ️ Informações Adicionais:*\n${data.additional_info}` : '');
 
             // Salva caso no Redis
-            const caseData = {
-                ...data,
-                id: caseId,
-                created_at: new Date().toISOString(),
-                status: 'pending'
-            };
-            
-            await this.redisStore.set(caseKey, JSON.stringify(caseData));
+            await this.redisStore.set(caseKey, JSON.stringify(caseData), REDIS_CONFIG.ttl.ecommerce.cases);
 
-            // Envia notificação via WhatsApp
-            const whatsapp = this._whatsAppService;
-            if (!whatsapp) {
-                throw new Error('WhatsApp service não configurado');
+            // Adiciona à fila do departamento
+            await this.redisStore.rpush(queueKey, caseId);
+
+            // Notifica departamento via WhatsApp
+            if (this._whatsAppService && WHATSAPP_CONFIG.notifications[data.department]) {
+                await this._notifyDepartment(caseData);
             }
-
-            await whatsapp.forwardToDepartment({ 
-                body: message,
-                from: 'SISTEMA',
-                department: data.department
-            }, data.order_number);
-
-            console.log('✅ Caso encaminhado ao departamento:', {
-                id: caseId,
-                department: data.department,
-                reason: data.reason,
-                order: data.order_number,
-                priority: data.priority,
-                timestamp: new Date().toISOString()
-            });
 
             return true;
         } catch (error) {
-            console.error('❌ Erro ao encaminhar caso:', {
-                department: data.department,
-                dados: data,
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
+            console.error('[Department] Erro ao encaminhar caso:', error);
             return false;
         }
     }
 
     /**
-     * Define o serviço WhatsApp após inicialização
-     * @param {Object} whatsappService - Serviço de WhatsApp
+     * Obtém casos pendentes de um departamento
+     * @param {string} department Nome do departamento
+     * @returns {Promise<Array>} Lista de casos
      */
-    setWhatsAppService(whatsappService) {
-        this.whatsAppService = whatsappService;
+    async getPendingCases(department) {
+        try {
+            const queueKey = this._getQueueKey(department);
+            const caseIds = await this.redisStore.lrange(queueKey, 0, -1);
+            
+            if (!caseIds.length) return [];
+
+            const cases = await Promise.all(
+                caseIds.map(async (caseId) => {
+                    const caseKey = this._getCaseKey(caseId);
+                    const caseData = await this.redisStore.get(caseKey);
+                    return caseData ? JSON.parse(caseData) : null;
+                })
+            );
+
+            return cases.filter(Boolean);
+        } catch (error) {
+            console.error('[Department] Erro ao obter casos pendentes:', error);
+            return [];
+        }
+    }
+
+    /**
+     * Atualiza status de um caso
+     * @param {string} caseId ID do caso
+     * @param {string} status Novo status
+     * @param {string} resolution Resolução do caso
+     * @returns {Promise<boolean>} Sucesso da atualização
+     */
+    async updateCaseStatus(caseId, status, resolution = '') {
+        try {
+            const caseKey = this._getCaseKey(caseId);
+
+            // Obtém dados atuais do caso
+            const caseData = await this.redisStore.get(caseKey);
+            if (!caseData) {
+                throw new Error('Caso não encontrado');
+            }
+
+            const parsedCase = JSON.parse(caseData);
+            const queueKey = this._getQueueKey(parsedCase.department);
+
+            // Atualiza dados
+            const updatedCase = {
+                ...parsedCase,
+                status,
+                resolution,
+                updated_at: new Date().toISOString()
+            };
+
+            // Salva atualização
+            await this.redisStore.set(caseKey, JSON.stringify(updatedCase), REDIS_CONFIG.ttl.ecommerce.cases);
+
+            // Remove da fila se resolvido
+            if (status === 'resolved') {
+                await this.redisStore.lrem(queueKey, 0, caseId);
+            }
+
+            return true;
+        } catch (error) {
+            console.error('[Department] Erro ao atualizar caso:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Notifica departamento via WhatsApp
+     * @private
+     */
+    async _notifyDepartment(caseData) {
+        try {
+            if (!this._whatsAppService) return;
+
+            const message = this._formatNotificationMessage(caseData);
+            const departmentConfig = WHATSAPP_CONFIG.notifications[caseData.department];
+            
+            if (departmentConfig && departmentConfig.number) {
+                await this._whatsAppService.sendMessage(
+                    departmentConfig.number,
+                    message
+                );
+            }
+        } catch (error) {
+            console.error('[Department] Erro ao notificar departamento:', error);
+        }
+    }
+
+    /**
+     * Formata mensagem de notificação
+     * @private
+     */
+    _formatNotificationMessage(caseData) {
+        const priority = caseData.priority || 'normal';
+        const priorityEmoji = {
+            urgent: '⚡',
+            high: '🔴',
+            medium: '🟡',
+            low: '🟢'
+        }[priority];
+
+        const departmentName = {
+            support: 'Suporte',
+            technical: 'Técnico',
+            logistics: 'Logística',
+            commercial: 'Comercial'
+        }[caseData.department];
+
+        return `*Novo Caso - ${departmentName}* ${priorityEmoji}\n\n` +
+            `*ID:* ${caseData.id}\n` +
+            `*Motivo:* ${caseData.reason}\n` +
+            `*Pedido:* ${caseData.order_number || 'N/A'}\n` +
+            `*Rastreio:* ${caseData.tracking_code || 'N/A'}\n` +
+            `*Mensagem:* ${caseData.customer_message}\n` +
+            (caseData.additional_info ? `*Info Adicional:* ${caseData.additional_info}\n` : '') +
+            `\nPrioridade: ${priority.toUpperCase()}`;
     }
 }
 

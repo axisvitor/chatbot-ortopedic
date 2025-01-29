@@ -1,10 +1,13 @@
-const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
+const { NUVEMSHOP_CONFIG, REDIS_CONFIG } = require('../../../config/settings');
 const logger = require('../../../utils/logger');
 
 class NuvemshopCache {
     constructor(cacheService) {
         this.cacheService = cacheService;
-        this.config = NUVEMSHOP_CONFIG.cache;
+        this.config = {
+            ttl: REDIS_CONFIG.ttl.ecommerce,
+            prefix: REDIS_CONFIG.prefix.ecommerce
+        };
     }
 
     /**
@@ -30,12 +33,12 @@ class NuvemshopCache {
      * @param {number} ttl - Tempo de vida do cache em segundos
      * @returns {Promise<any>} Dados do cache ou da API
      */
-    async getCachedData(cacheKey, fetchFunction, ttl) {
+    async getCachedData(cacheKey, fetchFunction, ttl = this.config.ttl) {
         try {
             // Tenta obter do cache
             const cachedData = await this.cacheService.get(cacheKey);
             if (cachedData) {
-                logger.debug('CacheHit', {
+                logger.debug('[Nuvemshop] Cache hit', {
                     key: cacheKey,
                     timestamp: new Date().toISOString()
                 });
@@ -43,24 +46,22 @@ class NuvemshopCache {
             }
 
             // Se não estiver no cache, busca da API
-            logger.debug('CacheMiss', {
+            logger.debug('[Nuvemshop] Cache miss', {
                 key: cacheKey,
                 timestamp: new Date().toISOString()
             });
             const data = await fetchFunction();
             
-            // Armazena no cache
-            await this.cacheService.set(cacheKey, JSON.stringify(data), ttl);
-            
+            // Salva no cache
+            if (data) {
+                await this.cacheService.set(cacheKey, JSON.stringify(data), ttl);
+                logger.debug('[Nuvemshop] Dados salvos em cache', { key: cacheKey });
+            }
+
             return data;
         } catch (error) {
-            logger.error('ErroCacheData', {
-                erro: error.message,
-                stack: error.stack,
-                cacheKey: cacheKey,
-                timestamp: new Date().toISOString()
-            });
-            throw error;
+            logger.error('[Nuvemshop] Erro ao obter dados do cache:', error);
+            return null;
         }
     }
 
@@ -75,19 +76,13 @@ class NuvemshopCache {
             
             if (keys.length > 0) {
                 await Promise.all(keys.map(key => this.cacheService.del(key)));
-                logger.info('CacheInvalidado', {
+                logger.info('[Nuvemshop] Cache invalidado', { 
                     prefix,
-                    keysRemovidas: keys.length,
-                    timestamp: new Date().toISOString()
+                    keysRemoved: keys.length 
                 });
             }
         } catch (error) {
-            logger.error('ErroInvalidarCache', {
-                erro: error.message,
-                stack: error.stack,
-                prefix: prefix,
-                timestamp: new Date().toISOString()
-            });
+            logger.error('[Nuvemshop] Erro ao invalidar cache:', error);
         }
     }
 
@@ -100,31 +95,16 @@ class NuvemshopCache {
     async mget(type, ids) {
         try {
             const keys = ids.map(id => this.generateCacheKey(type, id));
-            const results = await this.cacheService.mget(keys);
-
-            const items = {};
-            results.forEach((result, index) => {
+            const results = await Promise.all(keys.map(key => this.cacheService.get(key)));
+            
+            return results.reduce((acc, result, index) => {
                 if (result) {
-                    items[ids[index]] = JSON.parse(result);
+                    acc[ids[index]] = JSON.parse(result);
                 }
-            });
-
-            logger.debug('CacheMultiGet', {
-                type,
-                requested: ids.length,
-                found: Object.keys(items).length,
-                timestamp: new Date().toISOString()
-            });
-
-            return items;
+                return acc;
+            }, {});
         } catch (error) {
-            logger.error('ErroCacheMultiGet', {
-                type,
-                ids,
-                error: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
+            logger.error('[Nuvemshop] Erro ao obter múltiplos itens:', error);
             return {};
         }
     }
@@ -137,7 +117,7 @@ class NuvemshopCache {
      */
     async mset(type, items) {
         try {
-            const ttl = this.config.ttl[type] || 300;
+            const ttl = this.config.ttl;
             const operations = [];
 
             for (const [id, data] of Object.entries(items)) {
@@ -147,7 +127,7 @@ class NuvemshopCache {
 
             await this.cacheService.multi(operations).exec();
 
-            logger.debug('CacheMultiSet', {
+            logger.debug('[Nuvemshop] CacheMultiSet', {
                 type,
                 itemCount: Object.keys(items).length,
                 ttl,
@@ -156,7 +136,7 @@ class NuvemshopCache {
 
             return true;
         } catch (error) {
-            logger.error('ErroCacheMultiSet', {
+            logger.error('[Nuvemshop] ErroCacheMultiSet', {
                 type,
                 error: error.message,
                 stack: error.stack,

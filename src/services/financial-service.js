@@ -1,5 +1,5 @@
 const { RedisStore } = require('../store/redis-store');
-const { FINANCIAL_CONFIG } = require('../config/settings');
+const { FINANCIAL_CONFIG, REDIS_CONFIG } = require('../config/settings');
 const { WHATSAPP_CONFIG } = require('../config/settings');
 
 class FinancialService {
@@ -14,6 +14,22 @@ class FinancialService {
      */
     get _whatsAppService() {
         return this.whatsAppService;
+    }
+
+    /**
+     * Gera uma chave única para o caso financeiro
+     * @private
+     */
+    _getCaseKey(caseId) {
+        return `${REDIS_CONFIG.prefix.ecommerce}financial:case:${caseId}`;
+    }
+
+    /**
+     * Gera uma chave única para a fila de casos
+     * @private
+     */
+    _getQueueKey() {
+        return `${REDIS_CONFIG.prefix.ecommerce}financial:queue`;
     }
 
     /**
@@ -48,216 +64,141 @@ class FinancialService {
 
             // Gera ID único para o caso
             const caseId = `FIN${Date.now()}`;
-            const caseKey = `financial_case:${caseId}`;
+            const caseKey = this._getCaseKey(caseId);
+            const queueKey = this._getQueueKey();
 
-            // Traduz o motivo para português
-            const reasonMap = {
-                payment: 'Problema de Pagamento',
-                refund: 'Solicitação de Reembolso',
-                taxation: 'Taxação/Tributos',
-                customs: 'Retenção na Alfândega',
-                payment_proof: 'Comprovante de Pagamento',
-                other: 'Outro Motivo'
+            // Prepara dados do caso
+            const caseData = {
+                id: caseId,
+                ...data,
+                status: 'pending',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
             };
-
-            // Traduz a prioridade para português
-            const priorityMap = {
-                low: '🟢 Baixa',
-                medium: '🟡 Média',
-                high: '🟠 Alta'
-            };
-
-            // Monta mensagem para o financeiro
-            const message = `*📋 Novo Caso Financeiro - ${caseId}*\n\n` +
-                          `*Prioridade:* ${priorityMap[data.priority] || '🟡 Média'}\n` +
-                          `*Motivo:* ${reasonMap[data.reason] || data.reason}\n` +
-                          (data.order_number ? `*Pedido:* #${data.order_number}\n` : '') +
-                          (data.tracking_code ? `*Rastreio:* ${data.tracking_code}\n` : '') +
-                          `\n*📱 Mensagem do Cliente:*\n${data.customer_message}\n` +
-                          (data.additional_info ? `\n*ℹ️ Informações Adicionais:*\n${data.additional_info}` : '');
 
             // Salva caso no Redis
-            const caseData = {
-                ...data,
-                id: caseId,
-                created_at: new Date().toISOString(),
-                status: 'pending'
-            };
-            
-            await this.redisStore.set(caseKey, JSON.stringify(caseData));
+            await this.redisStore.set(caseKey, JSON.stringify(caseData), REDIS_CONFIG.ttl.ecommerce.cases);
 
-            // Envia notificação via WhatsApp
-            const whatsapp = this._whatsAppService;
-            await whatsapp.forwardToFinancial({ 
-                body: message,
-                from: 'SISTEMA'
-            }, data.order_number);
+            // Adiciona à fila de casos
+            await this.redisStore.rpush(queueKey, caseId);
 
-            console.log('✅ Caso encaminhado ao financeiro:', {
-                id: caseId,
-                reason: data.reason,
-                order: data.order_number,
-                priority: data.priority,
-                timestamp: new Date().toISOString()
-            });
+            // Notifica equipe financeira via WhatsApp
+            if (this._whatsAppService && WHATSAPP_CONFIG.notifications.financial) {
+                await this._notifyFinancialTeam(caseData);
+            }
 
             return true;
         } catch (error) {
-            console.error('❌ Erro ao encaminhar caso:', {
-                dados: data,
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
+            console.error('[Financial] Erro ao encaminhar caso:', error);
             return false;
         }
     }
 
     /**
-     * Cria um caso para análise de outro departamento
-     * @param {Object} data Dados do caso
-     * @param {string} data.department Departamento destino
-     * @param {string} data.order_number Número do pedido (opcional)
-     * @param {string} data.reason Motivo do encaminhamento
-     * @param {string} data.priority Prioridade do caso
-     * @param {string} data.details Detalhes adicionais
-     * @returns {Promise<boolean>} Sucesso da criação
+     * Obtém casos pendentes
+     * @returns {Promise<Array>} Lista de casos
      */
-    async createCase(data) {
+    async getPendingCases() {
         try {
-            // Valida dados obrigatórios
-            if (!data.department || !data.reason) {
-                throw new Error('Departamento e motivo são obrigatórios');
-            }
-
-            // Gera ID único para o caso
-            const caseId = `CASE${Date.now()}`;
-            const caseKey = `department_case:${caseId}`;
-
-            // Traduz o departamento para português
-            const departmentMap = {
-                support: 'Suporte',
-                technical: 'Técnico',
-                logistics: 'Logística',
-                commercial: 'Comercial'
-            };
-
-            // Traduz a prioridade para português
-            const priorityMap = {
-                urgent: '🔴 Urgente',
-                high: '🟠 Alta',
-                medium: '🟡 Média',
-                low: '🟢 Baixa'
-            };
-
-            // Monta mensagem para o departamento
-            const message = `*📋 Novo Caso - ${caseId}*\n\n` +
-                          `*Departamento:* ${departmentMap[data.department]}\n` +
-                          `*Prioridade:* ${priorityMap[data.priority] || '🟡 Média'}\n` +
-                          `*Motivo:* ${data.reason}\n` +
-                          (data.order_number ? `*Pedido:* #${data.order_number}\n` : '') +
-                          (data.tracking_code ? `*Rastreio:* ${data.tracking_code}\n` : '') +
-                          `\n*📱 Detalhes do Caso:*\n${data.details || 'Não informado'}\n`;
-
-            // Salva caso no Redis
-            const caseData = {
-                ...data,
-                id: caseId,
-                created_at: new Date().toISOString(),
-                status: 'pending'
-            };
+            const queueKey = this._getQueueKey();
+            const caseIds = await this.redisStore.lrange(queueKey, 0, -1);
             
-            await this.redisStore.set(caseKey, JSON.stringify(caseData));
+            if (!caseIds.length) return [];
 
-            // Envia notificação via WhatsApp
-            const whatsapp = this._whatsAppService;
-            await whatsapp.forwardToDepartment({ 
-                body: message,
-                from: 'SISTEMA',
-                department: data.department
-            }, data.order_number, WHATSAPP_CONFIG.departments.financial.number); // Usa mesmo número do financeiro
+            const cases = await Promise.all(
+                caseIds.map(async (caseId) => {
+                    const caseKey = this._getCaseKey(caseId);
+                    const caseData = await this.redisStore.get(caseKey);
+                    return caseData ? JSON.parse(caseData) : null;
+                })
+            );
 
-            console.log('✅ Caso criado:', {
-                id: caseId,
-                department: data.department,
-                reason: data.reason,
-                order: data.order_number,
-                priority: data.priority,
-                timestamp: new Date().toISOString()
-            });
-
-            return true;
+            return cases.filter(Boolean);
         } catch (error) {
-            console.error('❌ Erro ao criar caso:', {
-                dados: data,
-                erro: error.message,
-                stack: error.stack,
-                timestamp: new Date().toISOString()
-            });
-            return false;
-        }
-    }
-
-    /**
-     * Lista casos pendentes do setor financeiro
-     * @returns {Promise<Array>} Lista de casos pendentes
-     */
-    async listPendingCases() {
-        try {
-            const cases = await this.redisStore.keys('financial_case:*');
-            const pendingCases = [];
-
-            for (const caseKey of cases) {
-                const caseData = await this.redisStore.get(caseKey);
-                if (caseData) {
-                    const parsedCase = JSON.parse(caseData);
-                    if (parsedCase.status === 'pending') {
-                        pendingCases.push(parsedCase);
-                    }
-                }
-            }
-
-            return pendingCases;
-        } catch (error) {
-            console.error('❌ Erro ao listar casos pendentes:', error);
+            console.error('[Financial] Erro ao obter casos pendentes:', error);
             return [];
         }
     }
 
     /**
-     * Atualiza o status de um caso
+     * Atualiza status de um caso
      * @param {string} caseId ID do caso
      * @param {string} status Novo status
      * @param {string} resolution Resolução do caso
      * @returns {Promise<boolean>} Sucesso da atualização
      */
-    async updateCaseStatus(caseId, status, resolution) {
+    async updateCaseStatus(caseId, status, resolution = '') {
         try {
-            const caseKey = `financial_case:${caseId}`;
-            const caseData = await this.redisStore.get(caseKey);
+            const caseKey = this._getCaseKey(caseId);
+            const queueKey = this._getQueueKey();
 
+            // Obtém dados atuais do caso
+            const caseData = await this.redisStore.get(caseKey);
             if (!caseData) {
                 throw new Error('Caso não encontrado');
             }
 
-            const parsedCase = JSON.parse(caseData);
-            parsedCase.status = status;
-            parsedCase.resolution = resolution;
-            parsedCase.updated_at = new Date().toISOString();
-
-            await this.redisStore.set(caseKey, JSON.stringify(parsedCase));
-
-            console.log('✅ Status do caso atualizado:', {
-                id: caseId,
+            // Atualiza dados
+            const updatedCase = {
+                ...JSON.parse(caseData),
                 status,
-                timestamp: new Date().toISOString()
-            });
+                resolution,
+                updated_at: new Date().toISOString()
+            };
+
+            // Salva atualização
+            await this.redisStore.set(caseKey, JSON.stringify(updatedCase), REDIS_CONFIG.ttl.ecommerce.cases);
+
+            // Remove da fila se resolvido
+            if (status === 'resolved') {
+                await this.redisStore.lrem(queueKey, 0, caseId);
+            }
 
             return true;
         } catch (error) {
-            console.error('❌ Erro ao atualizar status:', error);
+            console.error('[Financial] Erro ao atualizar caso:', error);
             return false;
         }
+    }
+
+    /**
+     * Notifica equipe financeira via WhatsApp
+     * @private
+     */
+    async _notifyFinancialTeam(caseData) {
+        try {
+            if (!this._whatsAppService) return;
+
+            const message = this._formatNotificationMessage(caseData);
+            await this._whatsAppService.sendMessage(
+                WHATSAPP_CONFIG.notifications.financial.number,
+                message
+            );
+        } catch (error) {
+            console.error('[Financial] Erro ao notificar equipe:', error);
+        }
+    }
+
+    /**
+     * Formata mensagem de notificação
+     * @private
+     */
+    _formatNotificationMessage(caseData) {
+        const priority = caseData.priority || 'normal';
+        const priorityEmoji = {
+            high: '🔴',
+            medium: '🟡',
+            low: '🟢'
+        }[priority];
+
+        return `*Novo Caso Financeiro* ${priorityEmoji}\n\n` +
+            `*ID:* ${caseData.id}\n` +
+            `*Motivo:* ${caseData.reason}\n` +
+            `*Pedido:* ${caseData.order_number || 'N/A'}\n` +
+            `*Rastreio:* ${caseData.tracking_code || 'N/A'}\n` +
+            `*Mensagem:* ${caseData.customer_message}\n` +
+            (caseData.additional_info ? `*Info Adicional:* ${caseData.additional_info}\n` : '') +
+            `\nPrioridade: ${priority.toUpperCase()}`;
     }
 }
 

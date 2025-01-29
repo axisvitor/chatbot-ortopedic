@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { RedisStore } = require('../store/redis-store');
 const { WhatsAppService } = require('./whatsapp-service');
 const { OpenAIVisionService } = require('./openai-vision-service');
+const { REDIS_CONFIG } = require('../config/settings');
 
 class MediaManagerService {
     constructor(audioService, imageService) {
@@ -16,7 +17,6 @@ class MediaManagerService {
         this.MAX_AUDIO_DURATION = 300; // 5 minutos
         this.MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
         this.ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png'];
-        this.CACHE_TTL = 7 * 24 * 60 * 60; // 7 dias
     }
 
     setAudioService(audioService) {
@@ -226,26 +226,36 @@ class MediaManagerService {
     }
 
     /**
-     * Obtém resultado do cache
-     * @param {string} mediaId - ID da mídia
-     * @param {string} type - Tipo de mídia
-     * @returns {Promise<Object>} Resultado cacheado
-     */
-    async getCachedResult(mediaId, type) {
-        const cacheKey = `media_result:${type}:${mediaId}`;
-        const cached = await this.redisStore.get(cacheKey);
-        return cached ? JSON.parse(cached) : null;
-    }
-
-    /**
      * Armazena resultado no cache
      * @param {string} mediaId - ID da mídia
      * @param {string} type - Tipo de mídia
      * @param {Object} result - Resultado do processamento
      */
     async cacheResult(mediaId, type, result) {
-        const cacheKey = `media_result:${type}:${mediaId}`;
-        await this.redisStore.set(cacheKey, JSON.stringify(result), this.CACHE_TTL);
+        try {
+            const key = `${REDIS_CONFIG.prefix.ecommerce}media:${type}:${mediaId}`;
+            await this.redisStore.set(key, result, REDIS_CONFIG.ttl.ecommerce.cache);
+            console.log('[MediaManager] Resultado armazenado em cache:', { mediaId });
+        } catch (error) {
+            console.error('[MediaManager] Erro ao armazenar em cache:', error);
+        }
+    }
+
+    /**
+     * Obtém resultado do cache
+     * @param {string} mediaId - ID da mídia
+     * @param {string} type - Tipo de mídia
+     * @returns {Promise<Object>} Resultado em cache ou null
+     */
+    async getCachedResult(mediaId, type) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.ecommerce}media:${type}:${mediaId}`;
+            const cached = await this.redisStore.get(key);
+            return cached;
+        } catch (error) {
+            console.error('[MediaManager] Erro ao buscar do cache:', error);
+            return null;
+        }
     }
 }
 

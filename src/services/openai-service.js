@@ -3,7 +3,7 @@ const moment = require('moment-timezone');
 const logger = require('../utils/logger');
 const { RedisStore } = require('../store/redis-store');
 const { ContextManager } = require('../store/context-manager');
-const { OPENAI_CONFIG } = require('../config/settings');
+const { OPENAI_CONFIG, REDIS_CONFIG } = require('../config/settings');
 const { TrackingService } = require('./tracking-service');
 const { BusinessHoursService } = require('./business-hours');
 const { OrderValidationService } = require('./order-validation-service');
@@ -195,14 +195,13 @@ class OpenAIService {
      */
     async _persistThreadToRedis(threadId, thread) {
         try {
-            const key = `thread:${threadId}`;
-            await this.redisStore.set(key, JSON.stringify(thread));
-            logger.info('ThreadPersistedToRedis', { threadId });
+            const key = `${REDIS_CONFIG.prefix.openai}thread_meta:${threadId}`;
+            await this.redisStore.set(key, thread, REDIS_CONFIG.ttl.openai.threads);
+            logger.debug('[OpenAI] Thread persistido no Redis', { threadId });
+            return true;
         } catch (error) {
-            logger.error('ErrorPersistingThread', {
-                threadId,
-                error: error.message
-            });
+            logger.error('[OpenAI] Erro ao persistir thread no Redis:', error);
+            return false;
         }
     }
 
@@ -219,7 +218,7 @@ class OpenAIService {
 
         // Se não está em cache, busca no Redis
         try {
-            const key = `thread:${threadId}`;
+            const key = `${REDIS_CONFIG.prefix.openai}thread_meta:${threadId}`;
             const threadData = await this.redisStore.get(key);
             if (threadData) {
                 const thread = JSON.parse(threadData);
@@ -713,7 +712,7 @@ class OpenAIService {
     async deleteThread(threadId) {
         try {
             // Busca thread existente usando o prefixo correto
-            const threadKey = `openai:customer_threads:${threadId}`;
+            const threadKey = `${REDIS_CONFIG.prefix.openai}customer_threads:${threadId}`;
             let threadId = await this.redisStore.getThreadForCustomer(threadId);
             let shouldCreateNewThread = false;
 
@@ -735,7 +734,7 @@ class OpenAIService {
                     });
                     
                     // Verifica se a thread foi resetada ou deletada
-                    const metadata = await this.redisStore.get(`openai:thread_meta:${threadId}`);
+                    const metadata = await this.redisStore.get(`${REDIS_CONFIG.prefix.openai}thread_meta:${threadId}`);
                     logger.info('ThreadMetadataCheck', {
                         customerId: threadId,
                         threadId,
@@ -776,7 +775,7 @@ class OpenAIService {
                         reason: 'Thread inválida ou resetada'
                     });
                     // Remove o mapeamento antigo
-                    await this.redisStore.del(`openai:customer_threads:${threadId}`);
+                    await this.redisStore.del(`${REDIS_CONFIG.prefix.openai}customer_threads:${threadId}`);
                     threadId = null;
                 }
             }
@@ -810,7 +809,7 @@ class OpenAIService {
                 };
 
                 await this.redisStore.set(
-                    `openai:thread_meta:${threadId}`, 
+                    `${REDIS_CONFIG.prefix.openai}thread_meta:${threadId}`, 
                     JSON.stringify(metadata), 
                     30 * 24 * 60 * 60 // 30 dias TTL
                 );
@@ -842,7 +841,7 @@ class OpenAIService {
     async getOrCreateThreadForCustomer(customerId) {
         try {
             // Tenta obter uma thread existente do Redis
-            const threadId = await this.redisStore.get(`thread:${customerId}`);
+            const threadId = await this.redisStore.get(`${REDIS_CONFIG.prefix.openai}customer_threads:${customerId}`);
             if (threadId) {
                 return threadId;
             }
@@ -851,7 +850,7 @@ class OpenAIService {
             const thread = await this.client.beta.threads.create();
             
             // Salva a thread no Redis
-            await this.redisStore.set(`thread:${customerId}`, thread.id);
+            await this.redisStore.set(`${REDIS_CONFIG.prefix.openai}customer_threads:${customerId}`, thread.id);
             
             return thread.id;
         } catch (error) {
@@ -930,8 +929,8 @@ class OpenAIService {
      */
     async _saveContextToRedis(threadId, context) {
         try {
-            const contextKey = `openai:context:thread:${threadId}`;
-            const lastUpdateKey = `openai:context:update:${threadId}`;
+            const key = `${REDIS_CONFIG.prefix.openai}context:thread:${threadId}`;
+            const lastUpdateKey = `${REDIS_CONFIG.prefix.openai}context:update:${threadId}`;
             const contextData = {
                 lastMessage: context,
                 timestamp: Date.now(),
@@ -960,25 +959,12 @@ class OpenAIService {
      */
     async _getContextFromRedis(threadId) {
         try {
-            const contextKey = `openai:context:thread:${threadId}`;
-            const contextData = await this.redisStore.get(contextKey);
-            
-            if (!contextData) {
-                return null;
-            }
-
-            const context = JSON.parse(contextData);
-            
-            // Verifica se o contexto ainda é válido (24 horas)
-            if (Date.now() - context.timestamp > 24 * 60 * 60 * 1000) {
-                await this.redisStore.del(contextKey);
-                return null;
-            }
-
-            return context;
+            const key = `${REDIS_CONFIG.prefix.context}${threadId}:history`;
+            const context = await this.redisStore.get(key);
+            return context || [];
         } catch (error) {
             logger.error('ErrorGettingContext', { threadId, error });
-            return null;
+            return [];
         }
     }
 
@@ -988,7 +974,7 @@ class OpenAIService {
      */
     async _shouldUpdateContext(threadId) {
         try {
-            const lastUpdateKey = `openai:context:update:${threadId}`;
+            const lastUpdateKey = `${REDIS_CONFIG.prefix.openai}context:update:${threadId}`;
             const lastUpdate = await this.redisStore.get(lastUpdateKey);
             
             if (!lastUpdate) {
@@ -1366,6 +1352,48 @@ class OpenAIService {
             logger.error('ErrorCheckingRunStatus', { threadId, runId, error });
             console.error('[OpenAI] Erro ao verificar status:', error);
             throw error;
+        }
+    }
+
+    async _setRunStatus(threadId, status) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.run}${threadId}:active`;
+            await this.redisStore.set(key, status, REDIS_CONFIG.ttl.openai.threads);
+            return true;
+        } catch (error) {
+            logger.error('[OpenAI] Erro ao definir status do run:', error);
+            return false;
+        }
+    }
+
+    async _getRunStatus(threadId) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.run}${threadId}:active`;
+            return await this.redisStore.get(key) || false;
+        } catch (error) {
+            logger.error('[OpenAI] Erro ao obter status do run:', error);
+            return false;
+        }
+    }
+
+    async _saveCustomerThread(customerId, threadId) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.customer_thread}${customerId}`;
+            await this.redisStore.set(key, threadId, REDIS_CONFIG.ttl.openai.threads);
+            return true;
+        } catch (error) {
+            logger.error('[OpenAI] Erro ao salvar thread do cliente:', error);
+            return false;
+        }
+    }
+
+    async _getCustomerThread(customerId) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.customer_thread}${customerId}`;
+            return await this.redisStore.get(key);
+        } catch (error) {
+            logger.error('[OpenAI] Erro ao obter thread do cliente:', error);
+            return null;
         }
     }
 }

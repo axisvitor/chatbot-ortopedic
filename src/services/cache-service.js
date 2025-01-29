@@ -1,11 +1,17 @@
 const { RedisStore } = require('../store/redis-store');
-const { NUVEMSHOP_CONFIG } = require('../config/settings');
+const { REDIS_CONFIG, NUVEMSHOP_CONFIG } = require('../config/settings');
 const logger = require('../utils/logger');
 
 class CacheService {
     constructor() {
         this.redisStore = new RedisStore();
-        this.config = NUVEMSHOP_CONFIG.cache;
+        this.config = {
+            prefix: REDIS_CONFIG.prefix,
+            ttl: {
+                ...REDIS_CONFIG.ttl,
+                nuvemshop: NUVEMSHOP_CONFIG.cache.ttl
+            }
+        };
         this.operationCount = 0;
         this.lastResetTime = Date.now();
         this.MAX_OPS_PER_SECOND = 1000;
@@ -19,8 +25,9 @@ class CacheService {
         });
     }
 
-    generateKey(prefix, ...parts) {
-        return `${this.config.prefix}${prefix}:${parts.join(':')}`;
+    generateKey(domain, ...parts) {
+        const prefix = this.config.prefix[domain] || `loja:${domain}:`;
+        return `${prefix}${parts.join(':')}`;
     }
 
     async _checkRateLimit() {
@@ -69,20 +76,25 @@ class CacheService {
         }
     }
 
-    async set(key, value, ttl = this.config.ttl.default) {
+    async set(key, value, ttl) {
         try {
             await this._checkRateLimit();
             const startTime = process.hrtime();
             
+            // Se não foi especificado TTL, usa o padrão do domínio
+            const domain = key.split(':')[1]; // loja:domain:rest
+            const defaultTtl = this.config.ttl[domain]?.default || this.config.ttl.ecommerce.cache;
+            const finalTtl = ttl || defaultTtl;
+            
             const serialized = JSON.stringify(value);
-            const result = await this.redisStore.set(key, serialized, ttl);
+            const result = await this.redisStore.set(key, serialized, finalTtl);
             
             const [seconds, nanoseconds] = process.hrtime(startTime);
             const duration = seconds + nanoseconds / 1e9;
             
             logger.info('CacheSet', {
                 key,
-                ttl,
+                ttl: finalTtl,
                 size: serialized.length,
                 duration
             });
@@ -179,7 +191,7 @@ class CacheService {
         }
     }
 
-    async getOrSet(key, fallbackFn, ttl = this.config.ttl.default) {
+    async getOrSet(key, fallbackFn, ttl = this.config.ttl.ecommerce.cache) {
         try {
             let value = await this.get(key);
             

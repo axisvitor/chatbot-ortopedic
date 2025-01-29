@@ -7,6 +7,61 @@ function validateEnvVar(name) {
     return process.env[name];
 }
 
+// Redis Configuration
+const REDIS_CONFIG = {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT || '6379'),
+    password: process.env.REDIS_PASSWORD,
+    ttl: {
+        tracking: {
+            default: 2592000,    // 30 dias
+            orders: 2592000,     // 30 dias
+            updates: 2592000,    // 30 dias
+            status: 300          // 5 minutos
+        },
+        ortopedic: {
+            products: 604800,    // 7 dias
+            cache: 3600         // 1 hora
+        },
+        openai: {
+            threads: 2592000,    // 30 dias
+            context: 432000,     // 5 dias
+            metadata: 2592000    // 30 dias
+        },
+        ecommerce: {
+            processed: 2592000,  // 30 dias
+            cache: 3600         // 1 hora
+        },
+        chat: {
+            history: 2592000,    // 30 dias
+            session: 86400      // 24 horas
+        },
+        processing: 2592000,    // 30 dias
+        context: 432000,        // 5 dias
+        waiting: 2592000,       // 30 dias
+        assistant: 2592000      // 30 dias
+    },
+    prefix: {
+        tracking: 'loja:tracking:',
+        ortopedic: 'loja:ortopedic:',
+        openai: 'loja:openai:',
+        ecommerce: 'loja:ecommerce:',
+        chat: 'loja:chat:',
+        thread: 'loja:thread:',
+        thread_metadata: 'loja:thread_metadata:',
+        processing: 'loja:processing:',
+        context: 'loja:context:',
+        customer_thread: 'loja:customer_thread:',
+        waiting: 'loja:waiting_since:',
+        assistant: 'loja:assistant:',
+        run: 'loja:run:'
+    },
+    retryStrategy: (retries) => {
+        if (retries > 10) return new Error('Máximo de tentativas de reconexão excedido');
+        return Math.min(retries * 100, 3000);
+    }
+};
+
 // Nuvemshop Configuration
 const NUVEMSHOP_CONFIG = {
     // Configurações da API
@@ -128,15 +183,6 @@ const GROQ_CONFIG = {
     get embeddingsUrl() { return `${this.baseUrl}/embeddings` },
     get visionUrl() { return `${this.baseUrl}/chat/completions` },
     get audioUrl() { return `${this.baseUrl}/audio/transcriptions` }
-};
-
-// Redis Configuration
-const REDIS_CONFIG = {
-    host: validateEnvVar('REDIS_HOST'),
-    port: validateEnvVar('REDIS_PORT'),
-    password: validateEnvVar('REDIS_PASSWORD'),
-    ttl: 30 * 24 * 60 * 60, // 30 days
-    prefix: 'ecommerce:'
 };
 
 // WhatsApp Configuration

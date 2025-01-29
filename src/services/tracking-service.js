@@ -1,7 +1,7 @@
 'use strict';
 
 const https = require('https');
-const { TRACKING_CONFIG } = require('../config/settings');
+const { TRACKING_CONFIG, REDIS_CONFIG } = require('../config/settings');
 const { RedisStore } = require('../store/redis-store');
 const { NuvemshopService } = require('./nuvemshop');
 
@@ -51,8 +51,8 @@ class TrackingService {
 
         // Configurações de cache
         this.cacheConfig = {
-            ttl: 30 * 60, // 30 minutos
-            prefix: 'tracking:'
+            ttl: REDIS_CONFIG.ttl.tracking,
+            prefix: REDIS_CONFIG.prefix.tracking
         };
 
         console.log('✅ [Tracking] Serviço inicializado com sucesso:', {
@@ -74,7 +74,7 @@ class TrackingService {
      * @private
      */
     _getCacheKey(trackingNumber) {
-        return `${this.cacheConfig.prefix}${trackingNumber}`;
+        return `${REDIS_CONFIG.prefix.tracking}${trackingNumber}`;
     }
 
     /**
@@ -179,7 +179,7 @@ class TrackingService {
         try {
             // Tenta obter do cache primeiro (apenas se não forçar atualização)
             if (!forceRefresh) {
-                const cached = await this.redisStore.get(this._getCacheKey(trackingNumber));
+                const cached = await this._getFromCache(trackingNumber);
                 if (cached) {
                     const parsedCache = JSON.parse(cached);
                     // Verifica se o cache tem dados válidos
@@ -231,11 +231,7 @@ class TrackingService {
 
             // Atualiza cache apenas se tiver dados válidos
             if (safeTrackingData && safeTrackingData.status) {
-                await this.redisStore.set(
-                    this._getCacheKey(trackingNumber),
-                    JSON.stringify(safeTrackingData),
-                    this.cacheConfig.ttl
-                );
+                await this._saveToCache(trackingNumber, JSON.stringify(safeTrackingData));
             }
 
             // Se o status indica entrega, atualiza Nuvemshop
@@ -716,6 +712,89 @@ class TrackingService {
                     location: event.location || 'Local não informado'
                 }))
         };
+    }
+
+    /**
+     * Obtém informações de rastreamento do cache
+     * @private
+     */
+    async _getFromCache(trackingNumber) {
+        try {
+            const key = this._getCacheKey(trackingNumber);
+            const cached = await this.redisStore.get(key);
+            return cached;
+        } catch (error) {
+            console.error('[Tracking] Erro ao buscar do cache:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Salva informações de rastreamento no cache
+     * @private
+     */
+    async _saveToCache(trackingNumber, data) {
+        try {
+            const key = this._getCacheKey(trackingNumber);
+            await this.redisStore.set(key, data, REDIS_CONFIG.ttl.tracking);
+            console.log('[Tracking] Dados salvos em cache:', { trackingNumber });
+        } catch (error) {
+            console.error('[Tracking] Erro ao salvar no cache:', error);
+        }
+    }
+
+    /**
+     * Registra horário da última atualização
+     * @private
+     */
+    async _updateLastCheck(trackingNumber) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.tracking}last_check:${trackingNumber}`;
+            await this.redisStore.set(key, Date.now(), REDIS_CONFIG.ttl.tracking);
+        } catch (error) {
+            console.error('[Tracking] Erro ao atualizar último check:', error);
+        }
+    }
+
+    /**
+     * Obtém horário da última atualização
+     * @private
+     */
+    async _getLastCheck(trackingNumber) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.tracking}last_check:${trackingNumber}`;
+            return await this.redisStore.get(key) || 0;
+        } catch (error) {
+            console.error('[Tracking] Erro ao obter último check:', error);
+            return 0;
+        }
+    }
+
+    /**
+     * Registra tempo de espera
+     * @private
+     */
+    async _setWaitingSince(trackingNumber) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.waiting_since}${trackingNumber}`;
+            await this.redisStore.set(key, Date.now(), REDIS_CONFIG.ttl.tracking);
+        } catch (error) {
+            console.error('[Tracking] Erro ao registrar tempo de espera:', error);
+        }
+    }
+
+    /**
+     * Obtém tempo de espera
+     * @private
+     */
+    async _getWaitingSince(trackingNumber) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.waiting_since}${trackingNumber}`;
+            return await this.redisStore.get(key) || 0;
+        } catch (error) {
+            console.error('[Tracking] Erro ao obter tempo de espera:', error);
+            return 0;
+        }
     }
 }
 

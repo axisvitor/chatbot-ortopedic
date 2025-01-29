@@ -2,33 +2,21 @@ const { createClient } = require('redis');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../../../.env') });
 const logger = require('./logger');
+const { REDIS_CONFIG } = require('../../../config/settings');
 
 class RedisStore {
     constructor() {
         const config = {
             socket: {
-                host: process.env.REDIS_HOST || 'localhost',
-                port: parseInt(process.env.REDIS_PORT || '6379'),
+                host: REDIS_CONFIG.host,
+                port: REDIS_CONFIG.port,
                 tls: false,
                 rejectUnauthorized: false,
                 minVersion: 'TLSv1.2',
                 maxVersion: 'TLSv1.3'
             },
-            password: process.env.REDIS_PASSWORD,
-            retryStrategy: function(options) {
-                if (options.error && options.error.code === 'ECONNREFUSED') {
-                    logger.error('[Redis] Servidor recusou conexão');
-                    return new Error('Servidor Redis indisponível');
-                }
-                if (options.total_retry_time > 1000 * 60 * 60) {
-                    return new Error('Tempo máximo de retry excedido');
-                }
-                if (options.attempt > 10) {
-                    return new Error('Máximo de tentativas excedido');
-                }
-                // Retry com exponential backoff
-                return Math.min(options.attempt * 100, 3000);
-            }
+            password: REDIS_CONFIG.password,
+            retryStrategy: REDIS_CONFIG.retryStrategy
         };
 
         logger.info('[Redis] Configuração:', {
@@ -40,6 +28,7 @@ class RedisStore {
         });
 
         this.client = createClient(config);
+        this.config = REDIS_CONFIG;
 
         this.client.on('error', (err) => {
             logger.error('[Redis] Erro no Redis:', {
@@ -101,7 +90,7 @@ class RedisStore {
                 await this.connect();
             }
             const value = await this.client.get(key);
-            return value;
+            return JSON.parse(value);
         } catch (error) {
             logger.error('[Redis] Erro ao buscar do cache:', {
                 key,
@@ -111,14 +100,15 @@ class RedisStore {
         }
     }
 
-    async set(key, value, ttl = 3600) {
+    async set(key, value, ttl = this.config.ttl.tracking.default) {
         try {
             if (!this.client.isOpen) {
                 await this.connect();
             }
-            await this.client.set(key, value, {
-                EX: ttl
-            });
+            await this.client.set(key, JSON.stringify(value));
+            if (ttl) {
+                await this.client.expire(key, ttl);
+            }
             return true;
         } catch (error) {
             logger.error('[Redis] Erro ao salvar no cache:', {
@@ -253,7 +243,7 @@ class RedisStore {
     // Métodos para gerenciamento de códigos de rastreio
     async saveTrackingCode(orderId, trackingData) {
         try {
-            const key = `tracking:order:${orderId}`;
+            const key = `${this.config.prefix.tracking}order:${orderId}`;
             const data = {
                 orderId,
                 code: trackingData.code,
@@ -280,7 +270,7 @@ class RedisStore {
 
     async getTrackingCode(orderId) {
         try {
-            const key = `tracking:order:${orderId}`;
+            const key = `${this.config.prefix.tracking}order:${orderId}`;
             const data = await this.client.hGetAll(key);
             
             if (Object.keys(data).length === 0) {
@@ -296,7 +286,7 @@ class RedisStore {
 
     async listAllTrackingCodes() {
         try {
-            const keys = await this.keys('tracking:order:*');
+            const keys = await this.keys(`${this.config.prefix.tracking}order:*`);
             const trackingData = [];
             
             for (const key of keys) {
@@ -316,7 +306,7 @@ class RedisStore {
 
     async deleteTrackingCode(orderId) {
         try {
-            const key = `tracking:order:${orderId}`;
+            const key = `${this.config.prefix.tracking}order:${orderId}`;
             await this.client.del(key);
             logger.info(`[Redis] Código de rastreio deletado para pedido ${orderId}`);
             return true;
@@ -328,7 +318,7 @@ class RedisStore {
 
     async getUnregisteredTrackingCodes() {
         try {
-            const keys = await this.client.keys('tracking:order:*');
+            const keys = await this.client.keys(`${this.config.prefix.tracking}order:*`);
             const unregistered = [];
 
             for (const key of keys) {
@@ -347,7 +337,7 @@ class RedisStore {
 
     async markCodesAsRegistered(codes) {
         try {
-            const keys = await this.client.keys('tracking:order:*');
+            const keys = await this.client.keys(`${this.config.prefix.tracking}order:*`);
             
             for (const key of keys) {
                 const data = await this.client.hGetAll(key);
@@ -369,7 +359,7 @@ class RedisStore {
 
     async updateLastCheck(orderId) {
         try {
-            const key = `tracking:order:${orderId}`;
+            const key = `${this.config.prefix.tracking}order:${orderId}`;
             await this.client.hSet(key, 'lastCheck', new Date().toISOString());
             return true;
         } catch (error) {
