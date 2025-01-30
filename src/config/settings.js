@@ -37,9 +37,9 @@ REQUIRED_ENV_VARS.forEach(validateEnvVar);
 
 // Redis Configuration
 const REDIS_CONFIG = {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-    password: process.env.REDIS_PASSWORD,
+    host: validateEnvVar('REDIS_HOST') || 'localhost',
+    port: parseInt(validateEnvVar('REDIS_PORT') || '6379'),
+    password: validateEnvVar('REDIS_PASSWORD'),
     ttl: {
         tracking: {
             default: 2592000,    // 30 dias
@@ -440,17 +440,6 @@ const MEDIA_CONFIG = {
     }
 };
 
-// FFmpeg Configuration
-const FFMPEG_CONFIG = {
-    path: process.env.FFMPEG_PATH || './node_modules/ffmpeg-static/ffmpeg',
-    options: {
-        audioFormat: 'wav',
-        sampleRate: 16000,
-        channels: 1,
-        codec: 'pcm_s16le'
-    }
-};
-
 // Logging Configuration
 const LOGGING_CONFIG = {
     enabled: true,
@@ -481,6 +470,17 @@ const LOGGING_CONFIG = {
     }
 };
 
+// FFmpeg Configuration
+const FFMPEG_CONFIG = {
+    path: process.env.FFMPEG_PATH || './node_modules/ffmpeg-static/ffmpeg',
+    options: {
+        audioFormat: 'wav',
+        sampleRate: 16000,
+        channels: 1,
+        codec: 'pcm_s16le'
+    }
+};
+
 // Cache Configuration
 const CACHE_CONFIG = {
     prefix: 'cache:',
@@ -496,7 +496,11 @@ module.exports = {
     OPENAI_CONFIG,
     GROQ_CONFIG,
     WHATSAPP_CONFIG,
-    MEDIA_CONFIG,
     TRACKING_CONFIG,
-    RATE_LIMIT_CONFIG
+    RATE_LIMIT_CONFIG,
+    BUSINESS_HOURS,
+    MEDIA_CONFIG,
+    LOGGING_CONFIG,
+    CACHE_CONFIG,
+    FFMPEG_CONFIG
 };

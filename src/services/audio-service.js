@@ -12,12 +12,13 @@ const crypto = require('crypto');
 const stream = require('stream');
 const { promisify } = require('util');
 const pipeline = promisify(stream.pipeline);
+const { FFMPEG_CONFIG } = require('../config/settings');
 
 class AudioService {
     constructor(groqServices, whatsappClient) {
         this.groqServices = groqServices;
         this.whatsappClient = whatsappClient;
-        this.ffmpegPath = ffmpegStatic.path;
+        this.ffmpegPath = FFMPEG_CONFIG.path;
         this.initialized = false;
         this.hasOpusSupport = false;
         this.opusDetectionAttempts = 0;
@@ -57,6 +58,27 @@ class AudioService {
             });
             return false;
         }
+    }
+
+    async processAudio(inputBuffer) {
+        const outputBuffer = await new Promise((resolve, reject) => {
+            const command = ffmpeg()
+                .input(inputBuffer)
+                .toFormat(FFMPEG_CONFIG.options.audioFormat)
+                .audioFrequency(FFMPEG_CONFIG.options.sampleRate)
+                .audioChannels(FFMPEG_CONFIG.options.channels)
+                .audioCodec(FFMPEG_CONFIG.options.codec)
+                .on('error', reject)
+                .on('end', () => resolve(outputBuffer));
+
+            const chunks = [];
+            command.pipe()
+                .on('data', chunk => chunks.push(chunk))
+                .on('end', () => resolve(Buffer.concat(chunks)))
+                .on('error', reject);
+        });
+
+        return outputBuffer;
     }
 
     async processWhatsAppAudio(message) {
@@ -106,32 +128,10 @@ class AudioService {
             });
 
             // Converte usando FFmpeg com auto-detecção de formato
-            await new Promise((resolve, reject) => {
-                ffmpeg()
-                    .input(inputPath)
-                    .outputOptions([
-                        '-ar 16000',
-                        '-ac 1',
-                        '-c:a pcm_s16le'
-                    ])
-                    .on('error', (err) => {
-                        console.error('❌ Erro FFmpeg:', {
-                            erro: err.message,
-                            comando: err.command,
-                            timestamp: new Date().toISOString()
-                        });
-                        reject(err);
-                    })
-                    .on('end', () => {
-                        console.log('✅ Conversão concluída');
-                        resolve();
-                    })
-                    .save(outputPath);
-            });
+            const convertedAudioBuffer = await this.processAudio(audioBuffer);
 
             // Verifica se o arquivo de saída é válido
-            const outputStats = await fs.stat(outputPath);
-            if (!outputStats || outputStats.size < 100) {
+            if (!convertedAudioBuffer || convertedAudioBuffer.length < 100) {
                 throw new Error('Arquivo de saída inválido após conversão');
             }
 
@@ -141,8 +141,7 @@ class AudioService {
                 timestamp: new Date().toISOString()
             });
 
-            const audioData = await fs.readFile(outputPath);
-            const transcription = await this.groqServices.transcribeAudio(audioData);
+            const transcription = await this.groqServices.transcribeAudio(convertedAudioBuffer);
 
             // Limpa os arquivos temporários
             try {
