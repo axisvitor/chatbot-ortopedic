@@ -207,6 +207,12 @@ const NUVEMSHOP_CONFIG = {
     security: {
         rateLimitWindow: 60000, // 1 minuto
         maxRequestsPerWindow: 100
+    },
+
+    // Configurações de internacionalização
+    i18n: {
+        defaultLanguage: 'pt-BR',
+        supportedLanguages: ['pt-BR', 'es', 'en']
     }
 };
 
