@@ -29,15 +29,22 @@ const DEFAULT_VALUES = {
     WAPI_TOKEN: 'dummy_token',
     WAPI_CONNECTION_KEY: 'dummy_key',
     NUVEMSHOP_ACCESS_TOKEN: 'dummy_token',
-    NUVEMSHOP_API_URL: 'https://api.nuvemshop.com.br/v1',
-    NUVEMSHOP_STORE_ID: 'dummy_store',
+    NUVEMSHOP_API_URL: 'https://api.nuvemshop.com.br/v1/dummy_id',
+    NUVEMSHOP_USER_ID: 'dummy_user',
+    NUVEMSHOP_SCOPE: 'read_content,read_products,read_coupons,read_customers,read_orders,read_discounts,read_draft_orders,read_fulfillment_orders,read_domains',
     FINANCIAL_DEPT_NUMBER: '123456',
+    SUPPORT_DEPT_NUMBER: '123457',
+    SALES_DEPT_NUMBER: '123458',
+    TECHNICAL_DEPT_NUMBER: '123459',
     TRACK17_API_KEY: 'dummy_key',
     TRACK17_API_URL: 'https://api.17track.net/v2',
     TRACK17_REGISTER_PATH: '/register',
     TRACK17_STATUS_PATH: '/status',
     TRACK17_TRACK_PATH: '/track',
-    TRACK17_PUSH_PATH: '/push'
+    TRACK17_PUSH_PATH: '/push',
+    TRACK17_WEBHOOK_SECRET: 'dummy_secret',
+    WHATSAPP_NUMBER: '',
+    FFMPEG_PATH: './node_modules/ffmpeg-static/ffmpeg'
 };
 
 // Validar variáveis de ambiente obrigatórias
@@ -54,14 +61,21 @@ const REQUIRED_ENV_VARS = [
     'WAPI_CONNECTION_KEY',
     'NUVEMSHOP_ACCESS_TOKEN',
     'NUVEMSHOP_API_URL',
-    'NUVEMSHOP_STORE_ID',
+    'NUVEMSHOP_USER_ID',
+    'NUVEMSHOP_SCOPE',
     'FINANCIAL_DEPT_NUMBER',
+    'SUPPORT_DEPT_NUMBER',
+    'SALES_DEPT_NUMBER',
+    'TECHNICAL_DEPT_NUMBER',
     'TRACK17_API_KEY',
     'TRACK17_API_URL',
     'TRACK17_REGISTER_PATH',
     'TRACK17_STATUS_PATH',
     'TRACK17_TRACK_PATH',
-    'TRACK17_PUSH_PATH'
+    'TRACK17_PUSH_PATH',
+    'TRACK17_WEBHOOK_SECRET',
+    'WHATSAPP_NUMBER',
+    'FFMPEG_PATH'
 ];
 
 // Em desenvolvimento, usa valores padrão
@@ -132,85 +146,48 @@ const REDIS_CONFIG = {
 // Nuvemshop Configuration
 const NUVEMSHOP_CONFIG = {
     // Configurações da API
-    apiUrl: validateEnvVar('NUVEMSHOP_API_URL', 'https://api.nuvemshop.com.br/v1'),
-    accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN', 'dummy_token'),
+    apiUrl: validateEnvVar('NUVEMSHOP_API_URL'),
+    accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN'),
     userId: validateEnvVar('NUVEMSHOP_USER_ID'),
-    scope: validateEnvVar('NUVEMSHOP_SCOPE', '').split(','),
+    scope: validateEnvVar('NUVEMSHOP_SCOPE').split(','),
     
     // Configurações do webhook
     webhook: {
-        secret: validateEnvVar('NUVEMSHOP_WEBHOOK_SECRET'),
         topics: [
             'orders/created',
             'orders/paid',
             'orders/fulfilled',
             'orders/cancelled',
+            'orders/updated',
             'products/created',
             'products/updated',
             'products/deleted',
             'customers/created',
             'customers/updated'
-        ]
+        ],
+        retryAttempts: 3,
+        retryDelay: 1000, // 1 segundo
+        timeout: 5000 // 5 segundos
     },
 
     // Configurações de cache
     cache: {
-        prefix: 'nuvemshop:',
         ttl: {
-            default: 3600,        // 1 hora
-            products: 3600,       // 1 hora
-            categories: 86400,    // 24 horas
-            orders: {
-                recent: 300,      // 5 minutos para pedidos recentes
-                old: 3600,        // 1 hora para pedidos antigos
-                details: 1800     // 30 minutos para detalhes do pedido
-            },
-            customers: 1800,      // 30 minutos
-            inventory: 300,       // 5 minutos
-            shipping: 1800,       // 30 minutos
-            payments: 1800        // 30 minutos
-        }
-    },
-
-    // Configurações de API
-    api: {
-        timeout: 30000,          // 30 segundos
-        retryAttempts: 3,
-        retryDelays: [1000, 3000, 5000], // 1s, 3s, 5s
-        rateLimit: {
-            maxRequests: 10,     // 10 requisições
-            perMilliseconds: 1000, // por segundo
-            maxRPS: 10
+            orders: 3600,        // 1 hora
+            products: 7200,      // 2 horas
+            customers: 86400,    // 24 horas
+            webhooks: 300        // 5 minutos
         },
-        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
-    },
-
-    // Configurações de formatação
-    formatting: {
-        dateFormat: 'DD/MM/YYYY HH:mm:ss',
-        priceFormat: {
-            locale: 'pt-BR',
-            currency: 'BRL'
+        prefix: {
+            orders: 'nuvemshop:orders:',
+            products: 'nuvemshop:products:',
+            customers: 'nuvemshop:customers:',
+            webhooks: 'nuvemshop:webhooks:'
         }
-    },
-
-    // Configurações de internacionalização
-    i18n: {
-        defaultLanguage: 'pt',
-        supportedLanguages: ['pt', 'es', 'en']
-    },
-
-    // Configurações de validação
-    validation: {
-        maxProductsPerPage: 200,
-        maxOrdersPerPage: 200,
-        maxCustomersPerPage: 200,
-        minSearchLength: 3
     },
 
     // Configurações de segurança
     security: {
-        allowedIps: validateEnvVar('NUVEMSHOP_ALLOWED_IPS', '').split(',') || [],
         rateLimitWindow: 60000, // 1 minuto
         maxRequestsPerWindow: 100
     }
@@ -268,9 +245,9 @@ const WHATSAPP_CONFIG = {
     connectionKey: validateEnvVar('WAPI_CONNECTION_KEY', 'dummy_key'),
     departments: {
         financial: validateEnvVar('FINANCIAL_DEPT_NUMBER', '123456'),
-        support: validateEnvVar('SUPPORT_DEPT_NUMBER'),
-        sales: validateEnvVar('SALES_DEPT_NUMBER'),
-        technical: validateEnvVar('TECHNICAL_DEPT_NUMBER')
+        support: validateEnvVar('SUPPORT_DEPT_NUMBER', '123457'),
+        sales: validateEnvVar('SALES_DEPT_NUMBER', '123458'),
+        technical: validateEnvVar('TECHNICAL_DEPT_NUMBER', '123459')
     },
     messageDelay: 3000, // delay padrão entre mensagens em ms
     retryAttempts: 3,
@@ -371,7 +348,7 @@ const TRACKING_CONFIG = {
 
     // Webhook Configuration
     webhook: {
-        secret: validateEnvVar('TRACK17_WEBHOOK_SECRET'),
+        secret: validateEnvVar('TRACK17_WEBHOOK_SECRET', 'dummy_secret'),
         events: [
             'tracking.created',
             'tracking.updated',
