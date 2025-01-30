@@ -5,25 +5,29 @@ Sistema de atendimento automatizado via WhatsApp para e-commerce ortopédico, ut
 ## 🌟 Principais Funcionalidades
 
 ### Atendimento ao Cliente
+
 - Processamento de mensagens em texto, áudio e imagens
 - Respostas contextualizadas e personalizadas
 - Manutenção de histórico de conversas
 - Encaminhamento inteligente para departamentos
 
 ### Rastreamento de Pedidos 📦
+
 - Consulta automática de status em múltiplas transportadoras
 - Notificações proativas de atualizações
 - Tratamento especial para pedidos taxados
 - Alertas automáticos sobre atrasos
 
 ### Processamento de Pagamentos 💳
+
 - Análise automática de comprovantes via OCR
 - Confirmação instantânea de recebimento
 - Integração com setor financeiro
 - Histórico de transações
 
 ### Integrações 🔄
-- WhatsApp Business API
+
+- WhatsApp Business API(W-API)
 - Nuvemshop (e-commerce)
 - Múltiplas transportadoras
 - Redis para armazenamento

@@ -43,23 +43,27 @@ graph TD
 ## 🧩 Componentes Principais
 
 ### 1. OpenAI Service (openai-service.js)
+
 - Gerenciamento de threads
 - Execução de funções
 - Rate limiting
 - Gestão de contexto
 
 ### 2. Business Services
+
 - **Department Service**: Encaminhamento de casos
 - **Financial Service**: Processamento financeiro
 - **Order Service**: Gestão de pedidos
 - **Tracking Service**: Rastreamento de entregas
 
 ### 3. Armazenamento
+
 - Redis para cache e sessões
 - Armazenamento de conversas
 - Gestão de estado
 
 ### 4. Integrações
+
 - WhatsApp Business API
 - Nuvemshop API
 - APIs de Rastreamento
@@ -67,9 +71,12 @@ graph TD
 
 ## 📦 Estrutura de Diretórios
 
-```
-src/
+```src/
 ├── services/           # Serviços principais
+│   ├── department.js   # Serviço de Departamentos
+│   ├── financial.js    # Serviço Financeiro
+│   ├── order.js        # Serviço de Pedidos
+│   └── tracking.js     # Serviço de Rastreamento
 ├── tracking-system/    # Sistema de rastreamento
 ├── store/             # Gerenciamento de estado
 ├── utils/             # Utilitários
@@ -80,6 +87,7 @@ src/
 ## 🔐 Segurança
 
 ### Camadas de Proteção
+
 1. **API Gateway**
    - Rate limiting
    - Validação de tokens
@@ -98,11 +106,13 @@ src/
 ## 📊 Escalabilidade
 
 ### Horizontal
+
 - Múltiplas instâncias
 - Load balancing
 - Cache distribuído
 
 ### Vertical
+
 - Otimização de recursos
 - Pooling de conexões
 - Batch processing
@@ -110,16 +120,19 @@ src/
 ## 🔄 Ciclo de Vida da Mensagem
 
 1. **Recebimento**
+
    ```javascript
    async processMessage(messageData)
    ```
 
 2. **Processamento**
+
    ```javascript
    async handleToolCalls(run, threadId)
    ```
 
 3. **Resposta**
+
    ```javascript
    async sendResponse(response)
    ```
@@ -127,12 +140,14 @@ src/
 ## 📈 Monitoramento
 
 ### Métricas Principais
+
 - Tempo de resposta
 - Taxa de sucesso
 - Uso de recursos
 - Erros e exceções
 
 ### Logs
+
 - Nível de informação
 - Nível de erro
 - Auditoria

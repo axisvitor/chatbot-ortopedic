@@ -7,6 +7,7 @@ O assistant possui um conjunto de funções especializadas que podem ser chamada
 ## 🔍 Funções Disponíveis
 
 ### 1. check_order
+
 Verifica informações de pedidos na Nuvemshop.
 
 ```javascript
@@ -26,6 +27,7 @@ Verifica informações de pedidos na Nuvemshop.
 ```
 
 ### 2. check_tracking
+
 Consulta status de entrega nas transportadoras.
 
 ```javascript
@@ -45,6 +47,7 @@ Consulta status de entrega nas transportadoras.
 ```
 
 ### 3. extract_order_number
+
 Identifica números de pedido em textos.
 
 ```javascript
@@ -64,6 +67,7 @@ Identifica números de pedido em textos.
 ```
 
 ### 4. forward_to_financial
+
 Encaminha casos para o setor financeiro.
 
 ```javascript
@@ -111,6 +115,7 @@ Encaminha casos para o setor financeiro.
 ```
 
 ### 5. forward_to_department
+
 Encaminha casos para outros departamentos.
 
 ```javascript
@@ -157,6 +162,7 @@ Encaminha casos para outros departamentos.
 ```
 
 ### 6. request_payment_proof
+
 Gerencia fluxo de comprovantes de pagamento.
 
 ```javascript
