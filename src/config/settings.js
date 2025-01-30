@@ -1,12 +1,44 @@
 require('dotenv').config();
 
 // Função para validar variáveis de ambiente
-function validateEnvVar(name) {
-    if (!process.env[name]) {
-        throw new Error(`Environment variable ${name} is required`);
-    }
-    return process.env[name];
+function validateEnvVar(name, defaultValue = undefined) {
+    const value = process.env[name];
+    
+    // Se tiver valor, retorna ele
+    if (value) return value;
+    
+    // Se não tiver valor mas tiver um padrão, retorna o padrão
+    if (defaultValue !== undefined) return defaultValue;
+    
+    // Se não tiver valor nem padrão, lança erro
+    throw new Error(`Environment variable ${name} is required`);
 }
+
+// Primeiro define o NODE_ENV
+const NODE_ENV = validateEnvVar('NODE_ENV', 'development');
+
+// Valores padrão para desenvolvimento
+const DEFAULT_VALUES = {
+    PORT: '3000',
+    REDIS_HOST: 'localhost',
+    REDIS_PORT: '6379',
+    REDIS_PASSWORD: '',
+    OPENAI_API_KEY: 'dummy_key',
+    ASSISTANT_ID: 'dummy_assistant',
+    WAPI_URL: 'http://localhost:8080',
+    WAPI_TOKEN: 'dummy_token',
+    WAPI_CONNECTION_KEY: 'dummy_key',
+    NUVEMSHOP_ACCESS_TOKEN: 'dummy_token',
+    NUVEMSHOP_API_URL: 'https://api.nuvemshop.com.br/v1',
+    NUVEMSHOP_STORE_ID: 'dummy_store',
+    FINANCIAL_DEPT_NUMBER: '123456',
+    TRACK17_API_KEY: 'dummy_key',
+    TRACK17_API_URL: 'https://api.17track.net/v2',
+    TRACK17_REGISTER_PATH: '/register',
+    TRACK17_STATUS_PATH: '/status',
+    TRACK17_TRACK_PATH: '/track',
+    TRACK17_PUSH_PATH: '/push'
+};
 
 // Validar variáveis de ambiente obrigatórias
 const REQUIRED_ENV_VARS = [
@@ -32,14 +64,21 @@ const REQUIRED_ENV_VARS = [
     'TRACK17_PUSH_PATH'
 ];
 
-// Validar todas as variáveis obrigatórias
-REQUIRED_ENV_VARS.forEach(validateEnvVar);
+// Em desenvolvimento, usa valores padrão
+// Em produção, exige todas as variáveis
+REQUIRED_ENV_VARS.forEach(name => {
+    if (NODE_ENV === 'production') {
+        validateEnvVar(name);
+    } else {
+        validateEnvVar(name, DEFAULT_VALUES[name]);
+    }
+});
 
 // Redis Configuration
 const REDIS_CONFIG = {
-    host: validateEnvVar('REDIS_HOST') || 'localhost',
-    port: parseInt(validateEnvVar('REDIS_PORT') || '6379'),
-    password: validateEnvVar('REDIS_PASSWORD'),
+    host: validateEnvVar('REDIS_HOST', 'localhost'),
+    port: parseInt(validateEnvVar('REDIS_PORT', '6379')),
+    password: validateEnvVar('REDIS_PASSWORD', ''),
     ttl: {
         tracking: {
             default: 2592000,    // 30 dias
@@ -93,14 +132,14 @@ const REDIS_CONFIG = {
 // Nuvemshop Configuration
 const NUVEMSHOP_CONFIG = {
     // Configurações da API
-    apiUrl: process.env.NUVEMSHOP_API_URL || 'https://api.nuvemshop.com.br/v1',
-    accessToken: process.env.NUVEMSHOP_ACCESS_TOKEN,
-    userId: process.env.NUVEMSHOP_USER_ID,
-    scope: process.env.NUVEMSHOP_SCOPE?.split(','),
+    apiUrl: validateEnvVar('NUVEMSHOP_API_URL', 'https://api.nuvemshop.com.br/v1'),
+    accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN', 'dummy_token'),
+    userId: validateEnvVar('NUVEMSHOP_USER_ID'),
+    scope: validateEnvVar('NUVEMSHOP_SCOPE', '').split(','),
     
     // Configurações do webhook
     webhook: {
-        secret: process.env.NUVEMSHOP_WEBHOOK_SECRET,
+        secret: validateEnvVar('NUVEMSHOP_WEBHOOK_SECRET'),
         topics: [
             'orders/created',
             'orders/paid',
@@ -171,7 +210,7 @@ const NUVEMSHOP_CONFIG = {
 
     // Configurações de segurança
     security: {
-        allowedIps: process.env.NUVEMSHOP_ALLOWED_IPS?.split(',') || [],
+        allowedIps: validateEnvVar('NUVEMSHOP_ALLOWED_IPS', '').split(',') || [],
         rateLimitWindow: 60000, // 1 minuto
         maxRequestsPerWindow: 100
     }
@@ -179,8 +218,8 @@ const NUVEMSHOP_CONFIG = {
 
 // OpenAI Configuration
 const OPENAI_CONFIG = {
-    apiKey: validateEnvVar('OPENAI_API_KEY'),
-    assistantId: validateEnvVar('ASSISTANT_ID'),
+    apiKey: validateEnvVar('OPENAI_API_KEY', 'dummy_key'),
+    assistantId: validateEnvVar('ASSISTANT_ID', 'dummy_assistant'),
     baseUrl: 'https://api.openai.com/v1',
     models: {
         chat: 'gpt-4o',
@@ -224,11 +263,11 @@ const RATE_LIMIT_CONFIG = {
 
 // WhatsApp Configuration
 const WHATSAPP_CONFIG = {
-    apiUrl: validateEnvVar('WAPI_URL'),
-    token: validateEnvVar('WAPI_TOKEN'),
-    connectionKey: validateEnvVar('WAPI_CONNECTION_KEY'),
+    apiUrl: validateEnvVar('WAPI_URL', 'http://localhost:8080'),
+    token: validateEnvVar('WAPI_TOKEN', 'dummy_token'),
+    connectionKey: validateEnvVar('WAPI_CONNECTION_KEY', 'dummy_key'),
     departments: {
-        financial: validateEnvVar('FINANCIAL_DEPT_NUMBER'),
+        financial: validateEnvVar('FINANCIAL_DEPT_NUMBER', '123456'),
         support: validateEnvVar('SUPPORT_DEPT_NUMBER'),
         sales: validateEnvVar('SALES_DEPT_NUMBER'),
         technical: validateEnvVar('TECHNICAL_DEPT_NUMBER')
@@ -295,14 +334,14 @@ const WHATSAPP_CONFIG = {
             method: 'GET'
         }
     },
-    whatsappNumber: process.env.WHATSAPP_NUMBER || '',  
+    whatsappNumber: validateEnvVar('WHATSAPP_NUMBER', '')  
 };
 
 // 17track Configuration
 const TRACKING_CONFIG = {
     // API Configuration
-    endpoint: process.env.TRACK17_API_URL || 'https://api.17track.net/track/v2',
-    apiKey: validateEnvVar('TRACK17_API_KEY'),
+    endpoint: validateEnvVar('TRACK17_API_URL', 'https://api.17track.net/track/v2'),
+    apiKey: validateEnvVar('TRACK17_API_KEY', 'dummy_key'),
     
     // API Paths
     paths: {
@@ -332,7 +371,7 @@ const TRACKING_CONFIG = {
 
     // Webhook Configuration
     webhook: {
-        secret: process.env.TRACK17_WEBHOOK_SECRET,
+        secret: validateEnvVar('TRACK17_WEBHOOK_SECRET'),
         events: [
             'tracking.created',
             'tracking.updated',
@@ -472,7 +511,7 @@ const LOGGING_CONFIG = {
 
 // FFmpeg Configuration
 const FFMPEG_CONFIG = {
-    path: process.env.FFMPEG_PATH || './node_modules/ffmpeg-static/ffmpeg',
+    path: validateEnvVar('FFMPEG_PATH', './node_modules/ffmpeg-static/ffmpeg'),
     options: {
         audioFormat: 'wav',
         sampleRate: 16000,
