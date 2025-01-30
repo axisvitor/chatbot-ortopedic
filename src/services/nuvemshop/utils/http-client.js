@@ -5,6 +5,11 @@ const logger = require('../../../utils/logger');
 class NuvemshopHttpClient {
     constructor() {
         this.client = null;
+        this.bucket = {
+            tokens: NUVEMSHOP_CONFIG.api.rateLimit.bucketSize,
+            lastRefill: Date.now(),
+            queue: []
+        };
         this.initializeClient();
     }
 
@@ -35,7 +40,7 @@ class NuvemshopHttpClient {
         const headers = {
             'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
             'Content-Type': 'application/json',
-            'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)',
+            'User-Agent': NUVEMSHOP_CONFIG.api.userAgent,
             'Accept': 'application/json'
         };
 
@@ -52,51 +57,123 @@ class NuvemshopHttpClient {
     }
 
     /**
-     * Adiciona interceptor de request
+     * Implementa o algoritmo Leaky Bucket para rate limiting
      * @private
      */
-    _addRequestInterceptor() {
-        this.client.interceptors.request.use(request => {
-            logger.debug('RequestNuvemshop', {
-                url: request.url,
-                method: request.method,
-                params: request.params,
-                headers: {
-                    'Content-Type': request.headers['Content-Type'],
-                    'User-Agent': request.headers['User-Agent'],
-                    'Authentication': request.headers['Authentication']
-                },
+    async _rateLimiter(config) {
+        const now = Date.now();
+        const { bucketSize, requestsPerSecond } = NUVEMSHOP_CONFIG.api.rateLimit;
+        const refillRate = 1000 / requestsPerSecond; // ms por token
+        
+        // Calcula quantos tokens devem ser adicionados desde o último refill
+        const timePassed = now - this.bucket.lastRefill;
+        const tokensToAdd = Math.floor(timePassed / refillRate);
+        
+        // Atualiza os tokens no bucket
+        this.bucket.tokens = Math.min(bucketSize, this.bucket.tokens + tokensToAdd);
+        this.bucket.lastRefill = now;
+
+        // Se não tem tokens disponíveis, espera
+        if (this.bucket.tokens <= 0) {
+            const waitTime = refillRate * (1 - this.bucket.tokens);
+            logger.debug('RateLimitEsperando', {
+                waitTime,
+                tokens: this.bucket.tokens,
                 timestamp: new Date().toISOString()
             });
-            return request;
-        });
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            return this._rateLimiter(config);
+        }
+
+        // Consome um token
+        this.bucket.tokens--;
+        return config;
     }
 
     /**
-     * Adiciona interceptor de response
+     * Adiciona interceptor de requisição
      * @private
      */
-    _addResponseInterceptor() {
-        this.client.interceptors.response.use(
-            response => {
-                logger.debug('ResponseNuvemshopSucesso', {
-                    status: response.status,
-                    data: response.data,
-                    timestamp: new Date().toISOString()
-                });
-                return response;
+    _addRequestInterceptor() {
+        this.client.interceptors.request.use(
+            async config => {
+                // Aplica rate limiting
+                config = await this._rateLimiter(config);
+                return config;
             },
             error => {
-                logger.error('ResponseNuvemshopErro', {
-                    status: error.response?.status,
-                    data: error.response?.data,
-                    message: error.message,
-                    stack: error.stack,
+                logger.error('ErroRequisicao', {
+                    erro: error.message,
+                    config: error.config,
                     timestamp: new Date().toISOString()
                 });
                 return Promise.reject(error);
             }
         );
+    }
+
+    /**
+     * Adiciona interceptor de resposta
+     * @private
+     */
+    _addResponseInterceptor() {
+        this.client.interceptors.response.use(
+            response => {
+                // Atualiza o bucket baseado nos headers de rate limit
+                const headers = response.headers || {};
+                const { limit, remaining, reset } = NUVEMSHOP_CONFIG.api.rateLimit.headers;
+                
+                if (headers[limit]) {
+                    this.bucket.tokens = parseInt(headers[remaining] || '0');
+                    logger.debug('RateLimitAtualizado', {
+                        limit: headers[limit],
+                        remaining: headers[remaining],
+                        reset: headers[reset],
+                        timestamp: new Date().toISOString()
+                    });
+                }
+                
+                return response;
+            },
+            error => {
+                // Se receber 429 (Too Many Requests), espera o tempo indicado
+                if (error.response && error.response.status === 429) {
+                    const resetTime = parseInt(error.response.headers[NUVEMSHOP_CONFIG.api.rateLimit.headers.reset] || '1000');
+                    logger.warn('RateLimitExcedido', {
+                        resetTime,
+                        timestamp: new Date().toISOString()
+                    });
+                    return new Promise(resolve => {
+                        setTimeout(() => resolve(this.client(error.config)), resetTime);
+                    });
+                }
+                
+                logger.error('ErroResposta', {
+                    status: error.response?.status,
+                    erro: error.message,
+                    timestamp: new Date().toISOString()
+                });
+                return Promise.reject(error);
+            }
+        );
+    }
+
+    /**
+     * Executa uma requisição HTTP
+     * @param {Object} config Configuração da requisição
+     * @returns {Promise} Resposta da requisição
+     */
+    async request(config) {
+        try {
+            return await this.client.request(config);
+        } catch (error) {
+            logger.error('ErroRequisicao', {
+                erro: error.message,
+                config,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
     }
 
     /**

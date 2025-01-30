@@ -170,6 +170,23 @@ const NUVEMSHOP_CONFIG = {
         timeout: 5000 // 5 segundos
     },
 
+    // Configurações de API
+    api: {
+        timeout: 30000, // 30 segundos
+        retryAttempts: 3,
+        retryDelays: [1000, 3000, 5000], // 1s, 3s, 5s
+        rateLimit: {
+            bucketSize: 40,      // Tamanho máximo do bucket
+            requestsPerSecond: 2, // Taxa de 2 requisições por segundo
+            headers: {
+                limit: 'x-rate-limit-limit',
+                remaining: 'x-rate-limit-remaining',
+                reset: 'x-rate-limit-reset'
+            }
+        },
+        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
+    },
+
     // Configurações de cache
     cache: {
         ttl: {
