@@ -19,6 +19,7 @@ const {
     OpenAIVisionService,
     FinancialService
 } = require('./services');
+const cron = require('node-cron');
 
 // Configurações
 const { 
@@ -66,18 +67,6 @@ process.on('unhandledRejection', (reason, promise) => {
         razao: reason,
         timestamp: new Date().toISOString()
     });
-});
-
-process.on('SIGTERM', async () => {
-    console.log('🛑 Recebido sinal SIGTERM, encerrando graciosamente...');
-    try {
-        if (whatsappService) await whatsappService.close();
-        if (redisStore) await redisStore.disconnect();
-        process.exit(0);
-    } catch (error) {
-        console.error('❌ Erro ao encerrar servidor:', error);
-        process.exit(1);
-    }
 });
 
 console.log('🚀 Iniciando servidor...');
@@ -220,6 +209,49 @@ async function initializeServices() {
             lastError = error;
             console.error('❌ Erro ao inicializar serviços:', error);
             reject(error);
+        }
+    });
+}
+
+// Função para inicializar tarefas agendadas
+function initializeScheduledTasks() {
+    // Sincroniza pedidos da Nuvemshop a cada 30 minutos
+    cron.schedule('*/30 * * * *', async () => {
+        try {
+            console.log('🔄 Iniciando sincronização de pedidos...');
+            await nuvemshopService.syncOrders();
+        } catch (error) {
+            console.error('❌ Erro ao sincronizar pedidos:', error);
+        }
+    });
+
+    // Atualiza status de rastreamento a cada 2 horas
+    cron.schedule('0 */2 * * *', async () => {
+        try {
+            console.log('🔄 Atualizando status de rastreamento...');
+            await trackingService.updateAllTrackingStatus();
+        } catch (error) {
+            console.error('❌ Erro ao atualizar status de rastreamento:', error);
+        }
+    });
+
+    // Limpa cache antigo todo dia à meia-noite
+    cron.schedule('0 0 * * *', async () => {
+        try {
+            console.log('🧹 Iniciando limpeza de cache...');
+            await redisStore.cleanOldCache();
+        } catch (error) {
+            console.error('❌ Erro ao limpar cache:', error);
+        }
+    });
+
+    // Verifica pedidos pendentes a cada hora
+    cron.schedule('0 * * * *', async () => {
+        try {
+            console.log('🔍 Verificando pedidos pendentes...');
+            await orderValidationService.checkPendingOrders();
+        } catch (error) {
+            console.error('❌ Erro ao verificar pedidos pendentes:', error);
         }
     });
 }
@@ -414,6 +446,7 @@ app.post('/test/message', async (req, res) => {
 async function startServer(maxRetries = 3) {
     let retries = 0;
     isInitializing = true;
+    let server;
     
     while (retries < maxRetries) {
         try {
@@ -422,19 +455,63 @@ async function startServer(maxRetries = 3) {
             isInitializing = false;
             lastError = null;
             
-            app.listen(PORT, () => {
+            // Inicializa tarefas agendadas
+            initializeScheduledTasks();
+            
+            server = app.listen(PORT, () => {
                 console.log(`🚀 Servidor rodando na porta ${PORT}`);
                 console.log('✅ Todos os serviços inicializados com sucesso');
             });
 
-            // Graceful shutdown
-            process.on('SIGTERM', () => {
-                console.log('Recebido SIGTERM. Iniciando shutdown graceful...');
-                app.close(() => {
-                    console.log('Servidor HTTP fechado.');
+            // Graceful shutdown para ambiente 24/7
+            const shutdown = async (signal) => {
+                console.log(`\n🔄 Recebido ${signal}. Iniciando transição graceful...`);
+                
+                try {
+                    // 1. Notifica o health check que estamos em modo de transição
+                    servicesReady = false;
+                    isInitializing = true;
+                    
+                    // 2. Salva estado atual das conversas
+                    if (whatsappService?.saveState) {
+                        console.log('💾 Salvando estado das conversas...');
+                        await whatsappService.saveState();
+                    }
+
+                    // 3. Processa mensagens na fila
+                    if (redisStore?.processRemainingQueue) {
+                        console.log('📨 Processando mensagens restantes na fila...');
+                        await redisStore.processRemainingQueue();
+                    }
+
+                    // 4. Fecha conexões mantendo funcionalidade
+                    console.log('🔌 Preparando serviços para transição...');
+                    
+                    // Redis - mantém conexão para fila
+                    if (redisStore?.prepareForTransition) {
+                        await redisStore.prepareForTransition();
+                    }
+
+                    // WhatsApp - salva sessão mas mantém conexão
+                    if (whatsappService?.prepareForTransition) {
+                        await whatsappService.prepareForTransition();
+                    }
+
+                    console.log('✅ Serviços prontos para transição');
+                    console.log('👋 Encerrando processo para atualização');
                     process.exit(0);
-                });
-            });
+                } catch (error) {
+                    console.error('❌ Erro durante transição:', error);
+                    // Em caso de erro, tentamos manter o serviço rodando
+                    servicesReady = true;
+                    isInitializing = false;
+                    console.error('⚠️ Continuando operação normal');
+                }
+            };
+
+            // Registra handlers para sinais de término
+            process.on('SIGTERM', () => shutdown('SIGTERM'));
+            process.on('SIGINT', () => shutdown('SIGINT'));
             
             return app;
         } catch (error) {
@@ -446,8 +523,7 @@ async function startServer(maxRetries = 3) {
                 isInitializing = false;
                 servicesReady = false;
                 console.error('❌ Número máximo de tentativas atingido.');
-                // Não encerra o processo, deixa o healthcheck reportar o erro
-                return null;
+                process.exit(1);
             }
             
             // Espera 5 segundos antes da próxima tentativa
