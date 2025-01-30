@@ -230,6 +230,30 @@ app.use(limiter); // Aplica rate limiting
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Health Check
+app.get('/health', (_req, res) => {
+    if (!servicesReady) {
+        if (isInitializing) {
+            return res.status(503).json({
+                status: 'initializing',
+                message: 'Serviços ainda estão inicializando',
+                error: lastError?.message
+            });
+        }
+        return res.status(503).json({
+            status: 'error',
+            message: 'Serviços não inicializados corretamente',
+            error: lastError?.message
+        });
+    }
+
+    res.json({
+        status: 'healthy',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Healthcheck endpoint para Railwayz
 app.get('/', (req, res) => {
     if (isInitializing) {
@@ -247,74 +271,6 @@ app.get('/', (req, res) => {
         uptime: process.uptime(),
         error: lastError?.message
     });
-});
-
-app.get('/health', async (req, res) => {
-    if (isInitializing) {
-        res.status(200).json({
-            status: 'initializing',
-            timestamp: new Date().toISOString(),
-            uptime: process.uptime()
-        });
-        return;
-    }
-
-    try {
-        // Timeout de 5 segundos para healthcheck
-        const timeout = setTimeout(() => {
-            throw new Error('Timeout ao verificar serviços');
-        }, 5000);
-
-        // Verifica Redis
-        let redisConnected = false;
-        try {
-            redisConnected = redisStore?.isConnected?.() || false;
-            if (redisConnected) {
-                redisConnected = await redisStore.ping();
-            }
-        } catch (error) {
-            console.error('[Health] Erro ao verificar Redis:', error);
-            redisConnected = false;
-        }
-
-        // Verifica WhatsApp
-        let whatsappConnected = false;
-        try {
-            whatsappConnected = await whatsappService?.isConnected?.() || false;
-        } catch (error) {
-            console.error('[Health] Erro ao verificar WhatsApp:', error);
-            whatsappConnected = false;
-        }
-
-        // Atualiza status geral
-        const allServicesConnected = redisConnected && whatsappConnected;
-        servicesReady = allServicesConnected;
-
-        clearTimeout(timeout);
-
-        res.status(allServicesConnected ? 200 : 503).json({
-            status: allServicesConnected ? 'ok' : 'error',
-            services: {
-                redis: redisConnected,
-                whatsapp: whatsappConnected
-            },
-            timestamp: new Date().toISOString(),
-            uptime: process.uptime(),
-            error: lastError?.message
-        });
-    } catch (error) {
-        console.error('[Health] Erro ao verificar serviços:', error);
-        res.status(503).json({
-            status: 'error',
-            services: {
-                redis: false,
-                whatsapp: false
-            },
-            timestamp: new Date().toISOString(),
-            uptime: process.uptime(),
-            error: error.message
-        });
-    }
 });
 
 app.get('/healthcheck', (req, res) => {

@@ -79,20 +79,25 @@ const REQUIRED_ENV_VARS = [
 ];
 
 // Em desenvolvimento, usa valores padrão
-// Em produção, exige todas as variáveis
-REQUIRED_ENV_VARS.forEach(name => {
-    if (NODE_ENV === 'production') {
-        validateEnvVar(name);
-    } else {
-        validateEnvVar(name, DEFAULT_VALUES[name]);
-    }
-});
+const env = {};
+if (NODE_ENV === 'development') {
+    REQUIRED_ENV_VARS.forEach(varName => {
+        env[varName] = validateEnvVar(varName, DEFAULT_VALUES[varName]);
+    });
+} else {
+    REQUIRED_ENV_VARS.forEach(varName => {
+        env[varName] = validateEnvVar(varName);
+    });
+}
+
+// Exporta variáveis de ambiente validadas
+const PORT = parseInt(env.PORT, 10);
 
 // Redis Configuration
 const REDIS_CONFIG = {
-    host: validateEnvVar('REDIS_HOST', 'localhost'),
-    port: parseInt(validateEnvVar('REDIS_PORT', '6379')),
-    password: validateEnvVar('REDIS_PASSWORD', ''),
+    host: env.REDIS_HOST,
+    port: parseInt(env.REDIS_PORT),
+    password: env.REDIS_PASSWORD,
     ttl: {
         tracking: {
             default: 2592000,    // 30 dias
@@ -146,10 +151,10 @@ const REDIS_CONFIG = {
 // Nuvemshop Configuration
 const NUVEMSHOP_CONFIG = {
     // Configurações da API
-    apiUrl: validateEnvVar('NUVEMSHOP_API_URL'),
-    accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN'),
-    userId: validateEnvVar('NUVEMSHOP_USER_ID'),
-    scope: validateEnvVar('NUVEMSHOP_SCOPE').split(','),
+    apiUrl: env.NUVEMSHOP_API_URL,
+    accessToken: env.NUVEMSHOP_ACCESS_TOKEN,
+    userId: env.NUVEMSHOP_USER_ID,
+    scope: env.NUVEMSHOP_SCOPE.split(','),
     
     // Configurações do webhook
     webhook: {
@@ -218,8 +223,8 @@ const NUVEMSHOP_CONFIG = {
 
 // OpenAI Configuration
 const OPENAI_CONFIG = {
-    apiKey: validateEnvVar('OPENAI_API_KEY', 'dummy_key'),
-    assistantId: validateEnvVar('ASSISTANT_ID', 'dummy_assistant'),
+    apiKey: env.OPENAI_API_KEY,
+    assistantId: env.ASSISTANT_ID,
     baseUrl: 'https://api.openai.com/v1',
     models: {
         chat: 'gpt-4o',
@@ -234,7 +239,7 @@ const OPENAI_CONFIG = {
 
 // Groq Configuration
 const GROQ_CONFIG = {
-    apiKey: validateEnvVar('GROQ_API_KEY'),
+    apiKey: env.GROQ_API_KEY,
     models: {
         vision: 'llama-3.2-90b-vision-preview',
         audio: 'whisper-large-v3-turbo',
@@ -263,14 +268,14 @@ const RATE_LIMIT_CONFIG = {
 
 // WhatsApp Configuration
 const WHATSAPP_CONFIG = {
-    apiUrl: validateEnvVar('WAPI_URL', 'http://localhost:8080'),
-    token: validateEnvVar('WAPI_TOKEN', 'dummy_token'),
-    connectionKey: validateEnvVar('WAPI_CONNECTION_KEY', 'dummy_key'),
+    apiUrl: env.WAPI_URL,
+    token: env.WAPI_TOKEN,
+    connectionKey: env.WAPI_CONNECTION_KEY,
     departments: {
-        financial: validateEnvVar('FINANCIAL_DEPT_NUMBER', '123456'),
-        support: validateEnvVar('SUPPORT_DEPT_NUMBER', '123457'),
-        sales: validateEnvVar('SALES_DEPT_NUMBER', '123458'),
-        technical: validateEnvVar('TECHNICAL_DEPT_NUMBER', '123459')
+        financial: env.FINANCIAL_DEPT_NUMBER,
+        support: env.SUPPORT_DEPT_NUMBER,
+        sales: env.SALES_DEPT_NUMBER,
+        technical: env.TECHNICAL_DEPT_NUMBER
     },
     messageDelay: 3000, // delay padrão entre mensagens em ms
     retryAttempts: 3,
@@ -334,14 +339,14 @@ const WHATSAPP_CONFIG = {
             method: 'GET'
         }
     },
-    whatsappNumber: validateEnvVar('WHATSAPP_NUMBER', '')  
+    whatsappNumber: env.WHATSAPP_NUMBER  
 };
 
 // 17track Configuration
 const TRACKING_CONFIG = {
     // API Configuration
-    endpoint: validateEnvVar('TRACK17_API_URL', 'https://api.17track.net/track/v2'),
-    apiKey: validateEnvVar('TRACK17_API_KEY', 'dummy_key'),
+    endpoint: env.TRACK17_API_URL,
+    apiKey: env.TRACK17_API_KEY,
     
     // API Paths
     paths: {
@@ -371,7 +376,7 @@ const TRACKING_CONFIG = {
 
     // Webhook Configuration
     webhook: {
-        secret: validateEnvVar('TRACK17_WEBHOOK_SECRET', 'dummy_secret'),
+        secret: env.TRACK17_WEBHOOK_SECRET,
         events: [
             'tracking.created',
             'tracking.updated',
@@ -511,7 +516,7 @@ const LOGGING_CONFIG = {
 
 // FFmpeg Configuration
 const FFMPEG_CONFIG = {
-    path: validateEnvVar('FFMPEG_PATH', './node_modules/ffmpeg-static/ffmpeg'),
+    path: env.FFMPEG_PATH,
     options: {
         audioFormat: 'wav',
         sampleRate: 16000,
@@ -530,6 +535,7 @@ const CACHE_CONFIG = {
 };
 
 module.exports = {
+    PORT,
     REDIS_CONFIG,
     NUVEMSHOP_CONFIG,
     OPENAI_CONFIG,
