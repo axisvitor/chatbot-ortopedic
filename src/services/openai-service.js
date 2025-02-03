@@ -250,8 +250,8 @@ class OpenAIService {
     _getAssistantFunctions() {
         return [
             {
-                name: "check_order",
-                description: "Verifica informações básicas de pedidos como status, pagamento e produtos. NÃO atualiza automaticamente o status de rastreio.",
+                name: "get_complete_order_info",
+                description: "Busca informações completas do pedido incluindo status de rastreio atualizado",
                 parameters: {
                     type: "object",
                     required: ["order_number"],
@@ -264,106 +264,87 @@ class OpenAIService {
                 }
             },
             {
-                name: "check_tracking",
-                description: "Busca status atualizado de entrega diretamente na transportadora. Use em conjunto com check_order quando precisar de status atualizado.",
-                parameters: {
-                    type: "object",
-                    required: ["tracking_code"],
-                    properties: {
-                        tracking_code: {
-                            type: "string",
-                            description: "Código de rastreio (ex: NM123456789BR)"
-                        }
-                    }
-                }
-            },
-            {
-                name: "extract_order_number",
-                description: "Identifica números de pedido no texto do cliente. Use antes de check_order para validar números.",
-                parameters: {
-                    type: "object",
-                    required: ["text"],
-                    properties: {
-                        text: {
-                            type: "string",
-                            description: "Texto do cliente para extrair número do pedido"
-                        }
-                    }
-                }
-            },
-            {
                 name: "get_business_hours",
-                description: "Retorna informações sobre horário de atendimento e disponibilidade",
+                description: "Verifica o horário de atendimento atual",
                 parameters: {
                     type: "object",
                     properties: {}
                 }
             },
             {
+                name: "forward_to_financial",
+                description: "Encaminha caso para análise do setor financeiro",
+                parameters: {
+                    type: "object",
+                    required: ["message", "userContact"],
+                    properties: {
+                        message: {
+                            type: "string",
+                            description: "Mensagem do cliente"
+                        },
+                        userContact: {
+                            type: "string",
+                            description: "WhatsApp do cliente"
+                        },
+                        orderNumber: {
+                            type: "string",
+                            description: "Número do pedido (opcional)"
+                        }
+                    }
+                }
+            },
+            {
                 name: "forward_to_department",
-                description: "Encaminha casos para outros departamentos da Loja Ortopedic",
+                description: "Encaminha caso para um departamento específico",
                 parameters: {
                     type: "object",
                     required: ["message", "department", "userContact"],
                     properties: {
                         message: {
                             type: "string",
-                            description: "Mensagem original do cliente"
+                            description: "Mensagem do cliente"
                         },
                         department: {
                             type: "string",
                             enum: ["support", "sales", "technical", "shipping", "quality"],
-                            description: "Departamento para encaminhamento"
+                            description: "Departamento destino"
                         },
                         userContact: {
                             type: "string",
-                            description: "Contato do cliente (WhatsApp)"
+                            description: "WhatsApp do cliente"
                         },
                         priority: {
                             type: "string",
                             enum: ["low", "normal", "high", "urgent"],
                             default: "normal",
-                            description: "Nível de urgência do caso"
-                        },
-                        reason: {
-                            type: "string",
-                            description: "Motivo do encaminhamento"
+                            description: "Prioridade do caso"
                         },
                         orderNumber: {
                             type: "string",
-                            description: "Número do pedido (se disponível)"
-                        },
-                        trackingCode: {
-                            type: "string",
-                            description: "Código de rastreio (se disponível)"
+                            description: "Número do pedido (opcional)"
                         }
                     }
                 }
             },
             {
                 name: "request_payment_proof",
-                description: "Gerencia todo o fluxo de solicitação e processamento de comprovantes de pagamento",
+                description: "Gerencia solicitações de comprovante de pagamento",
                 parameters: {
                     type: "object",
                     required: ["action", "order_number"],
                     properties: {
                         action: {
                             type: "string",
-                            enum: ["request", "validate", "process", "cancel"],
+                            enum: ["request", "process", "validate", "cancel"],
                             description: "Ação a ser executada"
                         },
                         order_number: {
                             type: "string",
                             description: "Número do pedido"
                         },
-                        status: {
-                            type: "string",
-                            enum: ["pending", "processing", "approved", "rejected"],
-                            description: "Status do comprovante"
-                        },
                         image_url: {
                             type: "string",
-                            description: "URL da imagem do comprovante (apenas para action=process)"
+                            description: "URL da imagem do comprovante (necessário apenas para action='process')"
                         }
                     }
                 }
@@ -2067,6 +2048,10 @@ class OpenAIService {
                     result = await this._forwardToFinancial(args, threadId);
                     break;
 
+                case 'get_complete_order_info':
+                    result = await this._getCompleteOrderInfo(args, threadId);
+                    break;
+
                 default:
                     logger.warn('UnknownTool', {
                         threadId,
@@ -2090,6 +2075,155 @@ class OpenAIService {
                 toolName: name
             });
             throw error;
+        }
+    }
+
+    /**
+     * Busca informações completas do pedido incluindo rastreio
+     * @private
+     * @param {Object} args - Argumentos da função
+     * @param {string} threadId - ID da thread
+     * @returns {Promise<Object>} Informações completas do pedido
+     */
+    async _getCompleteOrderInfo(args, threadId) {
+        try {
+            const orderNumber = args.order_number?.trim();
+            if (!orderNumber) {
+                return {
+                    error: true,
+                    message: 'Por favor, forneça o número do pedido.'
+                };
+            }
+
+            // Busca o pedido na Nuvemshop
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            if (!order) {
+                return {
+                    error: true,
+                    message: `Pedido #${orderNumber} não encontrado. Por favor, verifique o número e tente novamente.`
+                };
+            }
+
+            // Formata os produtos
+            const products = order.products.map(p => {
+                const variations = p.variant_values ? ` (${p.variant_values.join(', ')})` : '';
+                return `▫ ${p.quantity}x ${p.name}${variations} - R$ ${p.price}`;
+            }).join('\n');
+
+            // Formata o valor total
+            const total = new Intl.NumberFormat('pt-BR', {
+                style: 'currency',
+                currency: 'BRL'
+            }).format(order.total);
+
+            // Monta a resposta base do pedido
+            let response = {
+                success: true,
+                orderNumber: order.number,
+                orderInfo: {
+                    customer: order.customer.name,
+                    date: new Date(order.created_at).toLocaleDateString('pt-BR'),
+                    status: order.status,
+                    paymentStatus: order.payment_status,
+                    total: total,
+                    products: products
+                }
+            };
+
+            // Se tiver código de rastreio, busca informações de entrega
+            if (order.shipping_tracking_number) {
+                try {
+                    const trackingInfo = await this.trackingService.getTrackingStatus(order.shipping_tracking_number);
+                    if (trackingInfo) {
+                        const lastUpdate = trackingInfo.lastUpdate ? 
+                            moment(trackingInfo.lastUpdate).format('DD/MM/YYYY HH:mm') : 
+                            'Não disponível';
+
+                        response.tracking = {
+                            code: order.shipping_tracking_number,
+                            status: trackingInfo.status,
+                            location: trackingInfo.location || 'Não disponível',
+                            lastUpdate: lastUpdate,
+                            description: trackingInfo.description || 'Sem descrição disponível'
+                        };
+
+                        // Adiciona os últimos 3 eventos se disponíveis
+                        if (trackingInfo.events?.length > 0) {
+                            response.tracking.events = trackingInfo.events.slice(0, 3).map(event => ({
+                                date: moment(event.date).format('DD/MM/YYYY HH:mm'),
+                                status: event.status,
+                                location: event.location
+                            }));
+                        }
+                    }
+                } catch (error) {
+                    logger.error('ErrorTrackingLookup', {
+                        error: error.message,
+                        orderNumber,
+                        trackingCode: order.shipping_tracking_number
+                    });
+                    // Não falha se o rastreio der erro, apenas indica que não está disponível
+                    response.tracking = {
+                        code: order.shipping_tracking_number,
+                        status: 'Não disponível no momento',
+                        error: 'Não foi possível obter informações de rastreio'
+                    };
+                }
+            }
+
+            // Formata a mensagem final
+            let message = [
+                `🛍 Pedido #${order.number}`,
+                '',
+                `👤 Cliente: ${response.orderInfo.customer}`,
+                `📅 Data: ${response.orderInfo.date}`,
+                `📦 Status: ${response.orderInfo.status}`,
+                `💰 Valor Total: ${response.orderInfo.total}`,
+                '',
+                'Produtos:',
+                response.orderInfo.products
+            ];
+
+            // Adiciona informações de rastreio se disponíveis
+            if (response.tracking) {
+                message.push(
+                    '',
+                    '📦 Informações de Entrega',
+                    `🔍 Status: ${response.tracking.status}`,
+                    `📍 Local: ${response.tracking.location}`,
+                    `🕒 Última Atualização: ${response.tracking.lastUpdate}`
+                );
+
+                if (response.tracking.events) {
+                    message.push(
+                        '',
+                        '📋 Histórico:'
+                    );
+                    response.tracking.events.forEach(event => {
+                        message.push(
+                            `▫️ ${event.date}`,
+                            `  ${event.status}`,
+                            `  📍 ${event.location}`,
+                            ''
+                        );
+                    });
+                }
+            }
+
+            response.message = message.join('\n');
+            return response;
+
+        } catch (error) {
+            logger.error('ErrorGettingOrderInfo', {
+                error: error.message,
+                stack: error.stack,
+                threadId,
+                orderNumber: args.order_number
+            });
+            return {
+                error: true,
+                message: 'Desculpe, ocorreu um erro ao buscar as informações do pedido. Por favor, tente novamente em alguns instantes.'
+            };
         }
     }
 }
