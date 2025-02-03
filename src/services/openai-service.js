@@ -30,6 +30,15 @@ class OpenAIService {
         this.redisStore = new RedisStore(); // Redis para controlar runs ativos
         this.contextManager = new ContextManager(this.redisStore);
         
+        // Serviços
+        this.nuvemshopService = nuvemshopService || new NuvemshopService();
+        this.trackingService = trackingService;
+        this.businessHoursService = businessHoursService;
+        this.orderValidationService = orderValidationService;
+        this.financialService = financialService;
+        this.departmentService = departmentService;
+        this.whatsappService = whatsappService;
+        
         // Conecta ao Redis
         this.redisStore.connect().catch(error => {
             console.error('[OpenAI] Erro ao conectar ao Redis:', error);
@@ -64,15 +73,6 @@ class OpenAIService {
         this.THREAD_CACHE_TTL = 30 * 60 * 1000; // 30 minutos de cache
         this.MAX_THREAD_MESSAGES = 10; // Máximo de mensagens por thread
         this.CONTEXT_UPDATE_INTERVAL = 15 * 60 * 1000; // 15 minutos em ms
-
-        // Serviços injetados
-        this.nuvemshopService = nuvemshopService;
-        this.trackingService = trackingService;
-        this.businessHoursService = businessHoursService;
-        this.orderValidationService = orderValidationService;
-        this.financialService = financialService;
-        this.departmentService = departmentService;
-        this.whatsappService = whatsappService;
 
         // Inicializa limpeza periódica
         setInterval(() => this._cleanupCache(), this.THREAD_CACHE_TTL);
@@ -796,48 +796,7 @@ class OpenAIService {
                 switch (name) {
                     case 'check_order':
                         try {
-                            output = await this.nuvemshopService.getOrderByNumber(parsedArgs.order_number);
-                            
-                            if (!output) {
-                                output = { 
-                                    error: true, 
-                                    message: `Pedido ${parsedArgs.order_number} não foi encontrado. Por favor, verifique se o número está correto.` 
-                                };
-                            } else {
-                                // Salva pedido no contexto para uso futuro
-                                context.order = output;
-                                
-                                // Formata a saída para melhor visualização
-                                const statusEmoji = {
-                                    pending: '⏳',
-                                    paid: '✅',
-                                    canceled: '❌',
-                                    refunded: '↩️'
-                                };
-
-                                const shippingEmoji = {
-                                    pending: '📦',
-                                    ready: '🚚',
-                                    shipped: '✈️',
-                                    delivered: '📬'
-                                };
-
-                                const paymentStatus = output.payment_status.toLowerCase();
-                                const shippingStatus = output.shipping_status.toLowerCase();
-
-                                output = {
-                                    success: true,
-                                    message: `🛍️ Detalhes do Pedido #${output.number}\n\n` +
-                                        `${statusEmoji[paymentStatus] || '❓'} Pagamento: ${output.payment_status}\n` +
-                                        `${shippingEmoji[shippingStatus] || '❓'} Envio: ${output.shipping_status}\n` +
-                                        (output.shipping_tracking_number ? 
-                                            `📌 Rastreio: ${output.shipping_tracking_number}\n` : '') +
-                                        `\n💰 Total: R$ ${(output.total/100).toFixed(2)}\n\n` +
-                                        `📝 Produtos:\n${output.products.map(p => 
-                                            `▫️ ${p.quantity}x ${p.name} - R$ ${p.price}`
-                                        ).join('\n')}`
-                                };
-                            }
+                            output = await this._checkOrder(parsedArgs, threadId);
                         } catch (error) {
                             logger.error('ErrorCheckingOrder', {
                                 error: error.message,
@@ -1978,7 +1937,7 @@ class OpenAIService {
         }
     }
 
-    async _checkOrder(args) {
+    async _checkOrder(args, threadId) {
         try {
             const orderNumber = args.order_number.replace(/[^\d]/g, '');
             
@@ -2003,14 +1962,15 @@ class OpenAIService {
             };
 
             // Salva no contexto
-            const threadId = await this.redisStore.get(`${REDIS_CONFIG.prefix.openai}current_thread`);
             if (threadId) {
                 const context = await this.contextManager.getContext(threadId);
-                context.order = {
-                    ...response,
-                    lastCheck: Date.now()
-                };
-                await this.contextManager.updateContext(threadId, context);
+                if (context) {
+                    context.order = {
+                        ...response,
+                        lastCheck: Date.now()
+                    };
+                    await this.contextManager.updateContext(threadId, context);
+                }
             }
 
             return response;
