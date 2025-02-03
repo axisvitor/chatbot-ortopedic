@@ -13,6 +13,7 @@ class WhatsAppService {
         this.paymentProofMessages = {};
         this.pendingProofs = new Map(); // Armazena comprovantes aguardando número do pedido
         this.orderValidationService = orderValidationService;
+        this.openaiService = null; // Armazena a instância do OpenAIService
         
         // Limpa comprovantes antigos a cada hora
         setInterval(() => this._cleanupPendingProofs(), 60 * 60 * 1000);
@@ -63,7 +64,25 @@ class WhatsAppService {
      * @private
      */
     get _openaiService() {
-        return new OpenAIService();
+        if (!this.openaiService) {
+            console.error('❌ [WhatsApp] OpenAIService não foi configurado');
+            throw new Error('OpenAIService não configurado');
+        }
+        return this.openaiService;
+    }
+
+    /**
+     * Define o serviço OpenAI após inicialização
+     * @param {Object} service Instância do OpenAIService
+     */
+    setOpenAIService(service) {
+        console.log('🔄 [WhatsApp] Configurando OpenAIService...');
+        if (!service) {
+            console.error('❌ [WhatsApp] Tentativa de configurar OpenAIService com valor nulo');
+            throw new Error('OpenAIService não pode ser nulo');
+        }
+        this.openaiService = service;
+        console.log('✅ [WhatsApp] OpenAIService configurado com sucesso');
     }
 
     /**
@@ -801,44 +820,6 @@ class WhatsAppService {
         }
     }
 
-    /**
-     * Executa uma função com retry e backoff exponencial
-     * @private
-     * @param {Function} fn - Função a ser executada
-     * @param {number} maxRetries - Número máximo de tentativas
-     * @returns {Promise<any>} Resultado da função
-     */
-    async _retryWithExponentialBackoff(fn, maxRetries = 3) {
-        for (let i = 0; i < maxRetries; i++) {
-            try {
-                return await fn();
-            } catch (error) {
-                if (i === maxRetries - 1) throw error;
-                await this.delay(Math.pow(2, i) * 1000);
-            }
-        }
-    }
-
-    /**
-     * Identifica o tipo real da mensagem
-     * @private
-     * @param {Object} message - Mensagem do WhatsApp
-     * @returns {Object} Mensagem real extraída
-     * @throws {Error} Se a estrutura for inválida
-     */
-    _extractRealMessage(message) {
-        const realMessage = message?.message?.ephemeralMessage?.message || // Mensagem ephemeral
-                          message?.message?.viewOnceMessage?.message ||    // Mensagem "ver uma vez"
-                          message?.message?.forwardedMessage ||           // Mensagem encaminhada
-                          message?.message;                              // Mensagem normal
-
-        if (!realMessage) {
-            throw new Error('Estrutura da mensagem inválida');
-        }
-
-        return realMessage;
-    }
-
     async handleTextMessage(message) {
         try {
             console.log('💬 [WhatsApp] Processando mensagem de texto:', {
@@ -872,13 +853,36 @@ class WhatsAppService {
                 `[USUÁRIO: ${message.pushName}] ${text}` : 
                 text;
 
+            console.log('🤖 [WhatsApp] Chamando OpenAI Assistant...', {
+                from,
+                contextText: contextText.substring(0, 100)
+            });
+
+            // Verifica se o OpenAIService está configurado
+            if (!this._openaiService) {
+                console.error('❌ [WhatsApp] OpenAIService não está configurado');
+                throw new Error('OpenAIService não configurado');
+            }
+
             // Processa a mensagem com o Assistant
             const response = await this._openaiService.runAssistant(from, contextText);
+
+            console.log('✨ [WhatsApp] Resposta do Assistant:', {
+                from,
+                responseType: typeof response,
+                responseLength: response?.length,
+                responsePreview: response?.substring(0, 100)
+            });
 
             if (!response || typeof response !== 'string') {
                 console.error('❌ [WhatsApp] Resposta inválida do Assistant:', response);
                 throw new Error('Resposta inválida do Assistant');
             }
+
+            console.log('📤 [WhatsApp] Enviando resposta...', {
+                to: from,
+                length: response.length
+            });
 
             await this.sendText(from, response);
             console.log('✅ [WhatsApp] Resposta enviada com sucesso');
@@ -886,16 +890,21 @@ class WhatsAppService {
         } catch (error) {
             console.error('❌ [WhatsApp] Erro ao processar mensagem de texto:', {
                 erro: error.message,
-                stack: error.stack
+                stack: error.stack,
+                timestamp: new Date().toISOString()
             });
 
-            const from = message.key?.remoteJid?.replace('@s.whatsapp.net', '');
-            if (from) {
-                await this.sendText(
-                    from,
-                    'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente em alguns instantes.'
-                );
+            // Se for um erro de OpenAI não configurado, tenta enviar mensagem de erro para o usuário
+            if (error.message === 'OpenAIService não configurado') {
+                try {
+                    await this.sendText(message.key.remoteJid.replace('@s.whatsapp.net', ''), 
+                        '❌ Desculpe, estou com um problema técnico no momento. Por favor, tente novamente mais tarde.');
+                } catch (sendError) {
+                    console.error('❌ [WhatsApp] Erro ao enviar mensagem de erro:', sendError);
+                }
             }
+
+            throw error;
         }
     }
 
@@ -1063,14 +1072,6 @@ class WhatsAppService {
             });
             return false;
         }
-    }
-
-    /**
-     * Define o serviço OpenAI após inicialização
-     * @param {Object} service Instância do OpenAIService
-     */
-    setOpenAIService(service) {
-        this.openAIService = service;
     }
 
     /**
