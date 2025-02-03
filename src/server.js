@@ -321,19 +321,38 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
         
         console.log('📨 Mensagem recebida:', {
             tipo: message.message?.imageMessage ? 'imagem' : 'texto',
-            de: message.key?.remoteJid
+            de: message.key?.remoteJid,
+            texto: message.message?.conversation || message.message?.extendedTextMessage?.text
         });
+
+        // Extrai o remetente
+        const from = message.key?.remoteJid?.replace('@s.whatsapp.net', '');
+        if (!from) {
+            throw new Error('Remetente não encontrado na mensagem');
+        }
 
         // Processa imagens
         if (message.message?.imageMessage) {
             const result = await aiServices.handleImageMessage(message);
             
-            // Envia a resposta para o usuário
+            // Envia a resposta do processamento da imagem
             if (result.response) {
                 await whatsappService.sendText(
                     message.key.remoteJid,
                     result.response
                 );
+            }
+        } 
+        // Processa mensagens de texto
+        else if (message.message?.conversation || message.message?.extendedTextMessage?.text) {
+            const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
+            
+            // Processa a mensagem com o OpenAI Assistant
+            const response = await openAIService.runAssistant(from, text);
+            
+            // Envia a resposta do Assistant
+            if (response) {
+                await whatsappService.sendText(from, response);
             }
         }
         
