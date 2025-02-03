@@ -1305,11 +1305,9 @@ class OpenAIService {
      * @returns {Promise<string>} Resposta do assistant
      */
     async _waitForResponse(threadId, runId) {
-        const maxRetries = 10;
-        const initialDelay = 1000;
-        const maxDelay = 5000;
+        const maxRetries = 8;
         const timeout = 30000;
-        const maxToolCalls = 3; // Reduzido para 3 chamadas máximas
+        const maxToolCalls = 5;
 
         let attempt = 0;
         let toolCallCount = 0;
@@ -1319,21 +1317,16 @@ class OpenAIService {
         while (attempt < maxRetries) {
             try {
                 if (Date.now() - startTime > timeout) {
+                    await this.cancelActiveRun(threadId);
                     throw new Error('Timeout ao aguardar resposta do assistant');
                 }
 
-                const run = await this.client.beta.threads.runs.retrieve(
-                    threadId,
-                    runId
-                );
+                const run = await this.client.beta.threads.runs.retrieve(threadId, runId);
 
                 switch (run.status) {
                     case 'completed':
-                        const messages = await this.client.beta.threads.messages.list(
-                            threadId,
-                            { order: 'desc', limit: 1 }
-                        );
-                        
+                        await this.removeActiveRun(threadId);
+                        const messages = await this.client.beta.threads.messages.list(threadId, { order: 'desc', limit: 1 });
                         const lastMessage = messages.data[0];
                         if (lastMessage.role === 'assistant') {
                             return lastMessage.content[0].text.value;
@@ -1341,61 +1334,66 @@ class OpenAIService {
                         break;
 
                     case 'failed':
+                        await this.cancelActiveRun(threadId);
                         throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
 
                     case 'expired':
-                        throw new Error('Run expirou');
+                    case 'cancelled':
+                        await this.removeActiveRun(threadId);
+                        throw new Error(`Run ${run.status}`);
 
                     case 'requires_action':
-                        toolCallCount++;
-                        if (toolCallCount > maxToolCalls) {
-                            logger.warn('[Assistant] Limite de chamadas excedido:', {
-                                threadId,
-                                runId,
-                                toolCalls: toolCallCount
-                            });
-                            throw new Error('Número máximo de chamadas de ferramentas excedido');
-                        }
+                        if (run.required_action?.submit_tool_outputs?.tool_calls) {
+                            toolCallCount++;
+                            
+                            if (toolCallCount > maxToolCalls) {
+                                await this.cancelActiveRun(threadId);
+                                throw new Error('Número máximo de chamadas de ferramentas excedido');
+                            }
 
-                        // Verifica chamadas repetidas
-                        const toolCall = JSON.stringify(run.required_action.submit_tool_outputs.tool_calls);
-                        if (toolCallHistory.has(toolCall)) {
-                            logger.warn('[Assistant] Chamada repetida detectada:', {
-                                threadId,
-                                runId,
-                                toolCall: run.required_action.submit_tool_outputs.tool_calls
-                            });
-                            throw new Error('Chamada de função repetida detectada');
-                        }
-                        toolCallHistory.add(toolCall);
+                            // Verifica chamadas repetidas
+                            const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
+                            for (const call of toolCalls) {
+                                const callKey = `${call.function.name}:${call.function.arguments}`;
+                                if (toolCallHistory.has(callKey)) {
+                                    await this.cancelActiveRun(threadId);
+                                    throw new Error('Chamada de função repetida detectada');
+                                }
+                                toolCallHistory.add(callKey);
+                            }
 
-                        await this.handleToolCalls(run, threadId);
+                            await this.handleToolCalls(run, threadId);
+                        }
+                        break;
+
+                    case 'queued':
+                    case 'in_progress':
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                         break;
 
                     default:
-                        const delay = Math.min(initialDelay * Math.pow(2, attempt), maxDelay);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                        attempt++;
+                        logger.warn('StatusDesconhecido', { threadId, runId, status: run.status });
+                        await new Promise(resolve => setTimeout(resolve, 1000));
                 }
+
             } catch (error) {
-                logger.error('[Assistant] Erro ao aguardar resposta:', {
-                    threadId,
-                    runId,
-                    attempt,
-                    error: error.message,
-                    stack: error.stack
-                });
-
-                if (attempt >= maxRetries - 1) {
-                    throw error;
-                }
-
-                await new Promise(resolve => setTimeout(resolve, initialDelay));
                 attempt++;
+                if (attempt >= maxRetries) {
+                    await this.cancelActiveRun(threadId);
+                    throw new Error(`Erro ao aguardar resposta após ${maxRetries} tentativas: ${error.message}`);
+                }
+                logger.warn('ErroAguardandoResposta', { 
+                    threadId, 
+                    runId, 
+                    attempt,
+                    error: error.message 
+                });
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
 
-        throw new Error('Máximo de tentativas excedido ao aguardar resposta');
+        await this.cancelActiveRun(threadId);
+        throw new Error('Máximo de tentativas excedido');
     }
 
     /**
