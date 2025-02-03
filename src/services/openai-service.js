@@ -539,51 +539,63 @@ class OpenAIService {
      */
     async processMessage(messageData) {
         try {
-            // Valida os dados da mensagem
-            if (!messageData?.customerId || !messageData?.messageText) {
-                throw new Error('CustomerId e messageText são obrigatórios');
-            }
-
-            // Verifica se já existe um thread para o cliente
-            const threadId = await this.getOrCreateThreadForCustomer(messageData.customerId);
-            
-            // Prepara a mensagem para o OpenAI
-            const message = {
-                role: 'user',
-                content: messageData.messageText
-            };
-
-            // Adiciona a mensagem e executa o assistente
-            const run = await this.addMessageAndRun(threadId, {
-                ...messageData,
-                role: message.role,
-                content: message.content
+            console.log('🤖 [Assistant] Iniciando processamento:', {
+                customerId: messageData.customerId,
+                messageId: messageData.messageId,
+                messageLength: messageData.messageText?.length,
+                timestamp: new Date().toISOString()
             });
 
-            if (!run || !run.id) {
-                throw new Error('Run não foi criado corretamente');
-            }
+            const threadId = await this._getThreadId(messageData.customerId);
+            
+            console.log('🧵 [Assistant] Thread identificada:', {
+                threadId,
+                isNew: !this.threadCache.has(threadId),
+                timestamp: new Date().toISOString()
+            });
 
-            // Aguarda a resposta completa
-            const response = await this.waitForResponse(threadId, run.id);
+            // Adiciona a mensagem ao thread
+            const message = await this.client.beta.threads.messages.create(threadId, {
+                role: 'user',
+                content: messageData.messageText
+            });
 
-            // Remove o run ativo após obter a resposta
-            await this.removeActiveRun(threadId);
+            console.log('💬 [Assistant] Mensagem adicionada ao thread:', {
+                messageId: message.id,
+                threadId,
+                timestamp: new Date().toISOString()
+            });
+
+            // Executa o assistant
+            const run = await this.client.beta.threads.runs.create(threadId, {
+                assistant_id: this.assistantId
+            });
+
+            console.log('🚀 [Assistant] Run iniciado:', {
+                runId: run.id,
+                threadId,
+                status: run.status,
+                timestamp: new Date().toISOString()
+            });
+
+            // Aguarda a conclusão
+            const response = await this._waitForResponse(threadId, run.id);
+
+            console.log('✅ [Assistant] Resposta gerada:', {
+                runId: run.id,
+                threadId,
+                responseLength: response?.length,
+                timestamp: new Date().toISOString()
+            });
 
             return response;
-
         } catch (error) {
-            // Registra erro
-            logger.error('ErrorProcessingMessage', {
-                error: {
-                    customerId: messageData?.customerId,
-                    messageId: messageData?.messageId,
-                    error: {
-                        message: error.message,
-                        stack: error.stack
-                    },
-                    timestamp: new Date().toISOString()
-                }
+            console.error('❌ [Assistant] Erro ao processar mensagem:', {
+                erro: error.message,
+                stack: error.stack,
+                customerId: messageData.customerId,
+                messageId: messageData.messageId,
+                timestamp: new Date().toISOString()
             });
             throw error;
         }
@@ -1565,76 +1577,64 @@ class OpenAIService {
      */
     async waitForResponse(threadId, runId) {
         try {
-            console.log('🔄 [OpenAI] Aguardando resposta...', { threadId, runId });
-            let run = await this.checkRunStatus(threadId, runId);
-            let attempts = 0;
-            const maxAttempts = 30; // 30 segundos no máximo
-
-            while (run.status === 'queued' || run.status === 'in_progress') {
-                if (attempts >= maxAttempts) {
-                    console.error('⚠️ [OpenAI] Timeout aguardando resposta');
-                    throw new Error('Timeout aguardando resposta do assistant');
-                }
-
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                run = await this.checkRunStatus(threadId, runId);
-                attempts++;
-            }
-
-            if (run.status === 'requires_action') {
-                console.log('🛠️ [OpenAI] Ação requerida, processando tool calls...');
-                
-                if (run.required_action?.type === 'submit_tool_outputs') {
-                    const toolOutputs = await this.handleToolCalls(run, threadId);
-                    
-                    // Submete os resultados das tools
-                    run = await this.client.beta.threads.runs.submitToolOutputs(
-                        threadId,
-                        runId,
-                        { tool_outputs: toolOutputs }
-                    );
-
-                    // Aguarda novamente pela resposta
-                    return await this.waitForResponse(threadId, runId);
-                }
-            }
-
-            if (run.status === 'completed') {
-                console.log('✅ [OpenAI] Run completado, buscando mensagens...');
-                
-                // Busca as mensagens mais recentes
-                const messages = await this.client.beta.threads.messages.list(threadId);
-                const lastMessage = messages.data[0];
-
-                if (!lastMessage) {
-                    console.error('❌ [OpenAI] Nenhuma mensagem encontrada após completar o run');
-                    throw new Error('Nenhuma mensagem encontrada');
-                }
-
-                // Remove o run ativo
-                await this.removeActiveRun(threadId);
-
-                // Retorna o conteúdo da última mensagem
-                return lastMessage.content[0].text.value;
-            }
-
-            if (run.status === 'failed') {
-                console.error('❌ [OpenAI] Run falhou:', run.last_error);
-                throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
-            }
-
-            if (run.status === 'expired') {
-                console.error('⚠️ [OpenAI] Run expirou');
-                throw new Error('Run expirou');
-            }
-
-            throw new Error(`Status inesperado do run: ${run.status}`);
-        } catch (error) {
-            console.error('❌ [OpenAI] Erro ao aguardar resposta:', {
+            console.log('⏳ [OpenAI] Aguardando resposta:', {
                 threadId,
                 runId,
+                timestamp: new Date().toISOString()
+            });
+
+            // Aguarda até o run completar
+            let run;
+            do {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                run = await this.checkRunStatus(threadId, runId);
+                
+                console.log('🔄 [OpenAI] Status do processamento:', {
+                    threadId,
+                    runId,
+                    status: run.status,
+                    timestamp: new Date().toISOString()
+                });
+
+            } while (run.status === 'queued' || run.status === 'in_progress');
+
+            // Verifica se houve erro
+            if (run.status === 'failed') {
+                console.error('❌ [OpenAI] Run falhou:', {
+                    threadId,
+                    runId,
+                    error: run.last_error,
+                    timestamp: new Date().toISOString()
+                });
+                throw new Error(`Run falhou: ${run.last_error?.message}`);
+            }
+
+            // Obtém as mensagens após o run completar
+            const messages = await this.client.beta.threads.messages.list(threadId);
+            const assistantMessages = messages.data
+                .filter(msg => msg.role === 'assistant' && msg.run_id === runId)
+                .map(msg => msg.content)
+                .flat()
+                .map(content => content.text?.value || '')
+                .join('\n');
+
+            console.log('📤 [OpenAI] Mensagens do assistant:', {
+                threadId,
+                runId,
+                messageCount: messages.data.length,
+                responseLength: assistantMessages.length,
+                timestamp: new Date().toISOString()
+            });
+
+            return assistantMessages;
+
+        } catch (error) {
+            console.error('❌ [OpenAI] Erro ao aguardar resposta:', {
                 erro: error.message,
-                stack: error.stack
+                stack: error.stack,
+                threadId,
+                runId,
+                timestamp: new Date().toISOString()
             });
             
             // Remove o run ativo em caso de erro

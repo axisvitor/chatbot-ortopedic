@@ -12,17 +12,31 @@ class WebhookService {
 
     async handleWebhook(data) {
         try {
-            console.log('📥 Webhook payload:', JSON.stringify(data, null, 2));
+            console.log('🔔 [Webhook] Nova mensagem recebida:', {
+                tipo: data?.type,
+                temBody: !!data?.body,
+                temMensagem: !!data?.body?.message || !!data?.message,
+                remetente: data?.body?.key?.remoteJid || data?.key?.remoteJid,
+                pushName: data?.body?.pushName || data?.pushName,
+                timestamp: new Date().toISOString(),
+                messageId: data?.body?.key?.id || data?.key?.id
+            });
 
             // Verifica se é uma mensagem do WhatsApp (W-API)
             if (data.type === 'message' || data.tipo === 'message') {
+                console.log('📱 [Webhook] Mensagem do WhatsApp detectada');
                 return this.handleWhatsAppMessage(data);
             }
 
             // Se não for mensagem do WhatsApp, trata como webhook da Nuvemshop
+            console.log('🏪 [Webhook] Mensagem da Nuvemshop detectada');
             return this.handleNuvemshopWebhook(data);
         } catch (error) {
-            console.error('[Webhook] Erro ao processar webhook:', error);
+            console.error('❌ [Webhook] Erro ao processar webhook:', {
+                erro: error.message,
+                stack: error.stack,
+                data: JSON.stringify(data)
+            });
             throw error;
         }
     }
@@ -78,16 +92,20 @@ class WebhookService {
             const messageData = this.extractMessageContent(data);
             
             if (!messageData.from) {
-                console.error('[WhatsApp] Mensagem inválida:', { messageData, data });
+                console.error('❌ [WhatsApp] Mensagem inválida:', { messageData, data });
                 throw new Error('Mensagem inválida: faltam campos obrigatórios');
             }
 
-            console.log(`[WhatsApp] Mensagem recebida de ${messageData.pushName || messageData.from}:`, {
+            console.log('📨 [WhatsApp] Nova mensagem processada:', {
+                remetente: messageData.from,
+                nome: messageData.pushName,
                 tipo: messageData.type,
-                texto: messageData.text,
+                texto: messageData.text?.substring(0, 100), // Mostra apenas os primeiros 100 caracteres
                 temImagem: messageData.type === 'image',
                 temAudio: messageData.type === 'audio',
-                temDocumento: messageData.type === 'document'
+                temDocumento: messageData.type === 'document',
+                messageId: messageData.messageId,
+                timestamp: new Date().toISOString()
             });
 
             // Se for imagem, processa primeiro
