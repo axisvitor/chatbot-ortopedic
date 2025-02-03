@@ -589,7 +589,7 @@ class OpenAIService {
             });
 
             // Aguarda a conclusão
-            const response = await this._waitForResponse(threadId, run.id);
+            const response = await this._waitForResponse(run, threadId);
 
             console.log('✅ [Assistant] Resposta gerada:', {
                 runId: run.id,
@@ -1285,100 +1285,139 @@ class OpenAIService {
     /**
      * Aguarda a resposta do assistant com retry e timeout
      * @private
+     * @param {string} run - Objeto de run
      * @param {string} threadId - ID da thread
-     * @param {string} runId - ID do run
      * @returns {Promise<string>} Resposta do assistant
      */
-    async _waitForResponse(threadId, runId) {
-        const maxRetries = 8;
-        const timeout = 30000;
-        const maxToolCalls = 5;
-
-        let attempt = 0;
+    async _waitForResponse(run, threadId) {
+        let attempts = 0;
         let toolCallCount = 0;
         const toolCallHistory = new Set();
-        const startTime = Date.now();
 
-        while (attempt < maxRetries) {
+        while (attempts < 8) {
             try {
-                if (Date.now() - startTime > timeout) {
-                    await this.cancelActiveRun(threadId);
-                    throw new Error('Timeout ao aguardar resposta do assistant');
+                attempts++;
+                const runStatus = await this.client.beta.threads.runs.retrieve(threadId, run.id);
+
+                if (runStatus.status === 'completed') {
+                    return runStatus;
                 }
 
-                const run = await this.client.beta.threads.runs.retrieve(threadId, runId);
-
-                switch (run.status) {
-                    case 'completed':
-                        await this.removeActiveRun(threadId);
-                        const messages = await this.client.beta.threads.messages.list(threadId, { order: 'desc', limit: 1 });
-                        const lastMessage = messages.data[0];
-                        if (lastMessage.role === 'assistant') {
-                            return lastMessage.content[0].text.value;
+                if (runStatus.status === 'requires_action') {
+                    const toolCalls = runStatus.required_action.submit_tool_outputs.tool_calls;
+                    
+                    // Verifica chamadas repetidas
+                    for (const call of toolCalls) {
+                        const callKey = `${call.function.name}:${call.function.arguments}`;
+                        if (toolCallHistory.has(callKey)) {
+                            logger.warn('ChamadaRepetidaDetectada', {
+                                threadId,
+                                runId: run.id,
+                                toolName: call.function.name
+                            });
+                            continue;
                         }
-                        break;
+                        toolCallHistory.add(callKey);
+                        toolCallCount++;
+                    }
 
-                    case 'failed':
-                        await this.cancelActiveRun(threadId);
-                        throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
+                    // Verifica limite de chamadas
+                    if (toolCallCount > 5) {
+                        throw new Error('Número máximo de chamadas de ferramentas excedido');
+                    }
 
-                    case 'expired':
-                    case 'cancelled':
-                        await this.removeActiveRun(threadId);
-                        throw new Error(`Run ${run.status}`);
-
-                    case 'requires_action':
-                        if (run.required_action?.submit_tool_outputs?.tool_calls) {
-                            toolCallCount++;
-                            
-                            if (toolCallCount > maxToolCalls) {
-                                await this.cancelActiveRun(threadId);
-                                throw new Error('Número máximo de chamadas de ferramentas excedido');
-                            }
-
-                            // Verifica chamadas repetidas
-                            const toolCalls = run.required_action.submit_tool_outputs.tool_calls;
-                            for (const call of toolCalls) {
-                                const callKey = `${call.function.name}:${call.function.arguments}`;
-                                if (toolCallHistory.has(callKey)) {
-                                    await this.cancelActiveRun(threadId);
-                                    throw new Error('Chamada de função repetida detectada');
-                                }
-                                toolCallHistory.add(callKey);
-                            }
-
-                            await this.handleToolCalls(run, threadId);
-                        }
-                        break;
-
-                    case 'queued':
-                    case 'in_progress':
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                        break;
-
-                    default:
-                        logger.warn('StatusDesconhecido', { threadId, runId, status: run.status });
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    // Processa chamadas de ferramentas
+                    const outputs = await this._processToolCalls(runStatus.required_action.submit_tool_outputs.tool_calls, threadId);
+                    
+                    if (outputs && outputs.length > 0) {
+                        await this.client.beta.threads.runs.submitToolOutputs(
+                            threadId,
+                            run.id,
+                            { tool_outputs: outputs }
+                        );
+                    }
                 }
+
+                if (runStatus.status === 'failed') {
+                    throw new Error(`Run falhou: ${runStatus.last_error?.message || 'Erro desconhecido'}`);
+                }
+
+                // Espera antes da próxima tentativa
+                await new Promise(resolve => setTimeout(resolve, 1500));
 
             } catch (error) {
-                attempt++;
-                if (attempt >= maxRetries) {
-                    await this.cancelActiveRun(threadId);
-                    throw new Error(`Erro ao aguardar resposta após ${maxRetries} tentativas: ${error.message}`);
-                }
-                logger.warn('ErroAguardandoResposta', { 
-                    threadId, 
-                    runId, 
-                    attempt,
-                    error: error.message 
+                logger.warn('ErroAguardandoResposta', {
+                    threadId,
+                    runId: run.id,
+                    attempt: attempts,
+                    error: error.message
                 });
-                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                if (attempts >= 8) {
+                    throw new Error(`Erro ao aguardar resposta após ${attempts} tentativas: ${error.message}`);
+                }
+
+                // Espera antes de tentar novamente
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
             }
         }
+    }
 
-        await this.cancelActiveRun(threadId);
-        throw new Error('Máximo de tentativas excedido');
+    /**
+     * Processa chamadas de ferramentas
+     * @private
+     * @param {Array} toolCalls - Array de chamadas de ferramentas
+     * @param {string} threadId - ID da thread
+     * @returns {Promise<Array>} - Array de respostas das chamadas de ferramentas
+     */
+    async _processToolCalls(toolCalls, threadId) {
+        try {
+            const outputs = [];
+            const processedCalls = new Set();
+
+            for (const toolCall of toolCalls) {
+                const { name, arguments: args } = toolCall.function;
+                const callKey = `${name}:${args}`;
+
+                // Evita processar a mesma chamada duas vezes
+                if (processedCalls.has(callKey)) {
+                    continue;
+                }
+                processedCalls.add(callKey);
+
+                // Verifica cache
+                const cachedResult = await this._getCachedToolResult(threadId, name, JSON.parse(args));
+                if (cachedResult) {
+                    outputs.push({
+                        tool_call_id: toolCall.id,
+                        output: JSON.stringify(cachedResult)
+                    });
+                    continue;
+                }
+
+                // Processa chamada
+                const result = await this._executeToolCall(name, JSON.parse(args), threadId);
+                
+                if (result) {
+                    outputs.push({
+                        tool_call_id: toolCall.id,
+                        output: JSON.stringify(result)
+                    });
+                    
+                    // Cache do resultado
+                    await this._cacheToolResult(threadId, name, JSON.parse(args), result);
+                }
+            }
+
+            return outputs;
+
+        } catch (error) {
+            logger.error('ErrorProcessingToolCalls', {
+                error: error.message,
+                threadId
+            });
+            throw error;
+        }
     }
 
     /**
@@ -1986,6 +2025,71 @@ class OpenAIService {
                 error: true,
                 message: 'Erro ao consultar pedido'
             };
+        }
+    }
+
+    /**
+     * Executa uma chamada de ferramenta
+     * @private
+     * @param {string} name - Nome da ferramenta
+     * @param {Object} args - Argumentos da ferramenta
+     * @param {string} threadId - ID da thread
+     * @returns {Promise<Object>} - Resultado da execução
+     */
+    async _executeToolCall(name, args, threadId) {
+        try {
+            logger.info('ExecutingTool', {
+                threadId,
+                toolName: name,
+                args: JSON.stringify(args)
+            });
+
+            let result;
+
+            switch (name) {
+                case 'check_order':
+                    result = await this._checkOrder(args, threadId);
+                    break;
+
+                case 'track_order':
+                    result = await this._trackOrder(args, threadId);
+                    break;
+
+                case 'check_business_hours':
+                    result = await this._checkBusinessHours(args);
+                    break;
+
+                case 'forward_to_department':
+                    result = await this._forwardToDepartment(args, threadId);
+                    break;
+
+                case 'forward_to_financial':
+                    result = await this._forwardToFinancial(args, threadId);
+                    break;
+
+                default:
+                    logger.warn('UnknownTool', {
+                        threadId,
+                        toolName: name
+                    });
+                    return null;
+            }
+
+            logger.info('ToolExecuted', {
+                threadId,
+                toolName: name,
+                success: !!result
+            });
+
+            return result;
+
+        } catch (error) {
+            logger.error('ErrorExecutingTool', {
+                error: error.message,
+                threadId,
+                toolName: name
+            });
+            throw error;
         }
     }
 }
