@@ -319,56 +319,6 @@ app.get('/healthcheck', (req, res) => {
     });
 });
 
-// Rota para webhook do WhatsApp
-app.post('/webhook/whatsapp', async (req, res) => {
-    try {
-        console.log('📥 Webhook do WhatsApp recebido:', {
-            headers: req.headers,
-            tipo: req.body?.type,
-            timestamp: new Date().toISOString()
-        });
-
-        if (!webhookService) {
-            throw new Error('WebhookService não inicializado');
-        }
-        
-        const result = await webhookService.handleWebhook(req.body);
-        res.json({ success: true, result });
-    } catch (error) {
-        console.error('❌ Erro no webhook:', error);
-        res.status(500).json({ 
-            error: true, 
-            message: error.message 
-        });
-    }
-});
-
-// Handler para mensagens recebidas
-app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
-    try {
-        console.log('📥 Webhook recebido:', {
-            headers: req.headers,
-            tipo: req.body?.type,
-            timestamp: new Date().toISOString()
-        });
-
-        if (!webhookService) {
-            throw new Error('WebhookService não inicializado');
-        }
-
-        // Passa a mensagem para o WebhookService processar
-        await webhookService.handleWebhook(req.body);
-        
-        res.status(200).send('OK');
-    } catch (error) {
-        console.error('❌ Erro no webhook:', error);
-        res.status(500).json({
-            error: 'Erro interno',
-            message: error.message
-        });
-    }
-});
-
 // Rota para enviar mensagens de texto (W-API)
 app.post('/message/send-text', async (req, res) => {
     try {

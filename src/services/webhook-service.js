@@ -217,6 +217,16 @@ class WebhookService {
                 timestamp: new Date().toISOString()
             });
 
+            // Se for áudio, adiciona log específico
+            if (messageData.type === 'audio') {
+                console.log('🎵 [Webhook] Áudio detectado:', {
+                    seconds: messageData.seconds,
+                    mimetype: messageData.mimetype,
+                    mediaKey: !!messageData.mediaKey,
+                    url: !!messageData.url
+                });
+            }
+
             return messageData;
         } catch (error) {
             console.error('❌ [Webhook] Erro ao extrair dados:', error);
