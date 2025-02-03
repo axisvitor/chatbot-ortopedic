@@ -1603,7 +1603,7 @@ class OpenAIService {
         const initialDelay = 1000;
         const maxDelay = 5000;
         const timeout = 30000;
-        const maxToolCalls = 10;
+        const maxToolCalls = 3; // Reduzido para 3 chamadas máximas
 
         let attempt = 0;
         let toolCallCount = 0;
@@ -1612,22 +1612,14 @@ class OpenAIService {
 
         while (attempt < maxRetries) {
             try {
-                // Verifica timeout
                 if (Date.now() - startTime > timeout) {
-                    logger.warn('[Assistant] Timeout atingido, cancelando run:', {
-                        threadId,
-                        runId,
-                        toolCalls: toolCallCount,
-                        elapsedTime: Date.now() - startTime
-                    });
-                    
-                    await this.cancelActiveRun(threadId);
-                    await this._setRunStatus(threadId, null);
                     throw new Error('Timeout ao aguardar resposta do assistant');
                 }
 
-                // Obtém status do run
-                const run = await this.client.beta.threads.runs.retrieve(threadId, runId);
+                const run = await this.client.beta.threads.runs.retrieve(
+                    threadId,
+                    runId
+                );
 
                 switch (run.status) {
                     case 'completed':
@@ -1638,29 +1630,15 @@ class OpenAIService {
                         
                         const lastMessage = messages.data[0];
                         if (lastMessage.role === 'assistant') {
-                            await this._setRunStatus(threadId, null);
                             return lastMessage.content[0].text.value;
                         }
                         break;
 
                     case 'failed':
-                        logger.error('[Assistant] Run falhou:', {
-                            threadId,
-                            runId,
-                            error: run.last_error?.message
-                        });
-                        await this._setRunStatus(threadId, null);
                         throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
 
                     case 'expired':
-                    case 'cancelled':
-                        logger.warn('[Assistant] Run cancelado/expirado:', {
-                            threadId,
-                            runId,
-                            status: run.status
-                        });
-                        await this._setRunStatus(threadId, null);
-                        throw new Error(`Run ${run.status}`);
+                        throw new Error('Run expirou');
 
                     case 'requires_action':
                         toolCallCount++;
@@ -1670,8 +1648,6 @@ class OpenAIService {
                                 runId,
                                 toolCalls: toolCallCount
                             });
-                            await this.cancelActiveRun(threadId);
-                            await this._setRunStatus(threadId, null);
                             throw new Error('Número máximo de chamadas de ferramentas excedido');
                         }
 
@@ -1683,8 +1659,6 @@ class OpenAIService {
                                 runId,
                                 toolCall: run.required_action.submit_tool_outputs.tool_calls
                             });
-                            await this.cancelActiveRun(threadId);
-                            await this._setRunStatus(threadId, null);
                             throw new Error('Chamada de função repetida detectada');
                         }
                         toolCallHistory.add(toolCall);
@@ -1693,7 +1667,6 @@ class OpenAIService {
                         break;
 
                     default:
-                        // Aguarda com backoff exponencial
                         const delay = Math.min(initialDelay * Math.pow(2, attempt), maxDelay);
                         await new Promise(resolve => setTimeout(resolve, delay));
                         attempt++;
@@ -1708,25 +1681,14 @@ class OpenAIService {
                 });
 
                 if (attempt >= maxRetries - 1) {
-                    await this._setRunStatus(threadId, null);
                     throw error;
                 }
 
-                // Aguarda antes de tentar novamente
                 await new Promise(resolve => setTimeout(resolve, initialDelay));
                 attempt++;
             }
         }
 
-        logger.error('[Assistant] Máximo de tentativas excedido:', {
-            threadId,
-            runId,
-            attempts: maxRetries,
-            toolCalls: toolCallCount
-        });
-        
-        await this.cancelActiveRun(threadId);
-        await this._setRunStatus(threadId, null);
         throw new Error('Máximo de tentativas excedido ao aguardar resposta');
     }
 
