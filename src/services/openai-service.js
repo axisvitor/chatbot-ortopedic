@@ -688,325 +688,31 @@ class OpenAIService {
             try {
                 await this.client.beta.threads.runs.cancel(threadId, activeRun);
                 logger.info('ActiveRunCanceled', { threadId, runId: activeRun });
+                
+                // Aguarda um momento para garantir que o run foi cancelado
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                // Verifica se o run foi realmente cancelado
+                const run = await this.client.beta.threads.runs.retrieve(threadId, activeRun);
+                if (run.status !== 'cancelled') {
+                    logger.warn('RunNotCancelled', { threadId, runId: activeRun, status: run.status });
+                    // Tenta cancelar novamente
+                    await this.client.beta.threads.runs.cancel(threadId, activeRun);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                await this.removeActiveRun(threadId);
             } catch (error) {
                 // Ignora erro se o run não existir mais
                 if (!error.message.includes('No run found')) {
                     logger.error('ErrorCancelingRun', { threadId, runId: activeRun, error: error.message });
                 }
+                // Mesmo com erro, tenta remover o run
+                await this.removeActiveRun(threadId);
             }
-
-            await this.removeActiveRun(threadId);
         } catch (error) {
             logger.error('ErrorInCancelActiveRun', { threadId, error });
         }
-    }
-
-    async deleteThread(threadId) {
-        try {
-            // Busca thread existente usando o prefixo correto
-            const threadKey = `${REDIS_CONFIG.prefix.openai}thread_meta:${threadId}`;
-            let threadId = await this.redisStore.getThreadForCustomer(threadId);
-            let shouldCreateNewThread = false;
-
-            logger.info('CheckingExistingThread', { 
-                customerId: threadId, 
-                threadId, 
-                hasExistingThread: !!threadId 
-            });
-
-            if (threadId) {
-                // Verifica se a thread ainda existe na OpenAI e se não foi resetada
-                try {
-                    // Tenta recuperar a thread na OpenAI
-                    const openaiThread = await this.client.beta.threads.retrieve(threadId);
-                    logger.info('OpenAIThreadFound', { 
-                        customerId: threadId, 
-                        threadId,
-                        openaiThreadId: openaiThread.id
-                    });
-                    
-                    // Verifica se a thread foi resetada ou deletada
-                    const metadata = await this.redisStore.get(`${REDIS_CONFIG.prefix.openai}thread_meta:${threadId}`);
-                    logger.info('ThreadMetadataCheck', {
-                        customerId: threadId,
-                        threadId,
-                        hasMetadata: !!metadata
-                    });
-
-                    if (!metadata) {
-                        logger.info('ThreadWasReset', { customerId: threadId, threadId });
-                        shouldCreateNewThread = true;
-                    }
-
-                    // Verifica se há mensagens na thread
-                    const messages = await this.client.beta.threads.messages.list(threadId);
-                    logger.info('ThreadMessagesCheck', {
-                        customerId: threadId,
-                        threadId,
-                        messageCount: messages?.data?.length || 0
-                    });
-
-                    if (!messages || messages.data.length === 0) {
-                        logger.info('ThreadIsEmpty', { customerId: threadId, threadId });
-                        shouldCreateNewThread = true;
-                    }
-                } catch (error) {
-                    logger.warn('ThreadNotFound', { 
-                        customerId: threadId, 
-                        threadId, 
-                        error: error.message,
-                        stack: error.stack
-                    });
-                    shouldCreateNewThread = true;
-                }
-
-                if (shouldCreateNewThread) {
-                    logger.info('CleaningOldThread', { 
-                        customerId: threadId, 
-                        threadId,
-                        reason: 'Thread inválida ou resetada'
-                    });
-                    // Remove o mapeamento antigo
-                    await this.redisStore.del(`${REDIS_CONFIG.prefix.openai}customer_threads:${threadId}`);
-                    threadId = null;
-                }
-            }
-
-            if (!threadId || shouldCreateNewThread) {
-                logger.info('CreatingNewThread', { 
-                    customerId: threadId,
-                    reason: !threadId ? 'Sem thread existente' : 'Thread antiga inválida'
-                });
-
-                // Cria nova thread
-                const thread = await this.client.beta.threads.create();
-                threadId = thread.id;
-
-                logger.info('NewThreadCreated', {
-                    customerId: threadId,
-                    threadId,
-                    openaiThreadId: thread.id
-                });
-
-                // Salva mapeamento cliente -> thread
-                await this.redisStore.setThreadForCustomer(threadId, threadId);
-
-                // Inicializa metadados da thread
-                const metadata = {
-                    customerId: threadId,
-                    createdAt: new Date().toISOString(),
-                    lastActivity: new Date().toISOString(),
-                    messageCount: 0,
-                    isNew: true
-                };
-
-                await this.redisStore.set(
-                    `${REDIS_CONFIG.prefix.openai}thread_meta:${threadId}`, 
-                    JSON.stringify(metadata), 
-                    30 * 24 * 60 * 60 // 30 dias TTL
-                );
-
-                logger.info('ThreadMetadataSaved', {
-                    customerId: threadId,
-                    threadId,
-                    metadata
-                });
-            }
-
-            return threadId;
-
-        } catch (error) {
-            logger.error('ErrorCreatingThread', { 
-                customerId: threadId, 
-                error: error.message,
-                stack: error.stack 
-            });
-            return null;
-        }
-    }
-
-    /**
-     * Obtém ou cria uma thread para um cliente
-     * @param {string} customerId - ID do cliente
-     * @returns {Promise<string>} ID da thread
-     */
-    async getOrCreateThreadForCustomer(customerId) {
-        try {
-            // Tenta obter uma thread existente do Redis
-            const threadId = await this.redisStore.get(`${REDIS_CONFIG.prefix.openai}customer_threads:${customerId}`);
-            if (threadId) {
-                return threadId;
-            }
-
-            // Se não existir, cria uma nova thread
-            const thread = await this.client.beta.threads.create();
-            
-            // Salva a thread no Redis
-            await this.redisStore.set(`${REDIS_CONFIG.prefix.openai}customer_threads:${customerId}`, thread.id);
-            
-            return thread.id;
-        } catch (error) {
-            logger.error('ErrorGetOrCreateThread', { 
-                error: {
-                    message: error.message,
-                    stack: error.stack
-                },
-                customerId,
-                timestamp: new Date().toISOString()
-            });
-            throw error;
-        }
-    }
-
-    /**
-     * Processa um comprovante de pagamento
-     * @param {string} threadId - ID da thread
-     * @param {Object} image - Objeto contendo dados da imagem
-     * @param {string} orderNumber - Número do pedido
-     * @returns {Promise<string>} Resultado do processamento
-     */
-    async processPaymentProof(threadId, image, orderNumber) {
-        try {
-            logger.info('ProcessingPaymentProof', { threadId, orderNumber, hasImage: !!image });
-            console.log('[OpenAI] Processando comprovante:', {
-                threadId,
-                orderNumber,
-                hasImage: !!image
-            });
-
-            // Validar se há solicitação pendente
-            const waiting = await this.redisStore.get(`openai:waiting_order:${threadId}`);
-            const pendingOrder = await this.redisStore.get(`openai:pending_order:${threadId}`);
-            
-            if (!waiting || waiting !== 'payment_proof') {
-                return 'Não há solicitação de comprovante pendente. Por favor, primeiro me informe o número do pedido.';
-            }
-
-            if (pendingOrder && orderNumber && pendingOrder !== orderNumber) {
-                return ` O número do pedido informado (#${orderNumber}) é diferente do pedido pendente (#${pendingOrder}). Por favor, confirme o número correto do pedido.`;
-            }
-
-            if (!image) {
-                return ' Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.';
-            }
-
-            // Validar o pedido
-            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
-            if (!order) {
-                return ` Não encontrei o pedido #${orderNumber}. Por favor, verifique se o número está correto.`;
-            }
-
-            // Processar o comprovante
-            const result = await this.nuvemshopService.processPaymentProof({
-                orderId: order.id,
-                orderNumber: orderNumber,
-                image: image,
-                threadId: threadId,
-                timestamp: new Date().toISOString()
-            });
-
-            // Limpar o comprovante pendente após processamento
-            await this.redisStore.del(`openai:pending_proof:${threadId}`);
-
-            return ' Comprovante recebido! Nosso time irá analisar e confirmar o pagamento em breve.';
-        } catch (error) {
-            logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber, error });
-            throw error;
-        }
-    }
-
-    /**
-     * Salva contexto da conversa no Redis
-     * @private
-     */
-    async _saveContextToRedis(threadId, context) {
-        try {
-            const key = `${REDIS_CONFIG.prefix.openai}context:thread:${threadId}`;
-            const lastUpdateKey = `${REDIS_CONFIG.prefix.openai}context:update:${threadId}`;
-            const contextData = {
-                lastMessage: context,
-                timestamp: Date.now(),
-                metadata: {
-                    lastOrderNumber: await this.redisStore.get(`openai:pending_order:${threadId}`),
-                    lastTrackingCode: await this.redisStore.get(`openai:tracking:${threadId}`),
-                    waitingFor: await this.redisStore.get(`openai:waiting_order:${threadId}`),
-                    lastToolCalls: await this.redisStore.get(`openai:tool_calls:${threadId}`)
-                }
-            };
-
-            await Promise.all([
-                this.redisStore.set(contextKey, JSON.stringify(contextData), 24 * 60 * 60), // 24 horas
-                this.redisStore.set(lastUpdateKey, Date.now().toString(), 24 * 60 * 60)
-            ]);
-
-            logger.info('ContextSaved', { threadId });
-        } catch (error) {
-            logger.error('ErrorSavingContext', { threadId, error });
-        }
-    }
-
-    /**
-     * Recupera contexto da conversa do Redis
-     * @private
-     */
-    async _getContextFromRedis(threadId) {
-        try {
-            const key = `${REDIS_CONFIG.prefix.context}${threadId}:history`;
-            const context = await this.redisStore.get(key);
-            return context || [];
-        } catch (error) {
-            logger.error('ErrorGettingContext', { threadId, error });
-            return [];
-        }
-    }
-
-    /**
-     * Verifica se precisa atualizar o contexto
-     * @private
-     */
-    async _shouldUpdateContext(threadId) {
-        try {
-            const lastUpdateKey = `${REDIS_CONFIG.prefix.openai}context:update:${threadId}`;
-            const lastUpdate = await this.redisStore.get(lastUpdateKey);
-            
-            if (!lastUpdate) {
-                return true;
-            }
-
-            // Atualiza a cada 15 minutos
-            return (Date.now() - parseInt(lastUpdate)) > this.CONTEXT_UPDATE_INTERVAL;
-        } catch (error) {
-            logger.error('ErrorCheckingContextUpdate', { threadId, error });
-            return true;
-        }
-    }
-
-    getCurrentCustomerId() {
-        return this.currentCustomerId;
-    }
-
-    /**
-     * Define o serviço WhatsApp após inicialização
-     * @param {Object} whatsappService - Serviço de WhatsApp
-     */
-    setWhatsAppService(whatsappService) {
-        this.whatsappService = whatsappService;
-    }
-
-    /**
-     * Define o serviço de Departamentos após inicialização
-     * @param {Object} departmentService - Serviço de Departamentos
-     */
-    setDepartmentService(departmentService) {
-        this.departmentService = departmentService;
-    }
-
-    /**
-     * Define o serviço Financeiro após inicialização
-     * @param {Object} financialService - Serviço Financeiro
-     */
-    setFinancialService(financialService) {
-        this.financialService = financialService;
     }
 
     async runAssistant(threadId) {
@@ -1763,14 +1469,28 @@ class OpenAIService {
             try {
                 await this.client.beta.threads.runs.cancel(threadId, activeRun);
                 logger.info('ActiveRunCanceled', { threadId, runId: activeRun });
+                
+                // Aguarda um momento para garantir que o run foi cancelado
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                // Verifica se o run foi realmente cancelado
+                const run = await this.client.beta.threads.runs.retrieve(threadId, activeRun);
+                if (run.status !== 'cancelled') {
+                    logger.warn('RunNotCancelled', { threadId, runId: activeRun, status: run.status });
+                    // Tenta cancelar novamente
+                    await this.client.beta.threads.runs.cancel(threadId, activeRun);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+
+                await this.removeActiveRun(threadId);
             } catch (error) {
                 // Ignora erro se o run não existir mais
                 if (!error.message.includes('No run found')) {
                     logger.error('ErrorCancelingRun', { threadId, runId: activeRun, error: error.message });
                 }
+                // Mesmo com erro, tenta remover o run
+                await this.removeActiveRun(threadId);
             }
-
-            await this.removeActiveRun(threadId);
         } catch (error) {
             logger.error('ErrorInCancelActiveRun', { threadId, error });
         }
@@ -1866,6 +1586,314 @@ class OpenAIService {
             logger.error('[OpenAI] Erro ao obter thread do cliente:', error);
             return null;
         }
+    }
+
+    async deleteThread(customerId) {
+        try {
+            // Busca thread existente usando o prefixo correto
+            const threadKey = `${REDIS_CONFIG.prefix.openai}thread_meta:${customerId}`;
+            let existingThreadId = await this.redisStore.getThreadForCustomer(customerId);
+            let shouldCreateNewThread = false;
+
+            logger.info('CheckingExistingThread', { 
+                customerId, 
+                threadId: existingThreadId, 
+                hasExistingThread: !!existingThreadId 
+            });
+
+            if (existingThreadId) {
+                // Verifica se a thread ainda existe na OpenAI e se não foi resetada
+                try {
+                    // Tenta recuperar a thread na OpenAI
+                    const openaiThread = await this.client.beta.threads.retrieve(existingThreadId);
+                    logger.info('OpenAIThreadFound', { 
+                        customerId, 
+                        threadId: existingThreadId,
+                        openaiThreadId: openaiThread.id
+                    });
+                    
+                    // Verifica se a thread foi resetada ou deletada
+                    const metadata = await this.redisStore.get(`${REDIS_CONFIG.prefix.openai}thread_meta:${existingThreadId}`);
+                    logger.info('ThreadMetadataCheck', {
+                        customerId,
+                        threadId: existingThreadId,
+                        hasMetadata: !!metadata
+                    });
+
+                    if (!metadata) {
+                        logger.info('ThreadWasReset', { customerId, threadId: existingThreadId });
+                        shouldCreateNewThread = true;
+                    }
+
+                    // Verifica se há mensagens na thread
+                    const messages = await this.client.beta.threads.messages.list(existingThreadId);
+                    logger.info('ThreadMessagesCheck', {
+                        customerId,
+                        threadId: existingThreadId,
+                        messageCount: messages?.data?.length || 0
+                    });
+
+                    if (!messages || messages.data.length === 0) {
+                        logger.info('ThreadIsEmpty', { customerId, threadId: existingThreadId });
+                        shouldCreateNewThread = true;
+                    }
+                } catch (error) {
+                    logger.warn('ThreadNotFound', { 
+                        customerId, 
+                        threadId: existingThreadId, 
+                        error: error.message,
+                        stack: error.stack
+                    });
+                    shouldCreateNewThread = true;
+                }
+
+                if (shouldCreateNewThread) {
+                    logger.info('CleaningOldThread', { 
+                        customerId, 
+                        threadId: existingThreadId,
+                        reason: 'Thread inválida ou resetada'
+                    });
+                    // Remove o mapeamento antigo
+                    await this.redisStore.del(`${REDIS_CONFIG.prefix.openai}customer_threads:${customerId}`);
+                    existingThreadId = null;
+                }
+            }
+
+            if (!existingThreadId || shouldCreateNewThread) {
+                logger.info('CreatingNewThread', { 
+                    customerId,
+                    reason: !existingThreadId ? 'Sem thread existente' : 'Thread antiga inválida'
+                });
+
+                // Cria nova thread
+                const thread = await this.client.beta.threads.create();
+                existingThreadId = thread.id;
+
+                logger.info('NewThreadCreated', {
+                    customerId,
+                    threadId: existingThreadId,
+                    openaiThreadId: thread.id
+                });
+
+                // Salva mapeamento cliente -> thread
+                await this.redisStore.setThreadForCustomer(customerId, existingThreadId);
+
+                // Inicializa metadados da thread
+                const metadata = {
+                    customerId,
+                    createdAt: new Date().toISOString(),
+                    lastActivity: new Date().toISOString(),
+                    messageCount: 0,
+                    isNew: true
+                };
+
+                await this.redisStore.set(
+                    `${REDIS_CONFIG.prefix.openai}thread_meta:${existingThreadId}`, 
+                    JSON.stringify(metadata), 
+                    30 * 24 * 60 * 60 // 30 dias TTL
+                );
+
+                logger.info('ThreadMetadataSaved', {
+                    customerId,
+                    threadId: existingThreadId,
+                    metadata
+                });
+            }
+
+            return existingThreadId;
+
+        } catch (error) {
+            logger.error('ErrorCreatingThread', { 
+                customerId, 
+                error: error.message,
+                stack: error.stack 
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Obtém ou cria uma thread para um cliente
+     * @param {string} customerId - ID do cliente
+     * @returns {Promise<string>} ID da thread
+     */
+    async getOrCreateThreadForCustomer(customerId) {
+        try {
+            // Tenta obter uma thread existente do Redis
+            const threadId = await this.redisStore.get(`${REDIS_CONFIG.prefix.openai}customer_threads:${customerId}`);
+            if (threadId) {
+                return threadId;
+            }
+
+            // Se não existir, cria uma nova thread
+            const thread = await this.client.beta.threads.create();
+            
+            // Salva a thread no Redis
+            await this.redisStore.set(`${REDIS_CONFIG.prefix.openai}customer_threads:${customerId}`, thread.id);
+            
+            return thread.id;
+        } catch (error) {
+            logger.error('ErrorGetOrCreateThread', { 
+                error: {
+                    message: error.message,
+                    stack: error.stack
+                },
+                customerId,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Processa um comprovante de pagamento
+     * @param {string} threadId - ID da thread
+     * @param {Object} image - Objeto contendo dados da imagem
+     * @param {string} orderNumber - Número do pedido
+     * @returns {Promise<string>} Resultado do processamento
+     */
+    async processPaymentProof(threadId, image, orderNumber) {
+        try {
+            logger.info('ProcessingPaymentProof', { threadId, orderNumber, hasImage: !!image });
+            console.log('[OpenAI] Processando comprovante:', {
+                threadId,
+                orderNumber,
+                hasImage: !!image
+            });
+
+            // Validar se há solicitação pendente
+            const waiting = await this.redisStore.get(`openai:waiting_order:${threadId}`);
+            const pendingOrder = await this.redisStore.get(`openai:pending_order:${threadId}`);
+            
+            if (!waiting || waiting !== 'payment_proof') {
+                return 'Não há solicitação de comprovante pendente. Por favor, primeiro me informe o número do pedido.';
+            }
+
+            if (pendingOrder && orderNumber && pendingOrder !== orderNumber) {
+                return ` O número do pedido informado (#${orderNumber}) é diferente do pedido pendente (#${pendingOrder}). Por favor, confirme o número correto do pedido.`;
+            }
+
+            if (!image) {
+                return ' Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.';
+            }
+
+            // Validar o pedido
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            if (!order) {
+                return ` Não encontrei o pedido #${orderNumber}. Por favor, verifique se o número está correto.`;
+            }
+
+            // Processar o comprovante
+            const result = await this.nuvemshopService.processPaymentProof({
+                orderId: order.id,
+                orderNumber: orderNumber,
+                image: image,
+                threadId: threadId,
+                timestamp: new Date().toISOString()
+            });
+
+            // Limpar o comprovante pendente após processamento
+            await this.redisStore.del(`openai:pending_proof:${threadId}`);
+
+            return ' Comprovante recebido! Nosso time irá analisar e confirmar o pagamento em breve.';
+        } catch (error) {
+            logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber, error });
+            throw error;
+        }
+    }
+
+    /**
+     * Salva contexto da conversa no Redis
+     * @private
+     */
+    async _saveContextToRedis(threadId, context) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.openai}context:thread:${threadId}`;
+            const lastUpdateKey = `${REDIS_CONFIG.prefix.openai}context:update:${threadId}`;
+            const contextData = {
+                lastMessage: context,
+                timestamp: Date.now(),
+                metadata: {
+                    lastOrderNumber: await this.redisStore.get(`openai:pending_order:${threadId}`),
+                    lastTrackingCode: await this.redisStore.get(`openai:tracking:${threadId}`),
+                    waitingFor: await this.redisStore.get(`openai:waiting_order:${threadId}`),
+                    lastToolCalls: await this.redisStore.get(`openai:tool_calls:${threadId}`)
+                }
+            };
+
+            await Promise.all([
+                this.redisStore.set(key, JSON.stringify(contextData), 24 * 60 * 60), // 24 horas
+                this.redisStore.set(lastUpdateKey, Date.now().toString(), 24 * 60 * 60)
+            ]);
+
+            logger.info('ContextSaved', { threadId });
+        } catch (error) {
+            logger.error('ErrorSavingContext', { threadId, error });
+        }
+    }
+
+    /**
+     * Recupera contexto da conversa do Redis
+     * @private
+     */
+    async _getContextFromRedis(threadId) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.context}${threadId}:history`;
+            const context = await this.redisStore.get(key);
+            return context || [];
+        } catch (error) {
+            logger.error('ErrorGettingContext', { threadId, error });
+            return [];
+        }
+    }
+
+    /**
+     * Verifica se precisa atualizar o contexto
+     * @private
+     */
+    async _shouldUpdateContext(threadId) {
+        try {
+            const lastUpdateKey = `${REDIS_CONFIG.prefix.openai}context:update:${threadId}`;
+            const lastUpdate = await this.redisStore.get(lastUpdateKey);
+            
+            if (!lastUpdate) {
+                return true;
+            }
+
+            // Atualiza a cada 15 minutos
+            return (Date.now() - parseInt(lastUpdate)) > this.CONTEXT_UPDATE_INTERVAL;
+        } catch (error) {
+            logger.error('ErrorCheckingContextUpdate', { threadId, error });
+            return true;
+        }
+    }
+
+    getCurrentCustomerId() {
+        return this.currentCustomerId;
+    }
+
+    /**
+     * Define o serviço WhatsApp após inicialização
+     * @param {Object} whatsappService - Serviço de WhatsApp
+     */
+    setWhatsAppService(whatsappService) {
+        this.whatsappService = whatsappService;
+    }
+
+    /**
+     * Define o serviço de Departamentos após inicialização
+     * @param {Object} departmentService - Serviço de Departamentos
+     */
+    setDepartmentService(departmentService) {
+        this.departmentService = departmentService;
+    }
+
+    /**
+     * Define o serviço Financeiro após inicialização
+     * @param {Object} financialService - Serviço Financeiro
+     */
+    setFinancialService(financialService) {
+        this.financialService = financialService;
     }
 }
 
