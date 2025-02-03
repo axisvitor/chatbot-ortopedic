@@ -51,70 +51,13 @@ router.post(TRACKING_CONFIG.paths.webhook, verifyWebhook, async (req, res) => {
             timestamp: new Date().toISOString()
         });
 
-        let successCount = 0;
-        let errorCount = 0;
-        const notifications = [];
-
+        // Processa cada atualização
         for (const update of updates) {
             try {
-                const trackingKey = `${TRACKING_CONFIG.cache.prefix}${update.number}`;
-                const trackingData = {
-                    code: update.number,
-                    carrier: update.carrier || 'Desconhecido',
-                    status: {
-                        text: update.track_info?.latest_status?.status || 'Desconhecido',
-                        location: update.track_info?.latest_status?.location || 'N/A',
-                        time: update.track_info?.latest_status?.time
-                    },
-                    events: update.track_info?.events || [],
-                    lastUpdate: new Date().toISOString(),
-                    meta: {
-                        webhookReceived: true,
-                        updateTimestamp: startTime,
-                        source: '17track'
-                    }
-                };
-
-                // Busca dados existentes para preservar informações importantes
-                const existingData = await redis.get(trackingKey);
-                if (existingData) {
-                    const parsed = JSON.parse(existingData);
-                    trackingData.orderId = parsed.orderId;
-                    trackingData.customerName = parsed.customerName;
-                    trackingData.shippingAddress = parsed.shippingAddress;
-                    
-                    // Verifica se precisa notificar mudança importante
-                    if (parsed.status?.text !== trackingData.status.text) {
-                        notifications.push({
-                            code: update.number,
-                            orderId: parsed.orderId,
-                            oldStatus: parsed.status?.text,
-                            newStatus: trackingData.status.text,
-                            customerName: parsed.customerName,
-                            carrier: trackingData.carrier
-                        });
-                    }
-                }
-
-                // Salva atualização no Redis com TTL
-                await redis.set(
-                    trackingKey,
-                    JSON.stringify(trackingData),
-                    TRACKING_CONFIG.cache.ttl.webhook
-                );
-                successCount++;
-
-                logger.info('[17Track] Atualização processada:', {
-                    code: update.number,
-                    carrier: trackingData.carrier,
-                    status: trackingData.status.text,
-                    location: trackingData.status.location,
-                    timestamp: new Date().toISOString()
-                });
+                await processTrackingUpdate(update);
             } catch (error) {
-                errorCount++;
                 logger.error('[17Track] Erro ao processar atualização:', {
-                    code: update.number,
+                    update,
                     error: error.message,
                     stack: error.stack,
                     timestamp: new Date().toISOString()
@@ -122,38 +65,17 @@ router.post(TRACKING_CONFIG.paths.webhook, verifyWebhook, async (req, res) => {
             }
         }
 
-        // Processa notificações importantes
-        if (notifications.length > 0) {
-            try {
-                await processNotifications(notifications);
-            } catch (error) {
-                logger.error('[17Track] Erro ao processar notificações:', {
-                    error: error.message,
-                    notifications,
-                    timestamp: new Date().toISOString()
-                });
-            }
-        }
-
         const processingTime = Date.now() - startTime;
         logger.info('[17Track] Processamento concluído:', {
-            total: updates.length,
-            success: successCount,
-            errors: errorCount,
-            notifications: notifications.length,
-            processingTime: `${processingTime}ms`,
+            count: updates.length,
+            processingTime,
             timestamp: new Date().toISOString()
         });
 
-        return res.status(200).json({
+        return res.status(200).json({ 
             message: 'Updates processed',
-            stats: {
-                total: updates.length,
-                success: successCount,
-                errors: errorCount,
-                notifications: notifications.length,
-                processingTime
-            }
+            count: updates.length,
+            processingTime 
         });
     } catch (error) {
         logger.error('[17Track] Erro geral no webhook:', {
@@ -165,56 +87,90 @@ router.post(TRACKING_CONFIG.paths.webhook, verifyWebhook, async (req, res) => {
     }
 });
 
-// Processa notificações importantes
-async function processNotifications(notifications) {
-    if (!WHATSAPP_CONFIG.notifications?.tracking) {
-        logger.info('[17Track] Notificações WhatsApp desativadas');
-        return;
-    }
-
-    for (const notif of notifications) {
-        const message = formatNotificationMessage(notif);
-        try {
-            await sendWhatsAppNotification(message);
-            logger.info('[17Track] Notificação enviada:', {
-                code: notif.code,
-                orderId: notif.orderId,
-                carrier: notif.carrier,
+/**
+ * Processa uma atualização de rastreamento
+ * @param {Object} update - Dados da atualização
+ * @returns {Promise<void>}
+ */
+async function processTrackingUpdate(update) {
+    try {
+        // Valida dados da atualização
+        if (!update.number || !update.status) {
+            logger.warn('[17Track] Atualização inválida:', {
+                update,
                 timestamp: new Date().toISOString()
             });
-        } catch (error) {
-            logger.error('[17Track] Erro ao enviar notificação:', {
-                error: error.message,
-                notification: notif,
-                timestamp: new Date().toISOString()
-            });
+            return;
         }
+
+        // Salva atualização no Redis
+        const trackingKey = `${TRACKING_CONFIG.cache.prefix}tracking:${update.number}`;
+        const trackingData = {
+            status: update.status,
+            lastUpdate: new Date().toISOString(),
+            events: update.events || [],
+            meta: {
+                source: '17track',
+                webhookReceived: true
+            }
+        };
+
+        await redis.set(trackingKey, JSON.stringify(trackingData), TRACKING_CONFIG.cache.ttl.tracking);
+
+        // Verifica se precisa notificar
+        if (shouldNotifyUpdate(update)) {
+            const notification = formatTrackingNotification(update);
+            await sendTrackingNotification(notification);
+        }
+
+        logger.info('[17Track] Atualização processada:', {
+            trackingNumber: update.number,
+            status: update.status,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logger.error('[17Track] Erro ao processar atualização:', {
+            trackingNumber: update.number,
+            error: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString()
+        });
+        throw error;
     }
 }
 
-// Formata mensagem de notificação
-function formatNotificationMessage(notification) {
-    const statusEmojis = {
-        'pending': '📫',
-        'em_transito': '🚚',
-        'entregue': '✅',
-        'problema': '⚠️',
-        'expirado': '⏰',
-        'retornando': '↩️'
-    };
+/**
+ * Verifica se deve notificar sobre a atualização
+ * @param {Object} update - Dados da atualização
+ * @returns {boolean}
+ */
+function shouldNotifyUpdate(update) {
+    const notifiableStatus = [
+        'delivered',
+        'out_for_delivery',
+        'exception',
+        'returned'
+    ];
 
-    const emoji = statusEmojis[notification.newStatus] || '📦';
-    
-    return `*Atualização de Rastreio* ${emoji}\n\n` +
-           `*Pedido:* #${notification.orderId}\n` +
-           `*Rastreio:* ${notification.code}\n` +
-           `*Transportadora:* ${notification.carrier}\n` +
-           `*Status:* ${notification.newStatus}\n\n` +
-           `*Cliente:* ${notification.customerName}`;
+    return notifiableStatus.includes(update.status.toLowerCase());
 }
 
-// Envia notificação via WhatsApp
-async function sendWhatsAppNotification(message) {
+/**
+ * Formata mensagem de notificação de rastreamento
+ * @param {Object} update - Dados da atualização
+ * @returns {string}
+ */
+function formatTrackingNotification(update) {
+    return `Atualização de rastreamento: ${update.number} - ${update.status}`;
+}
+
+/**
+ * Envia notificação de rastreamento
+ * @param {string} message - Mensagem de notificação
+ * @returns {Promise<void>}
+ */
+async function sendTrackingNotification(message) {
     // Implementar integração com WhatsApp
     logger.info('[17Track] Mensagem para enviar:', message);
 }

@@ -200,7 +200,62 @@ class NuvemshopService {
     }
 
     /**
-     * Sincroniza pedidos recentes da Nuvemshop
+     * Processa um pedido individual
+     * @param {Object} order - Dados do pedido
+     * @returns {Promise<void>}
+     */
+    async processOrder(order) {
+        try {
+            // Verifica se o pedido tem código de rastreio
+            if (!order.shipping_tracking) {
+                return;
+            }
+
+            logger.info('ProcessandoPedido', {
+                orderId: order.id,
+                tracking: order.shipping_tracking,
+                timestamp: new Date().toISOString()
+            });
+
+            // Atualiza status no banco de dados
+            await this.updateOrderStatus(order);
+
+        } catch (error) {
+            logger.error('ErroProcessamentoPedido', {
+                orderId: order.id,
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Atualiza o status de um pedido no banco de dados
+     * @param {Object} order - Dados do pedido
+     * @returns {Promise<void>}
+     */
+    async updateOrderStatus(order) {
+        try {
+            const status = await this.getOrderStatus(order.id);
+            
+            logger.info('StatusPedidoAtualizado', {
+                orderId: order.id,
+                status: status,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            logger.error('ErroAtualizacaoStatus', {
+                orderId: order.id,
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Sincroniza pedidos da Nuvemshop
      * @returns {Promise<void>}
      */
     async syncOrders() {
@@ -211,13 +266,30 @@ class NuvemshopService {
 
             const orders = await this.getNewOrdersWithTracking();
             
-            logger.info('SincronizacaoPedidosConcluida', {
-                quantidadePedidos: orders.length,
+            logger.info('PedidosRecuperados', {
+                quantidade: orders.length,
                 timestamp: new Date().toISOString()
             });
 
+            // Processa cada pedido
+            for (const order of orders) {
+                try {
+                    await this.processOrder(order);
+                } catch (error) {
+                    logger.error('ErroProcessamentoPedido', {
+                        orderId: order.id,
+                        error: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+
+            logger.info('SincronizacaoConcluida', {
+                quantidade: orders.length,
+                timestamp: new Date().toISOString()
+            });
         } catch (error) {
-            logger.error('ErroSincronizarPedidos', {
+            logger.error('ErroSincronizacaoPedidos', {
                 error: error.message,
                 stack: error.stack,
                 timestamp: new Date().toISOString()

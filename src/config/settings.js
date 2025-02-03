@@ -214,6 +214,19 @@ const NUVEMSHOP_CONFIG = {
         maxRequestsPerWindow: 100
     },
 
+    // Configurações de validação
+    validation: {
+        maxOrdersPerPage: 50, // Limite de pedidos por página
+        maxProductsPerPage: 100, // Limite de produtos por página
+        maxCustomersPerPage: 100, // Limite de clientes por página
+        orderStatuses: ['open', 'closed', 'cancelled'],
+        requiredFields: {
+            orders: ['id', 'number', 'status', 'shipping_tracking', 'created_at'],
+            products: ['id', 'title', 'handle', 'variants'],
+            customers: ['id', 'name', 'email']
+        }
+    },
+
     // Configurações de internacionalização
     i18n: {
         defaultLanguage: 'pt-BR',

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { RedisStore } = require('../utils/redis-store');
 const { Track17Service } = require('../services/track17-service');
-const { REDIS_CONFIG, WHATSAPP_CONFIG, NUVEMSHOP_CONFIG } = require('../../config/settings');
+const { REDIS_CONFIG, WHATSAPP_CONFIG, NUVEMSHOP_CONFIG, TRACKING_CONFIG } = require('../../config/settings');
 const logger = require('../utils/logger');
 
 const redis = new RedisStore();
@@ -66,108 +66,21 @@ router.post('/order-update', verifyWebhook, async (req, res) => {
             timestamp: new Date().toISOString()
         });
 
-        // Procura por informações de rastreio no pedido
-        const fulfillment = order.fulfillments?.find(f => f.tracking_info?.code);
-        
-        if (!fulfillment?.tracking_info?.code) {
-            logger.info('[Nuvemshop] Pedido sem código de rastreio:', {
-                orderId: order.number,
-                timestamp: new Date().toISOString()
-            });
-            return res.status(200).json({ 
-                message: 'Pedido sem código de rastreio',
-                orderId: order.number
-            });
-        }
-
-        // Prepara dados de rastreio
-        const trackingKey = `${REDIS_CONFIG.prefix.tracking}code:${fulfillment.tracking_info.code}`;
-        const trackingData = {
-            code: fulfillment.tracking_info.code,
-            carrier: fulfillment.shipping?.carrier?.name || 'Correios',
-            status: fulfillment.status || 'pendente',
-            lastUpdate: order.updated_at,
-            estimatedDelivery: fulfillment.tracking_info.estimated_delivery_date || null,
-            orderStatus: order.status,
-            orderId: order.number,
-            customerName: order.customer?.name || 'N/A',
-            shippingAddress: order.shipping_address ? 
-                `${order.shipping_address.street}, ${order.shipping_address.number} - ${order.shipping_address.city}/${order.shipping_address.state}` : 
-                'N/A',
-            meta: {
-                registered17track: false,
-                attempts: 0,
-                errors: [],
-                lastSync: new Date().toISOString()
-            }
-        };
-
-        // Salva o código de rastreio no Redis com TTL
-        await redis.set(trackingKey, JSON.stringify(trackingData), REDIS_CONFIG.ttl.tracking.status);
-        logger.info(`[Nuvemshop] Código de rastreio salvo:`, {
-            orderId: order.number,
-            code: trackingData.code,
-            timestamp: new Date().toISOString()
-        });
-
-        // Registra o código no 17track
-        try {
-            const registration = await track17.registerForTracking(trackingData.code);
-            if (registration.success.includes(trackingData.code)) {
-                trackingData.meta.registered17track = true;
-                await redis.set(trackingKey, JSON.stringify(trackingData), REDIS_CONFIG.ttl.tracking.status);
-                
-                logger.info(`[Nuvemshop] Código registrado no 17track:`, {
-                    code: trackingData.code,
-                    orderId: order.number,
-                    timestamp: new Date().toISOString()
-                });
-
-                // Notifica sobre novo rastreio
-                if (WHATSAPP_CONFIG.notifications.tracking) {
-                    try {
-                        await sendTrackingNotification(trackingData);
-                    } catch (notifError) {
-                        logger.error('[Nuvemshop] Erro ao enviar notificação:', {
-                            error: notifError.message,
-                            code: trackingData.code,
-                            orderId: order.number,
-                            timestamp: new Date().toISOString()
-                        });
-                    }
-                }
-            } else if (registration.failed.includes(trackingData.code)) {
-                logger.warn(`[Nuvemshop] Falha ao registrar no 17track:`, {
-                    code: trackingData.code,
-                    orderId: order.number,
-                    timestamp: new Date().toISOString()
-                });
-                // Será tentado novamente pelo job de sincronização
-            }
-        } catch (track17Error) {
-            logger.error('[Nuvemshop] Erro ao registrar no 17track:', {
-                code: trackingData.code,
-                orderId: order.number,
-                error: track17Error.message,
-                stack: track17Error.stack,
-                timestamp: new Date().toISOString()
-            });
-            // Não falha o webhook por erro no 17track
-        }
+        // Processa o pedido
+        await processOrderUpdate(event, order);
 
         const processingTime = Date.now() - startTime;
         logger.info('[Nuvemshop] Processamento concluído:', {
-            orderId: order.number,
             event,
-            processingTime: `${processingTime}ms`,
+            orderNumber: order.number,
+            processingTime,
             timestamp: new Date().toISOString()
         });
 
-        return res.status(200).json({
-            message: 'Pedido processado',
-            orderId: order.number,
-            trackingCode: trackingData.code,
-            processingTime
+        return res.status(200).json({ 
+            message: 'Order processed',
+            orderNumber: order.number,
+            processingTime 
         });
     } catch (error) {
         const processingTime = Date.now() - startTime;
@@ -181,6 +94,132 @@ router.post('/order-update', verifyWebhook, async (req, res) => {
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+/**
+ * Processa atualização de pedido
+ * @param {string} event - Tipo do evento
+ * @param {Object} order - Dados do pedido
+ * @returns {Promise<void>}
+ */
+async function processOrderUpdate(event, order) {
+    try {
+        // Valida dados do pedido
+        if (!order.number || !order.shipping_status) {
+            logger.warn('[Nuvemshop] Pedido inválido:', {
+                order,
+                timestamp: new Date().toISOString()
+            });
+            return;
+        }
+
+        // Salva dados do pedido no Redis
+        const orderKey = `${NUVEMSHOP_CONFIG.cache.prefix}order:${order.number}`;
+        const orderData = {
+            number: order.number,
+            status: order.shipping_status,
+            customer: {
+                name: order.customer?.name,
+                email: order.customer?.email,
+                phone: order.customer?.phone
+            },
+            shipping: {
+                address: order.shipping_address,
+                carrier: order.shipping_carrier,
+                tracking: order.shipping_tracking
+            },
+            lastUpdate: new Date().toISOString(),
+            meta: {
+                source: 'nuvemshop',
+                webhookReceived: true,
+                event
+            }
+        };
+
+        await redis.set(orderKey, JSON.stringify(orderData), NUVEMSHOP_CONFIG.cache.ttl.order);
+
+        // Se tem código de rastreio, registra no 17track
+        if (order.shipping_tracking) {
+            await registerTracking(order);
+        }
+
+        logger.info('[Nuvemshop] Pedido processado:', {
+            orderNumber: order.number,
+            status: order.shipping_status,
+            tracking: order.shipping_tracking || 'N/A',
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        logger.error('[Nuvemshop] Erro ao processar pedido:', {
+            orderNumber: order.number,
+            error: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString()
+        });
+        throw error;
+    }
+}
+
+/**
+ * Registra código de rastreio no 17track
+ * @param {Object} order - Dados do pedido
+ * @returns {Promise<void>}
+ */
+async function registerTracking(order) {
+    try {
+        // Verifica se já está registrado
+        const trackingKey = `${TRACKING_CONFIG.cache.prefix}tracking:${order.shipping_tracking}`;
+        const existingTracking = await redis.get(trackingKey);
+        
+        if (existingTracking) {
+            const parsed = JSON.parse(existingTracking);
+            if (parsed.meta?.registered17track) {
+                logger.info('[Nuvemshop] Rastreio já registrado:', {
+                    orderNumber: order.number,
+                    tracking: order.shipping_tracking,
+                    timestamp: new Date().toISOString()
+                });
+                return;
+            }
+        }
+
+        // Registra no 17track
+        const registration = await track17.registerForTracking(order.shipping_tracking);
+        
+        if (registration.success) {
+            // Salva status no Redis
+            const trackingData = {
+                code: order.shipping_tracking,
+                orderId: order.number,
+                customerName: order.customer?.name,
+                carrier: order.shipping_carrier,
+                status: 'pending',
+                lastUpdate: new Date().toISOString(),
+                meta: {
+                    registered17track: true,
+                    source: 'nuvemshop',
+                    orderNumber: order.number
+                }
+            };
+
+            await redis.set(trackingKey, JSON.stringify(trackingData), TRACKING_CONFIG.cache.ttl.tracking);
+
+            // Envia notificação de rastreio registrado
+            const notification = formatTrackingNotification(trackingData);
+            await sendTrackingNotification(notification);
+        }
+
+    } catch (error) {
+        logger.error('[Nuvemshop] Erro ao registrar rastreio:', {
+            orderNumber: order.number,
+            tracking: order.shipping_tracking,
+            error: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString()
+        });
+        throw error;
+    }
+}
 
 // Formata mensagem de notificação de novo rastreio
 function formatTrackingNotification(trackingData) {
