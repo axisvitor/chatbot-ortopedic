@@ -319,6 +319,38 @@ app.get('/healthcheck', (req, res) => {
     });
 });
 
+// Rota para receber mensagens do WhatsApp (W-API)
+app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
+    try {
+        console.log('📥 [Server] Webhook recebido:', {
+            tipo: req.body?.type,
+            temBody: !!req.body?.body,
+            temMensagem: !!req.body?.body?.message || !!req.body?.message,
+            remetente: req.body?.body?.key?.remoteJid || req.body?.key?.remoteJid,
+            pushName: req.body?.body?.pushName || req.body?.pushName,
+            timestamp: new Date().toISOString()
+        });
+
+        if (!webhookService) {
+            throw new Error('WebhookService não inicializado');
+        }
+
+        await webhookService.handleWebhook(req.body);
+        res.status(200).json({ status: 'success' });
+    } catch (error) {
+        console.error('❌ [Server] Erro no webhook:', {
+            erro: error.message,
+            stack: error.stack,
+            timestamp: new Date().toISOString()
+        });
+        res.status(500).json({
+            status: 'error',
+            message: 'Erro ao processar webhook',
+            error: error.message
+        });
+    }
+});
+
 // Rota para enviar mensagens de texto (W-API)
 app.post('/message/send-text', async (req, res) => {
     try {
