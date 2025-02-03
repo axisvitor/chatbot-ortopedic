@@ -115,9 +115,6 @@ async function initializeServices() {
             nuvemshopService = new NuvemshopService();
             console.log('✅ NuvemshopService inicializado');
 
-            departmentService = new DepartmentService();
-            console.log('✅ DepartmentService inicializado');
-
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
@@ -154,6 +151,9 @@ async function initializeServices() {
 
             financialService = new FinancialService(whatsappService);
             console.log('✅ FinancialService reinicializado com WhatsApp');
+
+            departmentService = new DepartmentService(whatsappService);
+            console.log('✅ DepartmentService inicializado com WhatsApp');
 
             // OpenAI precisa de vários serviços
             openAIService = new OpenAIService(

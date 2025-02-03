@@ -18,6 +18,7 @@ const { WebhookService } = require('./webhook-service');
 const { MediaManagerService } = require('./media-manager-service');
 const { OpenAIVisionService } = require('./openai-vision-service');
 const { FinancialService } = require('./financial-service');
+const { DepartmentService } = require('./department-service');
 
 // Nuvemshop APIs
 const { 
@@ -48,6 +49,7 @@ module.exports = {
     MediaManagerService,
     OpenAIVisionService,
     FinancialService,
+    DepartmentService,
     
     // Nuvemshop APIs
     NuvemshopAPIBase,
