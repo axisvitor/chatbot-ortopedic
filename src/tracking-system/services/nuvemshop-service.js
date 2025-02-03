@@ -198,6 +198,33 @@ class NuvemshopService {
             throw error;
         }
     }
+
+    /**
+     * Sincroniza pedidos recentes da Nuvemshop
+     * @returns {Promise<void>}
+     */
+    async syncOrders() {
+        try {
+            logger.info('IniciandoSincronizacaoPedidos', {
+                timestamp: new Date().toISOString()
+            });
+
+            const orders = await this.getNewOrdersWithTracking();
+            
+            logger.info('SincronizacaoPedidosConcluida', {
+                quantidadePedidos: orders.length,
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            logger.error('ErroSincronizarPedidos', {
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
 }
 
 module.exports = { NuvemshopService };
