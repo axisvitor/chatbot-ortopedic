@@ -185,8 +185,13 @@ async function initializeServices() {
             );
             console.log('✅ AIServices inicializado');
 
-            // Webhook precisa do WhatsApp e AI
-            webhookService = new WebhookService(whatsappService, aiServices);
+            // Webhook precisa do WhatsApp, AI e outros serviços
+            webhookService = new WebhookService(
+                whatsappService,
+                aiServices,
+                audioService,
+                mediaManagerService
+            );
             console.log('✅ WebhookService inicializado');
 
             clearTimeout(timeout);
@@ -317,44 +322,18 @@ app.get('/healthcheck', (req, res) => {
 // Handler para mensagens recebidas
 app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
-        const message = req.body;
-        
-        console.log('📨 Mensagem recebida:', {
-            tipo: message.message?.imageMessage ? 'imagem' : 'texto',
-            de: message.key?.remoteJid,
-            texto: message.message?.conversation || message.message?.extendedTextMessage?.text
+        console.log('📥 Webhook recebido:', {
+            headers: req.headers,
+            tipo: req.body?.type,
+            timestamp: new Date().toISOString()
         });
 
-        // Extrai o remetente
-        const from = message.key?.remoteJid?.replace('@s.whatsapp.net', '');
-        if (!from) {
-            throw new Error('Remetente não encontrado na mensagem');
+        if (!webhookService) {
+            throw new Error('WebhookService não inicializado');
         }
 
-        // Processa imagens
-        if (message.message?.imageMessage) {
-            const result = await aiServices.handleImageMessage(message);
-            
-            // Envia a resposta do processamento da imagem
-            if (result.response) {
-                await whatsappService.sendText(
-                    message.key.remoteJid,
-                    result.response
-                );
-            }
-        } 
-        // Processa mensagens de texto
-        else if (message.message?.conversation || message.message?.extendedTextMessage?.text) {
-            const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
-            
-            // Processa a mensagem com o OpenAI Assistant
-            const response = await openAIService.runAssistant(from, text);
-            
-            // Envia a resposta do Assistant
-            if (response) {
-                await whatsappService.sendText(from, response);
-            }
-        }
+        // Passa a mensagem para o WebhookService processar
+        await webhookService.handleWebhook(req.body);
         
         res.status(200).send('OK');
     } catch (error) {
