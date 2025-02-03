@@ -551,7 +551,7 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            // Extrai a mensagem real considerando todos os casos possíveis
+            // Extrai a mensagem real considerando todos os possíveis caminhos
             const realMessage = message?.message?.ephemeralMessage?.message || // Mensagem ephemeral
                               message?.message?.viewOnceMessage?.message ||    // Mensagem "ver uma vez"
                               message?.message?.forwardedMessage ||           // Mensagem encaminhada
@@ -1121,6 +1121,30 @@ class WhatsAppService {
                 return Promise.reject(error);
             }
         );
+    }
+
+    /**
+     * Executa uma função com retry exponencial em caso de falha
+     * @private
+     * @param {Function} fn - Função a ser executada
+     * @param {number} maxRetries - Número máximo de tentativas
+     * @param {number} initialDelay - Delay inicial em ms
+     * @returns {Promise<*>} Resultado da função
+     */
+    async _retryWithExponentialBackoff(fn, maxRetries = 3, initialDelay = 1000) {
+        let retries = 0;
+        while (true) {
+            try {
+                return await fn();
+            } catch (error) {
+                retries++;
+                if (retries >= maxRetries) {
+                    throw error;
+                }
+                const delay = initialDelay * Math.pow(2, retries - 1);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
     }
 }
 

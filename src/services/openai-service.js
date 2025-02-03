@@ -237,6 +237,16 @@ class OpenAIService {
         return null;
     }
 
+    /**
+     * Obtém o ID da thread para um cliente
+     * @private
+     * @param {string} customerId - ID do cliente
+     * @returns {Promise<string>} ID da thread
+     */
+    async _getThreadId(customerId) {
+        return await this.getOrCreateThreadForCustomer(customerId);
+    }
+
     _getAssistantFunctions() {
         return [
             {
@@ -599,6 +609,18 @@ class OpenAIService {
             });
             throw error;
         }
+    }
+
+    /**
+     * Processa uma mensagem do cliente para gerar uma resposta personalizada
+     * @param {string} customerId - ID do cliente
+     * @param {string} message - Mensagem do cliente
+     * @returns {Promise<string>} Resposta personalizada
+     */
+    async processCustomerMessage(customerId, message) {
+        const threadId = await this._getThreadId(customerId);
+        const response = await this.addMessageAndRun(threadId, message);
+        return response;
     }
 
     async addMessageAndRun(threadId, message) {
