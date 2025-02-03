@@ -29,8 +29,15 @@ class WebhookService {
 
     extractMessageContent(data) {
         try {
+            console.log('📝 [Webhook] Extraindo conteúdo:', {
+                tipo: data?.type,
+                temBody: !!data?.body,
+                temMensagem: !!data?.body?.message || !!data?.message,
+                estrutura: JSON.stringify(data, null, 2)
+            });
+
             // Se for o formato da W-API
-            if (data.body?.message) {
+            if (data.body?.message || data.message) {
                 const messageData = this.extractMessageFromWebhook(data);
                 if (!messageData) {
                     throw new Error('Não foi possível extrair os dados da mensagem');
@@ -38,12 +45,26 @@ class WebhookService {
                 return messageData;
             }
 
-            // Se for o formato antigo
+            // Se for o formato direto da W-API
+            if (data.key?.remoteJid) {
+                return {
+                    text: data.message?.conversation || data.message?.extendedTextMessage?.text || data.text,
+                    from: data.key.remoteJid.replace('@s.whatsapp.net', ''),
+                    messageId: data.key.id,
+                    type: 'text',
+                    pushName: data.pushName,
+                    message: data
+                };
+            }
+
+            // Se for o formato simplificado
             return {
                 text: data.message || data.text,
                 from: data.from || data.phoneNumber,
                 messageId: data.messageId,
-                type: 'text'
+                type: 'text',
+                pushName: data.pushName,
+                message: data
             };
         } catch (error) {
             console.error('[WhatsApp] Erro ao extrair conteúdo da mensagem:', error);
@@ -130,31 +151,32 @@ class WebhookService {
             console.log('🔍 [Webhook] Dados recebidos:', {
                 tipo: webhookData?.type,
                 temBody: !!webhookData?.body,
-                temMensagem: !!webhookData?.body?.message,
+                temMensagem: !!webhookData?.body?.message || !!webhookData?.message,
                 messageStructure: {
-                    hasConversation: !!webhookData?.body?.message?.conversation,
-                    hasExtendedText: !!webhookData?.body?.message?.extendedTextMessage?.text,
-                    hasDirectText: !!webhookData?.body?.text,
-                    messageTypes: Object.keys(webhookData?.body?.message || {})
+                    hasConversation: !!(webhookData?.body?.message?.conversation || webhookData?.message?.conversation),
+                    hasExtendedText: !!(webhookData?.body?.message?.extendedTextMessage?.text || webhookData?.message?.extendedTextMessage?.text),
+                    hasDirectText: !!(webhookData?.body?.text || webhookData?.text),
+                    messageTypes: Object.keys(webhookData?.body?.message || webhookData?.message || {})
                 },
                 headers: webhookData?.headers,
                 timestamp: new Date().toISOString()
             });
 
-            const message = webhookData?.body?.message;
+            // Obtém a mensagem do local correto
+            const message = webhookData?.body?.message || webhookData?.message;
             if (!message) {
                 throw new Error('Mensagem não encontrada no webhook');
             }
 
             // Extrai os dados básicos
             const messageData = {
-                messageId: webhookData.body.key?.id,
-                from: webhookData.body.key?.remoteJid?.replace('@s.whatsapp.net', ''),
-                pushName: webhookData.body.pushName,
-                timestamp: webhookData.body.messageTimestamp,
+                messageId: (webhookData.body?.key || webhookData.key)?.id,
+                from: (webhookData.body?.key || webhookData.key)?.remoteJid?.replace('@s.whatsapp.net', ''),
+                pushName: webhookData.body?.pushName || webhookData.pushName,
+                timestamp: webhookData.body?.messageTimestamp || webhookData.messageTimestamp,
                 type: 'text',
-                key: webhookData.body.key,
-                message: message // Inclui a mensagem original completa
+                key: webhookData.body?.key || webhookData.key,
+                message: message
             };
 
             // Detecta o tipo de mensagem e extrai o conteúdo
@@ -187,23 +209,13 @@ class WebhookService {
             }
 
             // Log dos dados extraídos
-            console.log('📝 [Webhook] Dados básicos extraídos:', {
+            console.log('📝 [Webhook] Dados extraídos:', {
                 tipo: messageData.type,
                 de: messageData.from,
                 messageId: messageData.messageId,
-                ultimaMensagem: messageData.text,
+                texto: messageData.text,
                 timestamp: new Date().toISOString()
             });
-
-            // Se for áudio, adiciona log específico
-            if (messageData.type === 'audio') {
-                console.log('🎵 [Webhook] Áudio detectado:', {
-                    seconds: messageData.seconds,
-                    mimetype: messageData.mimetype,
-                    mediaKey: !!messageData.mediaKey,
-                    url: !!messageData.url
-                });
-            }
 
             return messageData;
         } catch (error) {
