@@ -17,7 +17,8 @@ const {
     OpenAIService,
     BusinessHoursService,
     OpenAIVisionService,
-    FinancialService
+    FinancialService,
+    DepartmentService
 } = require('./services');
 const cron = require('node-cron');
 
@@ -43,6 +44,7 @@ let nuvemshopService;
 let openAIService;
 let financialService;
 let openAIVisionService;
+let departmentService;
 
 // Configuração do rate limiter
 const limiter = rateLimit({
@@ -110,14 +112,11 @@ async function initializeServices() {
             businessHoursService = new BusinessHoursService();
             console.log('✅ BusinessHoursService inicializado');
 
-            trackingService = new TrackingService();
-            console.log('✅ TrackingService inicializado');
-
-            orderValidationService = new OrderValidationService();
-            console.log('✅ OrderValidationService inicializado');
-
             nuvemshopService = new NuvemshopService();
             console.log('✅ NuvemshopService inicializado');
+
+            departmentService = new DepartmentService();
+            console.log('✅ DepartmentService inicializado');
 
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
@@ -146,32 +145,31 @@ async function initializeServices() {
             mediaManagerService.setAudioService(audioService);
             console.log('✅ MediaManager atualizado com AudioService');
 
-            // Inicializa serviços interdependentes
-            whatsappService = new WhatsAppService();
-            console.log('✅ WhatsAppService inicializado');
-
+            // Reinicializa serviços com dependência do WhatsApp
             trackingService = new TrackingService(whatsappService);
-            console.log('✅ TrackingService inicializado');
-
-            businessHoursService = new BusinessHoursService();
-            console.log('✅ BusinessHoursService inicializado');
+            console.log('✅ TrackingService reinicializado com WhatsApp');
 
             orderValidationService = new OrderValidationService(nuvemshopService, whatsappService);
-            console.log('✅ OrderValidationService inicializado');
+            console.log('✅ OrderValidationService reinicializado com dependências');
 
             financialService = new FinancialService(whatsappService);
-            console.log('✅ FinancialService inicializado');
+            console.log('✅ FinancialService reinicializado com WhatsApp');
 
-            // Inicializa OpenAI
+            // OpenAI precisa de vários serviços
             openAIService = new OpenAIService(
                 nuvemshopService,
                 trackingService,
                 businessHoursService,
                 orderValidationService,
                 financialService,
-                null  // whatsappService será injetado depois
+                departmentService,
+                whatsappService
             );
             console.log('✅ OpenAIService inicializado');
+
+            // Configura OpenAI no WhatsApp
+            whatsappService.setOpenAIService(openAIService);
+            console.log('✅ WhatsApp configurado com OpenAI');
 
             // OpenAI Vision é independente
             openAIVisionService = new OpenAIVisionService();
@@ -190,12 +188,6 @@ async function initializeServices() {
             // Webhook precisa do WhatsApp e AI
             webhookService = new WebhookService(whatsappService, aiServices);
             console.log('✅ WebhookService inicializado');
-
-            // Atualiza referências circulares
-            whatsappService.setOpenAIService(openAIService);
-            openAIService.setWhatsAppService(whatsappService);
-            openAIService.setFinancialService(financialService);
-            console.log('✅ Dependências circulares resolvidas');
 
             clearTimeout(timeout);
             servicesReady = true;
