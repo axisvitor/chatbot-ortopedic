@@ -1603,26 +1603,34 @@ class OpenAIService {
         const initialDelay = 1000;
         const maxDelay = 5000;
         const timeout = 30000;
+        const maxToolCalls = 10;
 
         let attempt = 0;
+        let toolCallCount = 0;
+        const toolCallHistory = new Set();
         const startTime = Date.now();
 
         while (attempt < maxRetries) {
             try {
                 // Verifica timeout
                 if (Date.now() - startTime > timeout) {
+                    logger.warn('[Assistant] Timeout atingido, cancelando run:', {
+                        threadId,
+                        runId,
+                        toolCalls: toolCallCount,
+                        elapsedTime: Date.now() - startTime
+                    });
+                    
+                    await this.cancelActiveRun(threadId);
+                    await this._setRunStatus(threadId, null);
                     throw new Error('Timeout ao aguardar resposta do assistant');
                 }
 
                 // Obtém status do run
-                const run = await this.client.beta.threads.runs.retrieve(
-                    threadId,
-                    runId
-                );
+                const run = await this.client.beta.threads.runs.retrieve(threadId, runId);
 
                 switch (run.status) {
                     case 'completed':
-                        // Busca mensagens após o run
                         const messages = await this.client.beta.threads.messages.list(
                             threadId,
                             { order: 'desc', limit: 1 }
@@ -1630,17 +1638,57 @@ class OpenAIService {
                         
                         const lastMessage = messages.data[0];
                         if (lastMessage.role === 'assistant') {
+                            await this._setRunStatus(threadId, null);
                             return lastMessage.content[0].text.value;
                         }
                         break;
 
                     case 'failed':
+                        logger.error('[Assistant] Run falhou:', {
+                            threadId,
+                            runId,
+                            error: run.last_error?.message
+                        });
+                        await this._setRunStatus(threadId, null);
                         throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
 
                     case 'expired':
-                        throw new Error('Run expirou');
+                    case 'cancelled':
+                        logger.warn('[Assistant] Run cancelado/expirado:', {
+                            threadId,
+                            runId,
+                            status: run.status
+                        });
+                        await this._setRunStatus(threadId, null);
+                        throw new Error(`Run ${run.status}`);
 
                     case 'requires_action':
+                        toolCallCount++;
+                        if (toolCallCount > maxToolCalls) {
+                            logger.warn('[Assistant] Limite de chamadas excedido:', {
+                                threadId,
+                                runId,
+                                toolCalls: toolCallCount
+                            });
+                            await this.cancelActiveRun(threadId);
+                            await this._setRunStatus(threadId, null);
+                            throw new Error('Número máximo de chamadas de ferramentas excedido');
+                        }
+
+                        // Verifica chamadas repetidas
+                        const toolCall = JSON.stringify(run.required_action.submit_tool_outputs.tool_calls);
+                        if (toolCallHistory.has(toolCall)) {
+                            logger.warn('[Assistant] Chamada repetida detectada:', {
+                                threadId,
+                                runId,
+                                toolCall: run.required_action.submit_tool_outputs.tool_calls
+                            });
+                            await this.cancelActiveRun(threadId);
+                            await this._setRunStatus(threadId, null);
+                            throw new Error('Chamada de função repetida detectada');
+                        }
+                        toolCallHistory.add(toolCall);
+
                         await this.handleToolCalls(run, threadId);
                         break;
 
@@ -1656,11 +1704,11 @@ class OpenAIService {
                     runId,
                     attempt,
                     error: error.message,
-                    stack: error.stack,
-                    timestamp: new Date().toISOString()
+                    stack: error.stack
                 });
 
                 if (attempt >= maxRetries - 1) {
+                    await this._setRunStatus(threadId, null);
                     throw error;
                 }
 
@@ -1670,6 +1718,15 @@ class OpenAIService {
             }
         }
 
+        logger.error('[Assistant] Máximo de tentativas excedido:', {
+            threadId,
+            runId,
+            attempts: maxRetries,
+            toolCalls: toolCallCount
+        });
+        
+        await this.cancelActiveRun(threadId);
+        await this._setRunStatus(threadId, null);
         throw new Error('Máximo de tentativas excedido ao aguardar resposta');
     }
 
@@ -1686,52 +1743,45 @@ class OpenAIService {
                 throw new Error('ThreadId e message são obrigatórios');
             }
 
-            // Verifica se já existe um run ativo
-            const activeRun = await this._getRunStatus(threadId);
-            if (activeRun) {
-                // Tenta cancelar o run anterior
-                try {
-                    await this.cancelActiveRun(threadId);
-                } catch (error) {
-                    logger.warn('[Assistant] Erro ao cancelar run anterior:', {
-                        threadId,
-                        runId: activeRun,
-                        error: error.message,
-                        timestamp: new Date().toISOString()
-                    });
-                }
-                // Aguarda um pouco para garantir
-                await new Promise(resolve => setTimeout(resolve, 1000));
+            if (!message.messageText && !message.content) {
+                throw new Error('Mensagem não pode estar vazia');
             }
 
-            // Adiciona a mensagem
+            // Adiciona a mensagem à thread
             await this.client.beta.threads.messages.create(
                 threadId,
                 { 
                     role: 'user', 
-                    content: typeof message === 'string' ? message : (message.messageText || message.content)
+                    content: message.messageText || message.content 
                 }
             );
 
-            // Executa o assistant
+            // Cancela qualquer run ativo anterior
+            await this.cancelActiveRun(threadId);
+
+            // Executa o assistant e aguarda criação do run
             const run = await this.runAssistant(threadId);
             
-            // Registra o run ativo
-            await this._setRunStatus(threadId, run.id);
+            // Verifica se o run foi criado corretamente
+            if (!run || !run.id) {
+                throw new Error('Run não foi criado corretamente');
+            }
 
-            // Aguarda e retorna a resposta
-            const response = await this._waitForResponse(threadId, run.id);
+            // Aguarda o registro ser confirmado
+            const hasRun = await this.hasActiveRun(threadId);
+            if (!hasRun) {
+                throw new Error('Falha ao registrar run ativo');
+            }
 
-            // Limpa o status do run
-            await this._setRunStatus(threadId, null);
-
-            return response;
+            return run;
 
         } catch (error) {
-            logger.error('[Assistant] Erro ao processar mensagem:', {
+            logger.error('ErrorAddingMessageAndRun', {
+                error: {
+                    message: error.message,
+                    stack: error.stack
+                },
                 threadId,
-                error: error.message,
-                stack: error.stack,
                 timestamp: new Date().toISOString()
             });
             throw error;
@@ -1739,11 +1789,31 @@ class OpenAIService {
     }
 
     /**
-     * Verifica o status de um run
+     * Cancela um run ativo
      * @param {string} threadId - ID do thread
-     * @param {string} runId - ID do run
-     * @returns {Promise<Object>} Status do run
+     * @returns {Promise<void>}
      */
+    async cancelActiveRun(threadId) {
+        try {
+            const activeRun = await this.redisStore.getActiveRun(threadId);
+            if (!activeRun) return;
+
+            try {
+                await this.client.beta.threads.runs.cancel(threadId, activeRun);
+                logger.info('ActiveRunCanceled', { threadId, runId: activeRun });
+            } catch (error) {
+                // Ignora erro se o run não existir mais
+                if (!error.message.includes('No run found')) {
+                    logger.error('ErrorCancelingRun', { threadId, runId: activeRun, error: error.message });
+                }
+            }
+
+            await this.removeActiveRun(threadId);
+        } catch (error) {
+            logger.error('ErrorInCancelActiveRun', { threadId, error });
+        }
+    }
+
     async checkRunStatus(threadId, runId) {
         try {
             console.log('🔍 [OpenAI] Verificando status do run...', { threadId, runId });

@@ -262,12 +262,37 @@ class AIServices {
                 return;
             }
 
-            const errorContext = `
-            Contexto: Ocorreu um erro ao processar a imagem do cliente.
-            Erro técnico: ${error.message}
+            let errorContext = '';
             
-            Por favor, gere uma mensagem educada explicando o problema e sugerindo alternativas.
-            Mantenha a mensagem curta e clara.`;
+            // Personaliza contexto baseado no tipo de erro
+            if (error.message.includes('Timeout')) {
+                errorContext = `
+                Contexto: O assistente demorou muito para processar sua solicitação.
+                Erro técnico: ${error.message}
+                
+                Por favor, gere uma mensagem educada explicando que houve um atraso no processamento e pedindo para o cliente tentar novamente.`;
+            } 
+            else if (error.message.includes('máximo de chamadas')) {
+                errorContext = `
+                Contexto: O assistente fez muitas tentativas de processar a solicitação.
+                Erro técnico: ${error.message}
+                
+                Por favor, gere uma mensagem educada pedindo para o cliente reformular a solicitação de forma mais clara.`;
+            }
+            else if (error.message.includes('repetida detectada')) {
+                errorContext = `
+                Contexto: O assistente entrou em um loop processando a mesma informação.
+                Erro técnico: ${error.message}
+                
+                Por favor, gere uma mensagem educada pedindo para o cliente tentar novamente, possivelmente de outra forma.`;
+            }
+            else {
+                errorContext = `
+                Contexto: Ocorreu um erro ao processar a solicitação do cliente.
+                Erro técnico: ${error.message}
+                
+                Por favor, gere uma mensagem educada explicando que houve um problema e sugerindo alternativas.`;
+            }
 
             try {
                 // Tenta gerar uma mensagem personalizada via Assistant
@@ -277,11 +302,28 @@ class AIServices {
                 });
                 await this.whatsAppService.sendText(to, errorResponse);
             } catch (assistantError) {
-                // Fallback para mensagem padrão em caso de erro do Assistant
+                // Fallback para mensagem específica baseada no tipo de erro
                 console.error('❌ [AIServices] Erro ao gerar mensagem personalizada:', assistantError);
-                const defaultError = 'Desculpe, não consegui processar sua imagem. ' +
-                                   'Por favor, tente enviar novamente ou envie em outro formato (JPEG ou PNG).';
-                await this.whatsAppService.sendText(to, defaultError);
+                
+                let fallbackMessage = '';
+                if (error.message.includes('Timeout')) {
+                    fallbackMessage = 'Desculpe, estou demorando um pouco mais que o normal para processar sua solicitação. ' +
+                                   'Por favor, tente novamente em alguns instantes.';
+                } 
+                else if (error.message.includes('máximo de chamadas')) {
+                    fallbackMessage = 'Desculpe, estou tendo dificuldade para entender sua solicitação. ' +
+                                   'Poderia, por favor, reformular de forma mais clara?';
+                }
+                else if (error.message.includes('repetida detectada')) {
+                    fallbackMessage = 'Desculpe, parece que entrei em um loop processando sua solicitação. ' +
+                                   'Poderia tentar novamente de uma forma diferente?';
+                }
+                else {
+                    fallbackMessage = 'Desculpe, ocorreu um erro ao processar sua solicitação. ' +
+                                   'Por favor, tente novamente em alguns instantes.';
+                }
+                
+                await this.whatsAppService.sendText(to, fallbackMessage);
             }
         } catch (sendError) {
             console.error('❌ [AIServices] Erro ao enviar mensagem de erro:', {
