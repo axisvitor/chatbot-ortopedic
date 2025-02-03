@@ -768,10 +768,9 @@ class OpenAIService {
         logger.info('ProcessingToolCalls', { threadId, tools: toolCalls.map(t => t.function.name) });
         
         const toolOutputs = [];
-        const context = {};
 
         for (const toolCall of toolCalls) {
-            const { name, arguments: args } = toolCall.function;
+            const { id, function: { name, arguments: args } } = toolCall;
             logger.info('ExecutingTool', { threadId, tool: name, args });
             
             let parsedArgs;
@@ -779,6 +778,16 @@ class OpenAIService {
                 parsedArgs = JSON.parse(args);
             } catch (error) {
                 logger.error('ErrorParsingToolArguments', { threadId, tool: name, error });
+                continue;
+            }
+
+            // Verifica se já temos resultado em cache
+            const cachedResult = await this._getCachedToolResult(threadId, name, parsedArgs);
+            if (cachedResult) {
+                toolOutputs.push({
+                    tool_call_id: id,
+                    output: JSON.stringify(cachedResult)
+                });
                 continue;
             }
 
@@ -1269,28 +1278,45 @@ class OpenAIService {
                         throw new Error(`Função desconhecida: ${name}`);
                 }
 
-                toolOutputs.push({
-                    tool_call_id: toolCall.id,
-                    output: JSON.stringify({
-                        ...output,
-                        formatted_response: output.formatted || output.message
-                    })
-                });
-
+                if (output !== undefined) {
+                    // Armazena resultado no cache
+                    await this._cacheToolResult(threadId, name, parsedArgs, output);
+                    
+                    toolOutputs.push({
+                        tool_call_id: id,
+                        output: JSON.stringify(output)
+                    });
+                }
             } catch (error) {
                 logger.error('ErrorExecutingTool', { 
                     threadId, 
                     tool: name, 
-                    error: error.message 
+                    error: error.message,
+                    stack: error.stack 
                 });
+            }
+        }
 
-                toolOutputs.push({
-                    tool_call_id: toolCall.id,
-                    output: JSON.stringify({ 
-                        error: true, 
-                        message: 'Erro ao processar solicitação'
-                    })
+        if (toolOutputs.length > 0) {
+            try {
+                await this.client.beta.threads.runs.submitToolOutputs(
+                    threadId,
+                    run.id,
+                    { tool_outputs: toolOutputs }
+                );
+                logger.info('ToolOutputsSubmitted', { 
+                    threadId,
+                    runId: run.id,
+                    outputCount: toolOutputs.length
                 });
+            } catch (error) {
+                logger.error('ErrorSubmittingToolOutputs', {
+                    threadId,
+                    runId: run.id,
+                    error: error.message,
+                    stack: error.stack
+                });
+                throw error;
             }
         }
 
@@ -1892,6 +1918,64 @@ class OpenAIService {
      */
     setFinancialService(financialService) {
         this.financialService = financialService;
+    }
+
+    async _cacheToolResult(threadId, toolName, args, result) {
+        try {
+            const context = await this.contextManager.getContext(threadId);
+            
+            // Inicializa a estrutura de cache de ferramentas se não existir
+            if (!context.metadata.toolResults) {
+                context.metadata.toolResults = {};
+            }
+
+            const cacheKey = `${toolName}:${JSON.stringify(args)}`;
+            context.metadata.toolResults[cacheKey] = {
+                result,
+                timestamp: Date.now()
+            };
+
+            await this.contextManager.updateContext(threadId, context);
+            logger.info('ToolResultCached', { threadId, toolName, args });
+        } catch (error) {
+            logger.error('ErrorCachingToolResult', { 
+                threadId, 
+                toolName, 
+                error: error.message 
+            });
+        }
+    }
+
+    async _getCachedToolResult(threadId, toolName, args) {
+        try {
+            const context = await this.contextManager.getContext(threadId);
+            if (!context.metadata.toolResults) {
+                return null;
+            }
+
+            const cacheKey = `${toolName}:${JSON.stringify(args)}`;
+            const cached = context.metadata.toolResults[cacheKey];
+
+            if (!cached) {
+                return null;
+            }
+
+            // Verifica se o cache ainda é válido (5 minutos)
+            const cacheAge = Date.now() - cached.timestamp;
+            if (cacheAge > 5 * 60 * 1000) { // 5 minutos em milissegundos
+                return null;
+            }
+
+            logger.info('ToolResultFromCache', { threadId, toolName, args });
+            return cached.result;
+        } catch (error) {
+            logger.error('ErrorGettingCachedToolResult', { 
+                threadId, 
+                toolName, 
+                error: error.message 
+            });
+            return null;
+        }
     }
 }
 
