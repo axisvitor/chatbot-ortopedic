@@ -314,58 +314,8 @@ app.get('/healthcheck', (req, res) => {
     });
 });
 
-app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
-    try {
-        console.log('📥 Webhook recebido:', {
-            headers: req.headers,
-            tipo: req.body?.type,
-            timestamp: new Date().toISOString()
-        });
-
-        if (!webhookService) {
-            throw new Error('WebhookService não inicializado');
-        }
-
-        await webhookService.handleWebhook(req.body);
-        res.status(200).send('OK');
-    } catch (error) {
-        console.error('❌ Erro ao processar webhook:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Erro ao processar webhook',
-            error: error.message
-        });
-    }
-});
-
-// Rota para enviar mensagens de texto (W-API)
-app.post('/message/send-text', async (req, res) => {
-    try {
-        const { phoneNumber, text, messageId, message, delayMessage } = req.body;
-
-        if (!phoneNumber || !text) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'phoneNumber e text são obrigatórios'
-            });
-        }
-
-        // Envia a mensagem usando o WhatsAppService que já está configurado com as credenciais da W-API
-        const response = await whatsappService.sendText(phoneNumber, text);
-
-        res.status(200).json(response);
-    } catch (error) {
-        console.error('❌ Erro ao enviar mensagem:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Erro ao enviar mensagem',
-            error: error.message
-        });
-    }
-});
-
 // Handler para mensagens recebidas
-app.post('/webhook/msg_recebidas', async (req, res) => {
+app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
         const message = req.body;
         
@@ -393,6 +343,32 @@ app.post('/webhook/msg_recebidas', async (req, res) => {
         res.status(500).json({
             error: 'Erro interno',
             message: error.message
+        });
+    }
+});
+
+// Rota para enviar mensagens de texto (W-API)
+app.post('/message/send-text', async (req, res) => {
+    try {
+        const { phoneNumber, text, messageId, message, delayMessage } = req.body;
+
+        if (!phoneNumber || !text) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'phoneNumber e text são obrigatórios'
+            });
+        }
+
+        // Envia a mensagem usando o WhatsAppService que já está configurado com as credenciais da W-API
+        const response = await whatsappService.sendText(phoneNumber, text);
+
+        res.status(200).json(response);
+    } catch (error) {
+        console.error('❌ Erro ao enviar mensagem:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Erro ao enviar mensagem',
+            error: error.message
         });
     }
 });

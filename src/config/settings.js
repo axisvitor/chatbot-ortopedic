@@ -337,6 +337,10 @@ const WHATSAPP_CONFIG = {
         connection: {
             path: 'instance/info',
             method: 'GET'
+        },
+        webhook: {
+            path: 'webhook/msg_recebidas_ou_enviadas',
+            method: 'POST'
         }
     },
     whatsappNumber: env.WHATSAPP_NUMBER  
