@@ -216,7 +216,7 @@ function initializeScheduledTasks() {
     cron.schedule('*/30 * * * *', async () => {
         try {
             console.log('🔄 Iniciando sincronização de pedidos...');
-            await nuvemshopService.syncOrders();
+            await nuvemshopService.orderService.syncOrders();
         } catch (error) {
             console.error('❌ Erro ao sincronizar pedidos:', error);
         }

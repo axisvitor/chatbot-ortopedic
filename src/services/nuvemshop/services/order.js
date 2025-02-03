@@ -288,6 +288,53 @@ class OrderService extends NuvemshopBase {
             return null;
         }
     }
+
+    /**
+     * Sincroniza pedidos recentes
+     * @param {Object} options - Opções de sincronização
+     * @param {Date} options.since - Data inicial para sincronização
+     * @returns {Promise<Array>} Lista de pedidos sincronizados
+     */
+    async syncOrders(options = {}) {
+        try {
+            logger.info('SyncOrders', {
+                options,
+                timestamp: new Date().toISOString()
+            });
+
+            const since = options.since || new Date(Date.now() - 24 * 60 * 60 * 1000); // Últimas 24h por padrão
+            
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params: {
+                    created_at_min: since.toISOString(),
+                    per_page: 50,
+                    fields: 'id,number,status,payment_status,shipping_status,shipping_tracking_number'
+                }
+            });
+
+            const orders = response.data;
+            
+            // Atualiza cache
+            for (const order of orders) {
+                const cacheKey = this.generateCacheKey('order', order.id);
+                await this.cache.set(cacheKey, order, NUVEMSHOP_CONFIG.cache.ttl.orders.recent);
+            }
+
+            logger.info('OrdersSynced', {
+                count: orders.length,
+                timestamp: new Date().toISOString()
+            });
+
+            return orders;
+
+        } catch (error) {
+            logger.error('ErrorSyncOrders', {
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
 }
 
 module.exports = { OrderService };

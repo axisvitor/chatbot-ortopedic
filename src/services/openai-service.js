@@ -1977,6 +1977,57 @@ class OpenAIService {
             return null;
         }
     }
+
+    async _checkOrder(args) {
+        try {
+            const orderNumber = args.order_number.replace(/[^\d]/g, '');
+            
+            // Busca o pedido
+            const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
+            
+            if (!order) {
+                return {
+                    found: false,
+                    message: `Pedido ${orderNumber} não encontrado.`
+                };
+            }
+
+            // Formata a resposta
+            const response = {
+                found: true,
+                id: order.id,
+                numeroLimpo: orderNumber,
+                numeroOriginal: args.order_number,
+                status: order.status,
+                rastreio: order.shipping_tracking_number || null
+            };
+
+            // Salva no contexto
+            const threadId = await this.redisStore.get(`${REDIS_CONFIG.prefix.openai}current_thread`);
+            if (threadId) {
+                const context = await this.contextManager.getContext(threadId);
+                context.order = {
+                    ...response,
+                    lastCheck: Date.now()
+                };
+                await this.contextManager.updateContext(threadId, context);
+            }
+
+            return response;
+
+        } catch (error) {
+            logger.error('ErrorCheckingOrder', { 
+                error: error.message,
+                orderNumber: args.order_number
+            });
+            
+            return {
+                found: false,
+                error: true,
+                message: 'Erro ao consultar pedido'
+            };
+        }
+    }
 }
 
 module.exports = { OpenAIService };
