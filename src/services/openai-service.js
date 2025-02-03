@@ -1592,76 +1592,148 @@ class OpenAIService {
     }
 
     /**
-     * Aguarda a resposta do assistant
+     * Aguarda a resposta do assistant com retry e timeout
+     * @private
      * @param {string} threadId - ID da thread
      * @param {string} runId - ID do run
      * @returns {Promise<string>} Resposta do assistant
      */
-    async waitForResponse(threadId, runId) {
+    async _waitForResponse(threadId, runId) {
+        const maxRetries = 10;
+        const initialDelay = 1000;
+        const maxDelay = 5000;
+        const timeout = 30000;
+
+        let attempt = 0;
+        const startTime = Date.now();
+
+        while (attempt < maxRetries) {
+            try {
+                // Verifica timeout
+                if (Date.now() - startTime > timeout) {
+                    throw new Error('Timeout ao aguardar resposta do assistant');
+                }
+
+                // Obtém status do run
+                const run = await this.client.beta.threads.runs.retrieve(
+                    threadId,
+                    runId
+                );
+
+                switch (run.status) {
+                    case 'completed':
+                        // Busca mensagens após o run
+                        const messages = await this.client.beta.threads.messages.list(
+                            threadId,
+                            { order: 'desc', limit: 1 }
+                        );
+                        
+                        const lastMessage = messages.data[0];
+                        if (lastMessage.role === 'assistant') {
+                            return lastMessage.content[0].text.value;
+                        }
+                        break;
+
+                    case 'failed':
+                        throw new Error(`Run falhou: ${run.last_error?.message || 'Erro desconhecido'}`);
+
+                    case 'expired':
+                        throw new Error('Run expirou');
+
+                    case 'requires_action':
+                        await this.handleToolCalls(run, threadId);
+                        break;
+
+                    default:
+                        // Aguarda com backoff exponencial
+                        const delay = Math.min(initialDelay * Math.pow(2, attempt), maxDelay);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        attempt++;
+                }
+            } catch (error) {
+                logger.error('[Assistant] Erro ao aguardar resposta:', {
+                    threadId,
+                    runId,
+                    attempt,
+                    error: error.message,
+                    stack: error.stack,
+                    timestamp: new Date().toISOString()
+                });
+
+                if (attempt >= maxRetries - 1) {
+                    throw error;
+                }
+
+                // Aguarda antes de tentar novamente
+                await new Promise(resolve => setTimeout(resolve, initialDelay));
+                attempt++;
+            }
+        }
+
+        throw new Error('Máximo de tentativas excedido ao aguardar resposta');
+    }
+
+    /**
+     * Adiciona mensagem e executa o assistant
+     * @param {string} threadId - ID da thread
+     * @param {string|Object} message - Mensagem para adicionar
+     * @returns {Promise<string>} Resposta do assistant
+     */
+    async addMessageAndRun(threadId, message) {
         try {
-            console.log('⏳ [OpenAI] Aguardando resposta:', {
-                threadId,
-                runId,
-                timestamp: new Date().toISOString()
-            });
-
-            // Aguarda até o run completar
-            let run;
-            do {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                run = await this.checkRunStatus(threadId, runId);
-                
-                console.log('🔄 [OpenAI] Status do processamento:', {
-                    threadId,
-                    runId,
-                    status: run.status,
-                    timestamp: new Date().toISOString()
-                });
-
-            } while (run.status === 'queued' || run.status === 'in_progress');
-
-            // Verifica se houve erro
-            if (run.status === 'failed') {
-                console.error('❌ [OpenAI] Run falhou:', {
-                    threadId,
-                    runId,
-                    error: run.last_error,
-                    timestamp: new Date().toISOString()
-                });
-                throw new Error(`Run falhou: ${run.last_error?.message}`);
+            // Valida parâmetros
+            if (!threadId || !message) {
+                throw new Error('ThreadId e message são obrigatórios');
             }
 
-            // Obtém as mensagens após o run completar
-            const messages = await this.client.beta.threads.messages.list(threadId);
-            const assistantMessages = messages.data
-                .filter(msg => msg.role === 'assistant' && msg.run_id === runId)
-                .map(msg => msg.content)
-                .flat()
-                .map(content => content.text?.value || '')
-                .join('\n');
+            // Verifica se já existe um run ativo
+            const activeRun = await this._getRunStatus(threadId);
+            if (activeRun) {
+                // Tenta cancelar o run anterior
+                try {
+                    await this.cancelActiveRun(threadId);
+                } catch (error) {
+                    logger.warn('[Assistant] Erro ao cancelar run anterior:', {
+                        threadId,
+                        runId: activeRun,
+                        error: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+                // Aguarda um pouco para garantir
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
 
-            console.log('📤 [OpenAI] Mensagens do assistant:', {
+            // Adiciona a mensagem
+            await this.client.beta.threads.messages.create(
                 threadId,
-                runId,
-                messageCount: messages.data.length,
-                responseLength: assistantMessages.length,
-                timestamp: new Date().toISOString()
-            });
+                { 
+                    role: 'user', 
+                    content: typeof message === 'string' ? message : (message.messageText || message.content)
+                }
+            );
 
-            return assistantMessages;
+            // Executa o assistant
+            const run = await this.runAssistant(threadId);
+            
+            // Registra o run ativo
+            await this._setRunStatus(threadId, run.id);
+
+            // Aguarda e retorna a resposta
+            const response = await this._waitForResponse(threadId, run.id);
+
+            // Limpa o status do run
+            await this._setRunStatus(threadId, null);
+
+            return response;
 
         } catch (error) {
-            console.error('❌ [OpenAI] Erro ao aguardar resposta:', {
-                erro: error.message,
-                stack: error.stack,
+            logger.error('[Assistant] Erro ao processar mensagem:', {
                 threadId,
-                runId,
+                error: error.message,
+                stack: error.stack,
                 timestamp: new Date().toISOString()
             });
-            
-            // Remove o run ativo em caso de erro
-            await this.removeActiveRun(threadId);
-            
             throw error;
         }
     }
@@ -1724,8 +1796,8 @@ class OpenAIService {
 
     async _setRunStatus(threadId, status) {
         try {
-            const key = `${REDIS_CONFIG.prefix.run}${threadId}:active`;
-            await this.redisStore.set(key, status, REDIS_CONFIG.ttl.openai.threads);
+            const key = `run:${threadId}`;
+            await this.redisStore.set(key, status, 300); // TTL de 5 minutos
             return true;
         } catch (error) {
             logger.error('[OpenAI] Erro ao definir status do run:', error);
@@ -1735,7 +1807,7 @@ class OpenAIService {
 
     async _getRunStatus(threadId) {
         try {
-            const key = `${REDIS_CONFIG.prefix.run}${threadId}:active`;
+            const key = `run:${threadId}`;
             return await this.redisStore.get(key) || false;
         } catch (error) {
             logger.error('[OpenAI] Erro ao obter status do run:', error);
@@ -1745,8 +1817,8 @@ class OpenAIService {
 
     async _saveCustomerThread(customerId, threadId) {
         try {
-            const key = `${REDIS_CONFIG.prefix.customer_thread}${customerId}`;
-            await this.redisStore.set(key, threadId, REDIS_CONFIG.ttl.openai.threads);
+            const key = `customer_thread:${customerId}`;
+            await this.redisStore.set(key, threadId, 300); // TTL de 5 minutos
             return true;
         } catch (error) {
             logger.error('[OpenAI] Erro ao salvar thread do cliente:', error);
@@ -1756,7 +1828,7 @@ class OpenAIService {
 
     async _getCustomerThread(customerId) {
         try {
-            const key = `${REDIS_CONFIG.prefix.customer_thread}${customerId}`;
+            const key = `customer_thread:${customerId}`;
             return await this.redisStore.get(key);
         } catch (error) {
             logger.error('[OpenAI] Erro ao obter thread do cliente:', error);
