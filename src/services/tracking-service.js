@@ -18,10 +18,12 @@ class TrackingService {
 
         this.config = {
             apiKey: TRACKING_CONFIG.apiKey,
-            endpoint: TRACKING_CONFIG.endpoint || 'api.17track.net',
+            endpoint: 'api.17track.net',
             paths: {
-                register: TRACKING_CONFIG.paths?.register || '/track/v2.2/register',
-                status: TRACKING_CONFIG.paths?.status || '/track/v2.2/gettrackinfo'
+                register: TRACKING_CONFIG.paths.register,
+                status: TRACKING_CONFIG.paths.status,
+                track: TRACKING_CONFIG.paths.track,
+                push: TRACKING_CONFIG.paths.push
             },
             updateInterval: TRACKING_CONFIG.updateInterval || 3600000,
             carriers: TRACKING_CONFIG.carriers || ['correios', 'jadlog', 'fedex', 'dhl']
@@ -531,9 +533,12 @@ class TrackingService {
     }
 
     async _makeRequest(path, data) {
+        // Remove qualquer barra inicial duplicada
+        const cleanPath = path.startsWith('/') ? path : `/${path}`;
+
         const options = {
-            hostname: this.config.endpoint,
-            path,
+            hostname: 'api.17track.net',
+            path: cleanPath,
             method: 'POST',
             headers: {
                 '17token': this.config.apiKey,
