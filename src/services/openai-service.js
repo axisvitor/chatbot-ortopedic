@@ -1300,16 +1300,29 @@ class OpenAIService {
 
                     // Garante que a resposta seja uma string válida
                     if (typeof messageText === 'object') {
-                        messageText = JSON.stringify(messageText);
-                    } else if (messageText === undefined || messageText === null) {
-                        messageText = 'Desculpe, não consegui processar sua mensagem. Por favor, tente novamente.';
-                    } else {
-                        messageText = String(messageText).trim();
+                        if (messageText.message) {
+                            messageText = messageText.message;
+                        } else if (messageText.error) {
+                            messageText = messageText.error;
+                        } else {
+                            messageText = JSON.stringify(messageText);
+                        }
                     }
 
+                    // Converte para string e remove espaços extras
+                    messageText = String(messageText || '').trim();
+
+                    // Se ainda estiver vazio, usa mensagem padrão
                     if (!messageText) {
                         messageText = 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.';
                     }
+
+                    logger.info('AssistantResponse', {
+                        threadId,
+                        runId: run.id,
+                        messageLength: messageText.length,
+                        timestamp: new Date().toISOString()
+                    });
 
                     return messageText;
                 }

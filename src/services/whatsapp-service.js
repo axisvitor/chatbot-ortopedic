@@ -245,8 +245,12 @@ class WhatsAppService {
      * @throws {Error} Se o número for inválido
      */
     _validatePhoneNumber(number) {
+        if (!number) {
+            throw new Error('O número de telefone é obrigatório');
+        }
+
         // Remove todos os caracteres não numéricos
-        const cleaned = number.replace(/\D/g, '');
+        const cleaned = String(number).replace(/\D/g, '');
         
         // Valida o formato (DDI + DDD + Número)
         // DDI: 1-3 dígitos
@@ -254,6 +258,11 @@ class WhatsAppService {
         // Número: 8-9 dígitos
         if (!/^[1-9]\d{1,2}[1-9]\d{8,9}$/.test(cleaned)) {
             throw new Error('Número de telefone inválido. Use o formato: DDI DDD NÚMERO');
+        }
+
+        // Garante que o número comece com o código do país (55 para Brasil)
+        if (!cleaned.startsWith('55')) {
+            throw new Error('O número deve começar com 55 (Brasil)');
         }
         
         return cleaned;
@@ -289,12 +298,25 @@ class WhatsAppService {
             }
 
             const phoneNumber = this._validatePhoneNumber(to);
-            const messageText = String(text);
+            
+            // Garante que o texto seja uma string válida
+            let messageText;
+            if (typeof text === 'object') {
+                messageText = text.message || JSON.stringify(text);
+            } else {
+                messageText = String(text || '').trim();
+            }
+
+            if (!messageText) {
+                throw new Error('O conteúdo da mensagem é obrigatório');
+            }
+
+            const messageId = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
             console.log('[WhatsAppService] sendText - Enviando mensagem:', {
                 para: phoneNumber,
                 texto: messageText,
-                messageId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                messageId,
                 timestamp: new Date().toISOString()
             });
 
