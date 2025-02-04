@@ -18,12 +18,10 @@ class TrackingService {
 
         this.config = {
             apiKey: TRACKING_CONFIG.apiKey,
-            endpoint: TRACKING_CONFIG.endpoint ? new URL(TRACKING_CONFIG.endpoint).hostname : 'api.17track.net',
+            endpoint: TRACKING_CONFIG.endpoint || 'api.17track.net',
             paths: {
-                register: TRACKING_CONFIG.paths.register,
-                status: TRACKING_CONFIG.paths.status,
-                track: TRACKING_CONFIG.paths.track,
-                push: TRACKING_CONFIG.paths.push
+                register: TRACKING_CONFIG.paths?.register || '/track/v2.2/register',
+                status: TRACKING_CONFIG.paths?.status || '/track/v2.2/gettrackinfo'
             },
             updateInterval: TRACKING_CONFIG.updateInterval || 3600000,
             carriers: TRACKING_CONFIG.carriers || ['correios', 'jadlog', 'fedex', 'dhl']
