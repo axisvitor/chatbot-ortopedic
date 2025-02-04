@@ -150,11 +150,26 @@ class TrackingService {
             
             const response = await this._makeRequest(this.config.paths.status, data);
             
-            console.log('✅ [Tracking] Resposta:', JSON.stringify(response, null, 2));
+            // Limpa e simplifica os dados antes de logar
+            const cleanedData = this._cleanTrackingData(response);
             
-            return response;
+            // Log apenas dos dados relevantes
+            console.log('📦 [Tracking] Dados do rastreamento:', {
+                trackingNumber,
+                status: cleanedData?.status,
+                latestEvent: cleanedData?.latest_event
+            });
+
+            if (!cleanedData) {
+                throw new Error('Dados de rastreamento não encontrados ou inválidos');
+            }
+            
+            return cleanedData;
         } catch (error) {
-            console.error('❌ [Tracking] Erro ao consultar status:', error);
+            console.error('❌ [Tracking] Erro ao consultar status:', {
+                trackingNumber,
+                error: error.message
+            });
             throw error;
         }
     }

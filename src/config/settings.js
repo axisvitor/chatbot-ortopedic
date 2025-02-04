@@ -31,7 +31,7 @@ const DEFAULT_VALUES = {
     NUVEMSHOP_ACCESS_TOKEN: 'dummy_token',
     NUVEMSHOP_API_URL: 'https://api.nuvemshop.com.br/v1/dummy_id',
     NUVEMSHOP_USER_ID: 'dummy_user',
-    NUVEMSHOP_SCOPE: 'read_content,read_products,read_coupons,read_customers,read_orders,read_discounts,read_draft_orders,read_fulfillment_orders,read_domains',
+    NUVEMSHOP_SCOPE: 'read_content,read_products,read_orders',
     FINANCIAL_DEPT_NUMBER: '123456',
     SUPPORT_DEPT_NUMBER: '123457',
     SALES_DEPT_NUMBER: '123458',

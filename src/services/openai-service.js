@@ -1272,26 +1272,31 @@ class OpenAIService {
      */
     async _waitForResponse(run, threadId) {
         let attempts = 0;
-        const toolCallHistory = new Set();
         let toolCallCount = 0;
-        const maxAttempts = 8;
-        const baseDelay = 1000;
+        const toolCallHistory = new Set();
 
-        while (attempts++ < maxAttempts) {
+        while (attempts < 8) {
             try {
-                // Aumenta o delay exponencialmente
-                const delay = baseDelay * Math.pow(2, attempts - 1);
-                await new Promise(resolve => setTimeout(resolve, delay));
-
-                const runStatus = await this.client.beta.threads.runs.retrieve(
-                    threadId,
-                    run.id
-                );
+                attempts++;
+                const runStatus = await this.client.beta.threads.runs.retrieve(threadId, run.id);
 
                 if (runStatus.status === 'completed') {
+                    // Busca a última mensagem do assistente
                     const messages = await this.client.beta.threads.messages.list(threadId);
                     const lastMessage = messages.data[0];
-                    let messageText = lastMessage?.content[0]?.text?.value || '';
+                    
+                    if (!lastMessage) {
+                        throw new Error('Nenhuma mensagem encontrada na resposta do assistente');
+                    }
+
+                    // Extrai o texto da mensagem
+                    let messageText = '';
+                    for (const content of lastMessage.content) {
+                        if (content.type === 'text') {
+                            messageText = content.text.value;
+                            break;
+                        }
+                    }
 
                     // Garante que a resposta seja uma string válida
                     if (typeof messageText === 'object') {
@@ -1310,11 +1315,6 @@ class OpenAIService {
                     // Se ainda estiver vazio, usa mensagem padrão
                     if (!messageText) {
                         messageText = 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.';
-                    }
-
-                    // Limita tamanho da mensagem se necessário
-                    if (messageText.length > 4000) {
-                        messageText = messageText.substring(0, 4000) + '...';
                     }
 
                     logger.info('AssistantResponse', {
@@ -1351,7 +1351,7 @@ class OpenAIService {
                     }
 
                     // Processa chamadas de ferramentas
-                    const outputs = await this._processToolCalls(toolCalls, threadId);
+                    const outputs = await this._processToolCalls(runStatus.required_action.submit_tool_outputs.tool_calls, threadId);
                     
                     if (outputs && outputs.length > 0) {
                         await this.client.beta.threads.runs.submitToolOutputs(
@@ -1363,15 +1363,11 @@ class OpenAIService {
                 }
 
                 if (runStatus.status === 'failed') {
-                    const errorMessage = runStatus.last_error?.message || 'Erro desconhecido';
-                    logger.error('RunFalhou', {
-                        threadId,
-                        runId: run.id,
-                        error: errorMessage,
-                        status: runStatus.status
-                    });
-                    throw new Error(`Run falhou: ${errorMessage}`);
+                    throw new Error(`Run falhou: ${runStatus.last_error?.message || 'Erro desconhecido'}`);
                 }
+
+                // Espera antes da próxima tentativa
+                await new Promise(resolve => setTimeout(resolve, 1500));
 
             } catch (error) {
                 logger.warn('ErroAguardandoResposta', {
@@ -1381,12 +1377,12 @@ class OpenAIService {
                     error: error.message
                 });
 
-                if (attempts >= maxAttempts) {
+                if (attempts >= 8) {
                     throw new Error(`Erro ao aguardar resposta após ${attempts} tentativas: ${error.message}`);
                 }
 
-                // Espera antes de tentar novamente com backoff exponencial
-                await new Promise(resolve => setTimeout(resolve, baseDelay * Math.pow(2, attempts)));
+                // Espera antes de tentar novamente
+                await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
             }
         }
     }
