@@ -1135,6 +1135,93 @@ class OrderValidationService {
             };
         }
     }
+
+    /**
+     * Verifica pedidos pendentes e realiza ações necessárias
+     * @returns {Promise<void>}
+     */
+    async checkPendingOrders() {
+        try {
+            // Busca pedidos das últimas 24 horas
+            const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const orders = await this.nuvemshopService.orderService.getOrders({
+                created_at_min: since.toISOString(),
+                status: ['pending', 'paid', 'authorized']
+            });
+
+            if (!orders || !orders.length) {
+                return;
+            }
+
+            for (const order of orders) {
+                // Verifica se já processamos este pedido recentemente
+                const cacheKey = `pending_check:${order.id}`;
+                const processed = await this.redisStore.get(cacheKey);
+                if (processed) continue;
+
+                // Marca como processado por 1 hora
+                await this.redisStore.set(cacheKey, true, 3600);
+
+                // Verifica pagamento pendente
+                if (order.payment_status === 'pending') {
+                    await this._handlePendingPayment(order);
+                }
+
+                // Verifica rastreio pendente
+                if (order.status === 'paid' && !order.shipping_tracking_number) {
+                    await this._handlePendingTracking(order);
+                }
+            }
+        } catch (error) {
+            console.error('Erro ao verificar pedidos pendentes:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Processa pedido com pagamento pendente
+     * @private
+     */
+    async _handlePendingPayment(order) {
+        // Verifica se já notificamos sobre este pagamento
+        const notifyKey = `payment_notify:${order.id}`;
+        const notified = await this.redisStore.get(notifyKey);
+        if (notified) return;
+
+        // Notifica equipe financeira
+        await this._financialService.notifyPendingPayment({
+            orderNumber: order.number,
+            customerName: order.customer.name,
+            amount: order.total,
+            createdAt: order.created_at
+        });
+
+        // Marca como notificado por 12 horas
+        await this.redisStore.set(notifyKey, true, 43200);
+    }
+
+    /**
+     * Processa pedido sem código de rastreio
+     * @private
+     */
+    async _handlePendingTracking(order) {
+        // Verifica se já notificamos sobre este rastreio
+        const notifyKey = `tracking_notify:${order.id}`;
+        const notified = await this.redisStore.get(notifyKey);
+        if (notified) return;
+
+        // Notifica equipe de envios
+        if (this._whatsAppService) {
+            await this._whatsAppService.notifyShippingTeam({
+                orderNumber: order.number,
+                customerName: order.customer.name,
+                shippingAddress: order.shipping_address
+            });
+        }
+
+        // Marca como notificado por 12 horas
+        await this.redisStore.set(notifyKey, true, 43200);
+    }
 }
 
 module.exports = { OrderValidationService };

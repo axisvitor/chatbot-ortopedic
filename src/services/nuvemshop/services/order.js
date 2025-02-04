@@ -4,6 +4,10 @@ const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 
 class OrderService extends NuvemshopBase {
     constructor(cacheService) {
+        if (!cacheService) {
+            const { RedisStore } = require('../../../store/redis-store');
+            cacheService = new RedisStore();
+        }
         super(cacheService);
     }
 
