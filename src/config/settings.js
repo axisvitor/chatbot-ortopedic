@@ -367,10 +367,10 @@ const TRACKING_CONFIG = {
     
     // API Paths
     paths: {
-        track: '/track/get',
-        register: '/track/register',
-        push: '/push/get',
-        webhook: '/webhook'
+        register: env.TRACK17_REGISTER_PATH,
+        status: env.TRACK17_STATUS_PATH,
+        track: env.TRACK17_TRACK_PATH,
+        push: env.TRACK17_PUSH_PATH
     },
 
     // Supported Carriers
