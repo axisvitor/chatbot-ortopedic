@@ -320,16 +320,27 @@ class WhatsAppService {
                 timestamp: new Date().toISOString()
             });
 
-            const endpoint = `${WHATSAPP_CONFIG.endpoints.text.path}`;
+            // Constrói a URL completa
+            const endpoint = `${WHATSAPP_CONFIG.apiUrl}/${WHATSAPP_CONFIG.endpoints.text.path}`;
 
+            // Constrói o payload conforme os parâmetros esperados
             const payload = {
-                to: phoneNumber,
-                content: messageText,
-                delay: Math.floor(WHATSAPP_CONFIG.messageDelay / 1000)
+                phoneNumber,
+                text: messageText,
+                delayMessage: Math.floor(WHATSAPP_CONFIG.messageDelay / 1000)
+            };
+
+            // Adiciona headers de autenticação
+            const config = {
+                headers: {
+                    'Authorization': `Bearer ${WHATSAPP_CONFIG.token}`,
+                    'Connection-Key': WHATSAPP_CONFIG.connectionKey,
+                    'Content-Type': 'application/json'
+                }
             };
 
             const response = await this._retryWithExponentialBackoff(async () => {
-                const result = await client.post(endpoint, payload);
+                const result = await client.post(endpoint, payload, config);
                 
                 if (result.data?.error && result.data?.message?.includes('conta')) {
                     await this.init();
