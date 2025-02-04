@@ -12,7 +12,8 @@ class NuvemshopBase {
         this.config = NUVEMSHOP_CONFIG;
 
         this.httpClient = new NuvemshopHttpClient();
-        this.cache = new NuvemshopCache(cacheService);
+        // Inicializa o cache com o serviço fornecido
+        this.cache = cacheService ? new NuvemshopCache(cacheService) : null;
         this.client = this.httpClient.getClient();
 
         // Inicializa cliente HTTP

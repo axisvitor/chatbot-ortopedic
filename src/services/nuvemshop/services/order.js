@@ -4,11 +4,19 @@ const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 
 class OrderService extends NuvemshopBase {
     constructor(cacheService) {
+        super(cacheService);
+        
+        // Inicializa o cache se não foi fornecido
         if (!cacheService) {
             const { RedisStore } = require('../../../store/redis-store');
-            cacheService = new RedisStore();
+            this.cacheService = new RedisStore();
+            this.cacheService.connect().catch(error => {
+                logger.error('ErrorConnectingToRedis', {
+                    error: error.message,
+                    stack: error.stack
+                });
+            });
         }
-        super(cacheService);
     }
 
     /**
@@ -318,10 +326,12 @@ class OrderService extends NuvemshopBase {
 
             const orders = response.data;
             
-            // Atualiza cache
-            for (const order of orders) {
-                const cacheKey = this.generateCacheKey('order', order.id);
-                await this.cache.set(cacheKey, order, NUVEMSHOP_CONFIG.cache.ttl.orders.recent);
+            // Atualiza cache se disponível
+            if (this.cache) {
+                for (const order of orders) {
+                    const cacheKey = this.cache.generateCacheKey('order', order.id);
+                    await this.cacheService.set(cacheKey, JSON.stringify(order), NUVEMSHOP_CONFIG.cache.ttl.orders.recent);
+                }
             }
 
             logger.info('OrdersSynced', {
