@@ -112,7 +112,7 @@ async function initializeServices() {
             businessHoursService = new BusinessHoursService();
             console.log('✅ BusinessHoursService inicializado');
 
-            nuvemshopService = new NuvemshopService();
+            nuvemshopService = new NuvemshopService(redisStore);
             console.log('✅ NuvemshopService inicializado');
 
             groqServices = new GroqServices();

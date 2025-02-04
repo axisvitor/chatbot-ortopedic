@@ -6,16 +6,8 @@ class OrderService extends NuvemshopBase {
     constructor(cacheService) {
         super(cacheService);
         
-        // Inicializa o cache se não foi fornecido
         if (!cacheService) {
-            const { RedisStore } = require('../../../store/redis-store');
-            this.cacheService = new RedisStore();
-            this.cacheService.connect().catch(error => {
-                logger.error('ErrorConnectingToRedis', {
-                    error: error.message,
-                    stack: error.stack
-                });
-            });
+            logger.warn('[NuvemshopOrder] Iniciado sem serviço de cache');
         }
     }
 
