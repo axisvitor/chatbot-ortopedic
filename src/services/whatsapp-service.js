@@ -301,9 +301,9 @@ class WhatsAppService {
             const endpoint = `${WHATSAPP_CONFIG.endpoints.text.path}`;
 
             const payload = {
-                phoneNumber: phoneNumber,
-                text: messageText,
-                delayMessage: Math.floor(WHATSAPP_CONFIG.messageDelay / 1000)
+                to: phoneNumber,
+                content: messageText,
+                delay: Math.floor(WHATSAPP_CONFIG.messageDelay / 1000)
             };
 
             const response = await this._retryWithExponentialBackoff(async () => {

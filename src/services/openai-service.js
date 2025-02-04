@@ -1281,7 +1281,37 @@ class OpenAIService {
                 const runStatus = await this.client.beta.threads.runs.retrieve(threadId, run.id);
 
                 if (runStatus.status === 'completed') {
-                    return runStatus;
+                    // Busca a última mensagem do assistente
+                    const messages = await this.client.beta.threads.messages.list(threadId);
+                    const lastMessage = messages.data[0];
+                    
+                    if (!lastMessage) {
+                        throw new Error('Nenhuma mensagem encontrada na resposta do assistente');
+                    }
+
+                    // Extrai o texto da mensagem
+                    let messageText = '';
+                    for (const content of lastMessage.content) {
+                        if (content.type === 'text') {
+                            messageText = content.text.value;
+                            break;
+                        }
+                    }
+
+                    // Garante que a resposta seja uma string válida
+                    if (typeof messageText === 'object') {
+                        messageText = JSON.stringify(messageText);
+                    } else if (messageText === undefined || messageText === null) {
+                        messageText = 'Desculpe, não consegui processar sua mensagem. Por favor, tente novamente.';
+                    } else {
+                        messageText = String(messageText).trim();
+                    }
+
+                    if (!messageText) {
+                        messageText = 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.';
+                    }
+
+                    return messageText;
                 }
 
                 if (runStatus.status === 'requires_action') {
@@ -1783,7 +1813,7 @@ class OpenAIService {
             // Validar o pedido
             const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
             if (!order) {
-                return ` Não encontrei o pedido #${orderNumber}. Por favor, verifique se o número está correto.`;
+                return ` Não encontrei o pedido #${orderNumber}. Por favor, verifique o número e tente novamente.`;
             }
 
             // Processar o comprovante
