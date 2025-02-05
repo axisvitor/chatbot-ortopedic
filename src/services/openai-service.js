@@ -86,6 +86,9 @@ class OpenAIService {
             baseUrl: OPENAI_CONFIG.baseUrl,
             timestamp: new Date().toISOString()
         });
+
+        // Define as funções disponíveis para o Assistant
+        this.functions = this._getAssistantFunctions();
     }
 
     /**
@@ -246,6 +249,11 @@ class OpenAIService {
         return await this.getOrCreateThreadForCustomer(customerId);
     }
 
+    /**
+     * Define as funções disponíveis para o Assistant
+     * @private
+     * @returns {Array} Array de definições de funções
+     */
     _getAssistantFunctions() {
         return [
             {
