@@ -546,10 +546,10 @@ class OpenAIService {
             });
 
             // Adiciona a mensagem ao thread
-            const message = await this.client.beta.threads.messages.create(threadId, {
-                role: 'user',
-                content: messageData.messageText
-            });
+            const message = await this.client.beta.threads.messages.create(
+                threadId,
+                messageData.messageText
+            );
 
             console.log('💬 [Assistant] Mensagem adicionada ao thread:', {
                 messageId: message.id,
@@ -558,9 +558,10 @@ class OpenAIService {
             });
 
             // Executa o assistant
-            const run = await this.client.beta.threads.runs.create(threadId, {
-                assistant_id: this.assistantId
-            });
+            const run = await this.client.beta.threads.runs.create(
+                threadId,
+                { assistant_id: this.assistantId }
+            );
 
             console.log('🚀 [Assistant] Run iniciado:', {
                 runId: run.id,
@@ -606,40 +607,43 @@ class OpenAIService {
 
     async addMessageAndRun(threadId, message, customerId) {
         try {
-            // Verifica se há um run ativo
-            const activeRuns = await this.client.beta.threads.runs.list(threadId);
-            const hasActiveRun = activeRuns.data.some(run => 
-                ['queued', 'in_progress', 'requires_action'].includes(run.status)
-            );
-
-            if (hasActiveRun) {
-                logger.warn('🔄 [OpenAI] Run ativo detectado, aguardando conclusão:', {
+            // Verifica se há um run ativo usando Redis
+            const activeRun = await this.redisStore.getActiveRun(threadId);
+            
+            if (activeRun) {
+                logger.warn('🔄 [OpenAI] Run ativo detectado, enfileirando mensagem:', {
                     threadId,
-                    customerId
+                    customerId,
+                    activeRun
                 });
-                
-                // Aguarda até que não haja mais runs ativos (máximo 30 segundos)
-                let attempts = 0;
-                while (attempts < 30) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    
-                    const currentRuns = await this.client.beta.threads.runs.list(threadId);
-                    const stillHasActiveRun = currentRuns.data.some(run => 
-                        ['queued', 'in_progress', 'requires_action'].includes(run.status)
-                    );
-                    
-                    if (!stillHasActiveRun) {
-                        break;
-                    }
-                    
-                    attempts++;
+
+                // Adiciona a mensagem à fila
+                if (!this.messageQueue.has(threadId)) {
+                    this.messageQueue.set(threadId, []);
                 }
-                
-                // Se ainda houver run ativo após 30 segundos, lança erro
-                if (attempts >= 30) {
-                    throw new Error('Timeout aguardando conclusão do run anterior');
+                this.messageQueue.get(threadId).push({ message, customerId });
+
+                // Se não houver timer de processamento, cria um
+                if (!this.processingTimers.has(threadId)) {
+                    const timer = setTimeout(async () => {
+                        try {
+                            await this.processQueuedMessages(threadId);
+                        } catch (error) {
+                            logger.error('❌ [OpenAI] Erro ao processar fila:', {
+                                threadId,
+                                error: error.message
+                            });
+                        }
+                    }, this.MESSAGE_DELAY);
+
+                    this.processingTimers.set(threadId, timer);
                 }
+
+                return { queued: true };
             }
+
+            // Registra o run como ativo no Redis
+            await this.redisStore.setActiveRun(threadId, 'pending', 30); // TTL de 30 segundos
 
             // Adiciona a mensagem e cria novo run
             const messageResponse = await this.client.beta.threads.messages.create(
@@ -658,6 +662,9 @@ class OpenAIService {
                 { assistant_id: this.assistantId }
             );
 
+            // Atualiza o ID do run ativo no Redis
+            await this.redisStore.setActiveRun(threadId, run.id, 30);
+
             logger.info('▶️ [OpenAI] Run iniciado:', {
                 threadId,
                 runId: run.id,
@@ -666,6 +673,9 @@ class OpenAIService {
 
             return { messageResponse, run };
         } catch (error) {
+            // Remove o run ativo em caso de erro
+            await this.redisStore.removeActiveRun(threadId);
+
             logger.error('❌ [OpenAI] Erro ao adicionar mensagem e criar run:', {
                 threadId,
                 customerId,
@@ -674,6 +684,138 @@ class OpenAIService {
             });
             throw error;
         }
+    }
+
+    async processQueuedMessages(threadId) {
+        try {
+            // Remove o timer
+            clearTimeout(this.processingTimers.get(threadId));
+            this.processingTimers.delete(threadId);
+
+            // Pega todas as mensagens da fila
+            const messages = this.messageQueue.get(threadId) || [];
+            this.messageQueue.delete(threadId);
+
+            if (messages.length === 0) {
+                return;
+            }
+
+            logger.info('📨 [OpenAI] Processando mensagens enfileiradas:', {
+                threadId,
+                messageCount: messages.length
+            });
+
+            // Processa em batch
+            const batchSize = this.rateLimitConfig.batchSize;
+            for (let i = 0; i < messages.length; i += batchSize) {
+                const batch = messages.slice(i, i + batchSize);
+                
+                // Consolida mensagens do batch
+                const consolidatedMessage = batch
+                    .map(item => item.message.content || item.message)
+                    .join('\n---\n');
+
+                // Adiciona mensagem consolidada
+                await this.addMessageAndRun(threadId, {
+                    role: 'user',
+                    content: consolidatedMessage
+                }, batch[0].customerId);
+
+                // Aguarda o delay entre batches
+                if (i + batchSize < messages.length) {
+                    await new Promise(resolve => setTimeout(resolve, this.MESSAGE_DELAY));
+                }
+            }
+        } catch (error) {
+            logger.error('❌ [OpenAI] Erro ao processar mensagens enfileiradas:', {
+                threadId,
+                error: error.message,
+                stack: error.stack
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Processa mensagem do cliente
+     * @param {Object} messageData - Dados da mensagem
+     * @returns {Promise<Object>} Resposta do processamento
+     */
+    async processMessage(messageData) {
+        try {
+            console.log('🤖 [Assistant] Iniciando processamento:', {
+                customerId: messageData.customerId,
+                messageId: messageData.messageId,
+                messageLength: messageData.messageText?.length,
+                timestamp: new Date().toISOString()
+            });
+
+            const threadId = await this._getThreadId(messageData.customerId);
+            
+            console.log('🧵 [Assistant] Thread identificada:', {
+                threadId,
+                isNew: !this.threadCache.has(threadId),
+                timestamp: new Date().toISOString()
+            });
+
+            // Adiciona a mensagem ao thread
+            const message = await this.client.beta.threads.messages.create(
+                threadId,
+                messageData.messageText
+            );
+
+            console.log('💬 [Assistant] Mensagem adicionada ao thread:', {
+                messageId: message.id,
+                threadId,
+                timestamp: new Date().toISOString()
+            });
+
+            // Executa o assistant
+            const run = await this.client.beta.threads.runs.create(
+                threadId,
+                { assistant_id: this.assistantId }
+            );
+
+            console.log('🚀 [Assistant] Run iniciado:', {
+                runId: run.id,
+                threadId,
+                status: run.status,
+                timestamp: new Date().toISOString()
+            });
+
+            // Aguarda a conclusão
+            const response = await this._waitForResponse(run, threadId);
+
+            console.log('✅ [Assistant] Resposta gerada:', {
+                runId: run.id,
+                threadId,
+                responseLength: response?.length,
+                timestamp: new Date().toISOString()
+            });
+
+            return response;
+        } catch (error) {
+            console.error('❌ [Assistant] Erro ao processar mensagem:', {
+                erro: error.message,
+                stack: error.stack,
+                customerId: messageData.customerId,
+                messageId: messageData.messageId,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Processa uma mensagem do cliente para gerar uma resposta personalizada
+     * @param {string} customerId - ID do cliente
+     * @param {string} message - Mensagem do cliente
+     * @returns {Promise<string>} Resposta personalizada
+     */
+    async processCustomerMessage(customerId, message) {
+        const threadId = await this._getThreadId(customerId);
+        const response = await this.addMessageAndRun(threadId, message);
+        return response;
     }
 
     async cancelActiveRun(threadId) {
