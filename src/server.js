@@ -22,6 +22,7 @@ const {
 } = require('./services');
 const { TrackingServiceSync } = require('./tracking-system/services/tracking-service-sync');
 const cron = require('node-cron');
+const logger = console;
 
 // Configurações
 const { 
@@ -59,7 +60,7 @@ const limiter = rateLimit({
 
 // Tratamento de erros não capturados
 process.on('uncaughtException', (error) => {
-    console.error('❌ Erro não capturado:', {
+    logger.error('❌ Erro não capturado:', {
         erro: error.message,
         stack: error.stack,
         timestamp: new Date().toISOString()
@@ -67,13 +68,13 @@ process.on('uncaughtException', (error) => {
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Promise rejeitada não tratada:', {
+    logger.error('❌ Promise rejeitada não tratada:', {
         razao: reason,
         timestamp: new Date().toISOString()
     });
 });
 
-console.log('🚀 Iniciando servidor...');
+logger.info('🚀 Iniciando servidor...');
 
 // Inicializa o app
 const app = express();
@@ -82,7 +83,7 @@ app.set('trust proxy', req => {
 });
 const port = process.env.PORT || PORT;
 
-console.log(`📝 Porta configurada: ${port}`);
+logger.info(`📝 Porta configurada: ${port}`);
 
 // Variáveis globais de estado
 let isInitializing = true;
@@ -98,7 +99,7 @@ async function initializeServices() {
         }, 30000);
 
         try {
-            console.log('🔄 Iniciando serviços...');
+            logger.info('🔄 Iniciando serviços...');
             
             // Verifica variáveis de ambiente
             if (!process.env.PORT) {
@@ -108,68 +109,103 @@ async function initializeServices() {
             // Inicializa serviços base primeiro
             redisStore = new RedisStore();
             await redisStore.connect();
-            console.log('✅ RedisStore conectado');
+            logger.info('[Server] RedisStore conectado', {
+                timestamp: new Date().toISOString()
+            });
+
+            // Verifica se o Redis está realmente conectado
+            if (!redisStore.isConnected()) {
+                throw new Error('Redis não está conectado após inicialização');
+            }
 
             try {
                 // Inicializa CacheService com o mesmo RedisStore
                 cacheService = new CacheService();
                 cacheService.redisStore = redisStore; // Usa o mesmo RedisStore já conectado
-                console.log('✅ CacheService inicializado');
+                logger.info('[Server] CacheService inicializado', {
+                    timestamp: new Date().toISOString()
+                });
             } catch (error) {
-                console.error('❌ Erro ao inicializar CacheService:', error);
+                logger.error('[Server] Erro ao inicializar CacheService:', error);
                 throw error;
             }
 
             // Serviços independentes
             businessHoursService = new BusinessHoursService();
-            console.log('✅ BusinessHoursService inicializado');
+            logger.info('[Server] BusinessHoursService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // Serviços que dependem do cache
             nuvemshopService = new NuvemshopService(redisStore); // Passando redisStore diretamente
-            console.log('✅ NuvemshopService inicializado com RedisStore');
+            logger.info('[Server] NuvemshopService inicializado com RedisStore', {
+                timestamp: new Date().toISOString()
+            });
 
             // Tracking usa seu próprio RedisStoreSync
             trackingService = new TrackingServiceSync();
-            console.log('✅ TrackingService inicializado com RedisStoreSync');
+            logger.info('[Server] TrackingService inicializado com RedisStoreSync', {
+                timestamp: new Date().toISOString()
+            });
 
             // Outros serviços independentes
             groqServices = new GroqServices();
-            console.log('✅ GroqServices inicializado');
+            logger.info('[Server] GroqServices inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             imageService = new ImageService();
-            console.log('✅ ImageService inicializado');
+            logger.info('[Server] ImageService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // MediaManager precisa do Image
             mediaManagerService = new MediaManagerService(null, imageService);
-            console.log('✅ MediaManagerService inicializado');
+            logger.info('[Server] MediaManagerService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // WhatsApp precisa do MediaManager
             whatsappService = new WhatsAppService(mediaManagerService);
             await whatsappService.initialize();  
-            console.log('✅ WhatsAppService inicializado');
+            logger.info('[Server] WhatsAppService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // WhatsAppImage precisa do WhatsApp
             whatsappImageService = new WhatsAppImageService(whatsappService);
-            console.log('✅ WhatsAppImageService inicializado');
+            logger.info('[Server] WhatsAppImageService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // Audio precisa do WhatsApp e Groq
             audioService = new AudioService(groqServices, whatsappService);
-            console.log('✅ AudioService inicializado');
+            logger.info('[Server] AudioService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // Atualiza MediaManager com AudioService
             mediaManagerService.setAudioService(audioService);
-            console.log('✅ MediaManager atualizado com AudioService');
+            logger.info('[Server] MediaManager atualizado com AudioService', {
+                timestamp: new Date().toISOString()
+            });
 
             // Reinicializa serviços com dependência do WhatsApp
             orderValidationService = new OrderValidationService(nuvemshopService, whatsappService);
             await orderValidationService.initialize();
-            console.log('✅ OrderValidationService reinicializado com dependências');
+            logger.info('[Server] OrderValidationService reinicializado com dependências', {
+                timestamp: new Date().toISOString()
+            });
 
             financialService = new FinancialService(whatsappService);
-            console.log('✅ FinancialService reinicializado com WhatsApp');
+            logger.info('[Server] FinancialService reinicializado com WhatsApp', {
+                timestamp: new Date().toISOString()
+            });
 
             departmentService = new DepartmentService(whatsappService);
-            console.log('✅ DepartmentService inicializado com WhatsApp');
+            logger.info('[Server] DepartmentService inicializado com WhatsApp', {
+                timestamp: new Date().toISOString()
+            });
 
             // OpenAI precisa de vários serviços
             openAIService = new OpenAIService(
@@ -181,15 +217,21 @@ async function initializeServices() {
                 departmentService,
                 whatsappService
             );
-            console.log('✅ OpenAIService inicializado');
+            logger.info('[Server] OpenAIService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // Configura OpenAI no WhatsApp
             whatsappService.setOpenAIService(openAIService);
-            console.log('✅ WhatsApp configurado com OpenAI');
+            logger.info('[Server] WhatsApp configurado com OpenAI', {
+                timestamp: new Date().toISOString()
+            });
 
             // OpenAI Vision é independente
             openAIVisionService = new OpenAIVisionService();
-            console.log('✅ OpenAIVisionService inicializado');
+            logger.info('[Server] OpenAIVisionService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // AIServices precisa de todos os serviços anteriores
             aiServices = new AIServices(
@@ -199,7 +241,9 @@ async function initializeServices() {
                 openAIVisionService,
                 audioService
             );
-            console.log('✅ AIServices inicializado');
+            logger.info('[Server] AIServices inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             // Webhook precisa do WhatsApp, AI e outros serviços
             webhookService = new WebhookService(
@@ -208,19 +252,23 @@ async function initializeServices() {
                 audioService,
                 mediaManagerService
             );
-            console.log('✅ WebhookService inicializado');
+            logger.info('[Server] WebhookService inicializado', {
+                timestamp: new Date().toISOString()
+            });
 
             clearTimeout(timeout);
             servicesReady = true;
             isInitializing = false;
-            console.log('✅ Todos os serviços inicializados com sucesso');
+            logger.info('[Server] ✅ Todos os serviços inicializados com sucesso', {
+                timestamp: new Date().toISOString()
+            });
             resolve();
 
         } catch (error) {
             clearTimeout(timeout);
             isInitializing = false;
             lastError = error;
-            console.error('❌ Erro ao inicializar serviços:', error);
+            logger.error('[Server] ❌ Erro ao inicializar serviços:', error);
             reject(error);
         }
     });
@@ -231,40 +279,40 @@ function initializeScheduledTasks() {
     // Sincroniza pedidos da Nuvemshop a cada 30 minutos
     cron.schedule('*/30 * * * *', async () => {
         try {
-            console.log('🔄 Iniciando sincronização de pedidos...');
+            logger.info('[Server] 🔄 Iniciando sincronização de pedidos...');
             await nuvemshopService.orderService.syncOrders();
         } catch (error) {
-            console.error('❌ Erro ao sincronizar pedidos:', error);
+            logger.error('[Server] ❌ Erro ao sincronizar pedidos:', error);
         }
     });
 
     // Atualiza status de rastreamento a cada 2 horas
     cron.schedule('0 */2 * * *', async () => {
         try {
-            console.log('🔄 Atualizando status de rastreamento...');
+            logger.info('[Server] 🔄 Atualizando status de rastreamento...');
             await trackingService.updateAllTrackingStatus();
         } catch (error) {
-            console.error('❌ Erro ao atualizar status de rastreamento:', error);
+            logger.error('[Server] ❌ Erro ao atualizar status de rastreamento:', error);
         }
     });
 
     // Limpa cache antigo todo dia à meia-noite
     cron.schedule('0 0 * * *', async () => {
         try {
-            console.log('🧹 Iniciando limpeza de cache...');
+            logger.info('[Server] 🧹 Iniciando limpeza de cache...');
             await redisStore.cleanOldCache();
         } catch (error) {
-            console.error('❌ Erro ao limpar cache:', error);
+            logger.error('[Server] ❌ Erro ao limpar cache:', error);
         }
     });
 
     // Verifica pedidos pendentes a cada hora
     cron.schedule('0 * * * *', async () => {
         try {
-            console.log('🔍 Verificando pedidos pendentes...');
+            logger.info('[Server] 🔍 Verificando pedidos pendentes...');
             await orderValidationService.checkPendingOrders();
         } catch (error) {
-            console.error('❌ Erro ao verificar pedidos pendentes:', error);
+            logger.error('[Server] ❌ Erro ao verificar pedidos pendentes:', error);
         }
     });
 }
@@ -338,7 +386,7 @@ app.get('/healthcheck', (req, res) => {
 // Rota para receber mensagens do WhatsApp (W-API)
 app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
     try {
-        console.log('📥 [Server] Webhook recebido:', {
+        logger.info('[Server] 📥 [Server] Webhook recebido:', {
             tipo: req.body?.type,
             temBody: !!req.body?.body,
             temMensagem: !!req.body?.body?.message || !!req.body?.message,
@@ -354,7 +402,7 @@ app.post('/webhook/msg_recebidas_ou_enviadas', async (req, res) => {
         await webhookService.handleWebhook(req.body);
         res.status(200).json({ status: 'success' });
     } catch (error) {
-        console.error('❌ [Server] Erro no webhook:', {
+        logger.error('[Server] ❌ [Server] Erro no webhook:', {
             erro: error.message,
             stack: error.stack,
             timestamp: new Date().toISOString()
@@ -384,7 +432,7 @@ app.post('/message/send-text', async (req, res) => {
 
         res.status(200).json(response);
     } catch (error) {
-        console.error('❌ Erro ao enviar mensagem:', error);
+        logger.error('[Server] ❌ Erro ao enviar mensagem:', error);
         res.status(500).json({
             status: 'error',
             message: 'Erro ao enviar mensagem',
@@ -421,7 +469,7 @@ app.post('/test/message', async (req, res) => {
         await webhookService.handleWhatsAppMessage(mockMessage);
         res.status(200).json({ status: 'success', message: 'Mensagem processada' });
     } catch (error) {
-        console.error('❌ Erro ao processar mensagem de teste:', error);
+        logger.error('[Server] ❌ Erro ao processar mensagem de teste:', error);
         res.status(500).json({
             status: 'error',
             message: 'Erro ao processar mensagem',
@@ -447,13 +495,13 @@ async function startServer(maxRetries = 3) {
             initializeScheduledTasks();
             
             server = app.listen(PORT, () => {
-                console.log(`🚀 Servidor rodando na porta ${PORT}`);
-                console.log('✅ Todos os serviços inicializados com sucesso');
+                logger.info(`[Server] 🚀 Servidor rodando na porta ${PORT}`);
+                logger.info('[Server] ✅ Todos os serviços inicializados com sucesso');
             });
 
             // Graceful shutdown para ambiente 24/7
             const shutdown = async (signal) => {
-                console.log(`\n🔄 Recebido ${signal}. Iniciando transição graceful...`);
+                logger.info(`[Server] 🔄 Recebido ${signal}. Iniciando transição graceful...`);
                 
                 try {
                     // 1. Notifica o health check que estamos em modo de transição
@@ -462,18 +510,18 @@ async function startServer(maxRetries = 3) {
                     
                     // 2. Salva estado atual das conversas
                     if (whatsappService?.saveState) {
-                        console.log('💾 Salvando estado das conversas...');
+                        logger.info('[Server] 💾 Salvando estado das conversas...');
                         await whatsappService.saveState();
                     }
 
                     // 3. Processa mensagens na fila
                     if (redisStore?.processRemainingQueue) {
-                        console.log('📨 Processando mensagens restantes na fila...');
+                        logger.info('[Server] 📨 Processando mensagens restantes na fila...');
                         await redisStore.processRemainingQueue();
                     }
 
                     // 4. Fecha conexões mantendo funcionalidade
-                    console.log('🔌 Preparando serviços para transição...');
+                    logger.info('[Server] 🔌 Preparando serviços para transição...');
                     
                     // Redis - mantém conexão para fila
                     if (redisStore?.prepareForTransition) {
@@ -485,15 +533,15 @@ async function startServer(maxRetries = 3) {
                         await whatsappService.prepareForTransition();
                     }
 
-                    console.log('✅ Serviços prontos para transição');
-                    console.log('👋 Encerrando processo para atualização');
+                    logger.info('[Server] ✅ Serviços prontos para transição');
+                    logger.info('[Server] 👋 Encerrando processo para atualização');
                     process.exit(0);
                 } catch (error) {
-                    console.error('❌ Erro durante transição:', error);
+                    logger.error('[Server] ❌ Erro durante transição:', error);
                     // Em caso de erro, tentamos manter o serviço rodando
                     servicesReady = true;
                     isInitializing = false;
-                    console.error('⚠️ Continuando operação normal');
+                    logger.error('[Server] ⚠️ Continuando operação normal');
                 }
             };
 
@@ -505,12 +553,12 @@ async function startServer(maxRetries = 3) {
         } catch (error) {
             retries++;
             lastError = error;
-            console.error(`❌ Tentativa ${retries}/${maxRetries} falhou:`, error);
+            logger.error(`[Server] ❌ Tentativa ${retries}/${maxRetries} falhou:`, error);
             
             if (retries === maxRetries) {
                 isInitializing = false;
                 servicesReady = false;
-                console.error('❌ Número máximo de tentativas atingido.');
+                logger.error('[Server] ❌ Número máximo de tentativas atingido.');
                 process.exit(1);
             }
             
@@ -526,7 +574,7 @@ module.exports = { app, startServer };
 // Se executado diretamente, inicia o servidor
 if (require.main === module) {
     startServer().catch(error => {
-        console.error('❌ Erro fatal ao iniciar servidor:', error);
+        logger.error('[Server] ❌ Erro fatal ao iniciar servidor:', error);
         process.exit(1);
     });
 }

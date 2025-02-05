@@ -12,12 +12,19 @@ class NuvemshopBase {
         this.config = NUVEMSHOP_CONFIG;
 
         // Verifica se o cacheService está conectado
-        if (cacheService && cacheService.isConnected && cacheService.isConnected()) {
+        if (cacheService && typeof cacheService.isConnected === 'function' && cacheService.isConnected()) {
             this.cache = new NuvemshopCache(cacheService);
-            logger.info('[NuvemshopBase] Cache inicializado com sucesso');
+            logger.info('[NuvemshopBase] Cache inicializado com sucesso', {
+                timestamp: new Date().toISOString()
+            });
         } else {
             this.cache = null;
-            logger.warn('[NuvemshopBase] Cache não inicializado - Redis não conectado');
+            logger.warn('[NuvemshopBase] Cache não inicializado - Redis não conectado', {
+                hasCacheService: !!cacheService,
+                hasIsConnected: !!(cacheService && cacheService.isConnected),
+                isConnected: !!(cacheService && cacheService.isConnected && cacheService.isConnected()),
+                timestamp: new Date().toISOString()
+            });
         }
 
         this.httpClient = new NuvemshopHttpClient();

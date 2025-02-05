@@ -1,5 +1,6 @@
 const { createClient } = require('redis');
 const { REDIS_CONFIG } = require('../config/settings');
+const logger = require('../utils/logger');
 
 class RedisStore {
     constructor() {
@@ -25,7 +26,7 @@ class RedisStore {
         });
 
         this.client.on('error', (err) => {
-            console.error('[Redis] Erro no Redis:', {
+            logger.error('[Redis] Erro no Redis:', {
                 erro: err.message,
                 stack: err.stack,
                 timestamp: new Date().toISOString()
@@ -33,15 +34,15 @@ class RedisStore {
         });
 
         this.client.on('connect', () => {
-            console.log('[Redis] Redis conectado com sucesso');
+            logger.log('[Redis] Redis conectado com sucesso');
         });
 
         this.client.on('reconnecting', () => {
-            console.log('[Redis] Tentando reconectar ao Redis...');
+            logger.log('[Redis] Tentando reconectar ao Redis...');
         });
 
         this.client.on('end', () => {
-            console.log('[Redis] Conexão com Redis encerrada');
+            logger.log('[Redis] Conexão com Redis encerrada');
         });
 
         // Conecta automaticamente ao Redis
@@ -51,9 +52,15 @@ class RedisStore {
     async _connect() {
         try {
             await this.client.connect();
-            console.log('[Redis] Conectado com sucesso');
+            logger.info('[Redis] Conectado com sucesso', {
+                timestamp: new Date().toISOString()
+            });
         } catch (error) {
-            console.error('[Redis] Erro ao conectar:', error);
+            logger.error('[Redis] Erro ao conectar:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }
@@ -66,11 +73,18 @@ class RedisStore {
         try {
             if (!this.client.isOpen) {
                 await this.client.connect();
+                logger.info('[Redis] Conectado com sucesso', {
+                    timestamp: new Date().toISOString()
+                });
             }
             // Verifica se realmente está conectado
             await this.ping();
+            logger.info('[Redis] Conexão verificada com sucesso', {
+                timestamp: new Date().toISOString()
+            });
+            return true;
         } catch (error) {
-            console.error('[Redis] Erro ao conectar ao Redis:', {
+            logger.error('[Redis] Erro ao conectar:', {
                 erro: error.message,
                 stack: error.stack,
                 timestamp: new Date().toISOString()
@@ -85,7 +99,7 @@ class RedisStore {
                 await this.client.quit();
             }
         } catch (error) {
-            console.error('[Redis] Erro ao desconectar do Redis:', error);
+            logger.error('[Redis] Erro ao desconectar do Redis:', error);
             throw error;
         }
     }
@@ -95,7 +109,7 @@ class RedisStore {
             await this.client.ping();
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao fazer ping no Redis:', error);
+            logger.error('[Redis] Erro ao fazer ping no Redis:', error);
             return false;
         }
     }
@@ -105,7 +119,7 @@ class RedisStore {
             const value = await this.client.get(key);
             return value;
         } catch (error) {
-            console.error('[Redis] Erro ao buscar do cache:', {
+            logger.error('[Redis] Erro ao buscar do cache:', {
                 key,
                 error: error.message
             });
@@ -136,7 +150,7 @@ class RedisStore {
             const result = await this.client.set(key, stringValue, options);
             return result === 'OK' || result === true;
         } catch (error) {
-            console.error('[Redis] Erro ao salvar no cache:', {
+            logger.error('[Redis] Erro ao salvar no cache:', {
                 key,
                 error: error.message,
                 stack: error.stack
@@ -148,13 +162,13 @@ class RedisStore {
     async del(key) {
         try {
             await this.client.del(key);
-            console.log('[Redis] Chave deletada com sucesso:', {
+            logger.log('[Redis] Chave deletada com sucesso:', {
                 key,
                 timestamp: new Date().toISOString()
             });
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao deletar do cache:', {
+            logger.error('[Redis] Erro ao deletar do cache:', {
                 key,
                 error: error.message,
                 stack: error.stack
@@ -167,7 +181,7 @@ class RedisStore {
         try {
             const keys = await this.client.keys(pattern);
             if (keys.length > 0) {
-                console.log('[Redis] Deletando chaves por padrão:', {
+                logger.log('[Redis] Deletando chaves por padrão:', {
                     pattern,
                     keys,
                     count: keys.length,
@@ -177,7 +191,7 @@ class RedisStore {
             }
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao deletar chaves por padrão:', {
+            logger.error('[Redis] Erro ao deletar chaves por padrão:', {
                 pattern,
                 error: error.message,
                 stack: error.stack
@@ -229,7 +243,7 @@ class RedisStore {
                 `order_validation:proof:${userId}*`
             ];
 
-            console.log('[Redis] Deletando dados do usuário:', {
+            logger.log('[Redis] Deletando dados do usuário:', {
                 userId,
                 patterns,
                 timestamp: new Date().toISOString()
@@ -238,7 +252,7 @@ class RedisStore {
             await Promise.all(patterns.map(pattern => this.delPattern(pattern)));
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao deletar dados do usuário:', {
+            logger.error('[Redis] Erro ao deletar dados do usuário:', {
                 userId,
                 error: error.message,
                 stack: error.stack
@@ -282,7 +296,7 @@ class RedisStore {
                 `proof:${threadId}*`
             ];
 
-            console.log('[Redis] Deletando dados da thread:', {
+            logger.log('[Redis] Deletando dados da thread:', {
                 threadId,
                 patterns,
                 timestamp: new Date().toISOString()
@@ -291,7 +305,7 @@ class RedisStore {
             await Promise.all(patterns.map(pattern => this.delPattern(pattern)));
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao deletar dados da thread:', {
+            logger.error('[Redis] Erro ao deletar dados da thread:', {
                 threadId,
                 error: error.message,
                 stack: error.stack
@@ -304,7 +318,7 @@ class RedisStore {
         try {
             return await this.client.keys(pattern);
         } catch (error) {
-            console.error('[Redis] Erro ao buscar chaves:', {
+            logger.error('[Redis] Erro ao buscar chaves:', {
                 pattern,
                 error: error.message
             });
@@ -316,7 +330,7 @@ class RedisStore {
         try {
             return await this.client.exists(key);
         } catch (error) {
-            console.error('[Redis] Erro ao verificar existência:', {
+            logger.error('[Redis] Erro ao verificar existência:', {
                 key,
                 error: error.message
             });
@@ -328,7 +342,7 @@ class RedisStore {
         try {
             return await this.client.ttl(key);
         } catch (error) {
-            console.error('[Redis] Erro ao buscar TTL:', {
+            logger.error('[Redis] Erro ao buscar TTL:', {
                 key,
                 error: error.message
             });
@@ -340,7 +354,7 @@ class RedisStore {
         try {
             return await this.client.expire(key, ttl);
         } catch (error) {
-            console.error('[Redis] Erro ao definir TTL:', {
+            logger.error('[Redis] Erro ao definir TTL:', {
                 key,
                 ttl,
                 error: error.message
@@ -353,7 +367,7 @@ class RedisStore {
         try {
             return await this.client.incr(key);
         } catch (error) {
-            console.error('[Redis] Erro ao incrementar:', {
+            logger.error('[Redis] Erro ao incrementar:', {
                 key,
                 error: error.message
             });
@@ -365,7 +379,7 @@ class RedisStore {
         try {
             return await this.client.decr(key);
         } catch (error) {
-            console.error('[Redis] Erro ao decrementar:', {
+            logger.error('[Redis] Erro ao decrementar:', {
                 key,
                 error: error.message
             });
@@ -377,7 +391,7 @@ class RedisStore {
         try {
             return await this.client.hGet(key, field);
         } catch (error) {
-            console.error('[Redis] Erro ao buscar hash:', {
+            logger.error('[Redis] Erro ao buscar hash:', {
                 key,
                 field,
                 error: error.message
@@ -395,7 +409,7 @@ class RedisStore {
             // Caso contrário, usa field e value
             return await this.client.hSet(key, field, value);
         } catch (error) {
-            console.error('[Redis] Erro ao definir hash:', error);
+            logger.error('[Redis] Erro ao definir hash:', error);
             return false;
         }
     }
@@ -405,7 +419,7 @@ class RedisStore {
             await this.client.hDel(key, field);
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao deletar hash:', {
+            logger.error('[Redis] Erro ao deletar hash:', {
                 key,
                 field,
                 error: error.message
@@ -418,7 +432,7 @@ class RedisStore {
         try {
             return await this.client.hGetAll(key);
         } catch (error) {
-            console.error('[Redis] Erro ao buscar todos os campos do hash:', {
+            logger.error('[Redis] Erro ao buscar todos os campos do hash:', {
                 key,
                 error: error.message
             });
@@ -434,7 +448,7 @@ class RedisStore {
             }
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao deletar padrão:', {
+            logger.error('[Redis] Erro ao deletar padrão:', {
                 pattern,
                 error: error.message
             });
@@ -448,7 +462,7 @@ class RedisStore {
             const value = await this.client.get(key);
             return value;
         } catch (error) {
-            console.error('[Redis] Erro ao buscar run ativo:', {
+            logger.error('[Redis] Erro ao buscar run ativo:', {
                 threadId,
                 erro: error.message,
                 stack: error.stack
@@ -465,7 +479,7 @@ class RedisStore {
             });
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao salvar run ativo:', {
+            logger.error('[Redis] Erro ao salvar run ativo:', {
                 threadId,
                 runId,
                 erro: error.message,
@@ -481,7 +495,7 @@ class RedisStore {
             await this.client.del(key);
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao remover run ativo:', {
+            logger.error('[Redis] Erro ao remover run ativo:', {
                 threadId,
                 erro: error.message,
                 stack: error.stack
@@ -511,7 +525,7 @@ class RedisStore {
             
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao salvar thread do cliente:', {
+            logger.error('[Redis] Erro ao salvar thread do cliente:', {
                 customerId,
                 threadId,
                 erro: error.message,
@@ -538,7 +552,7 @@ class RedisStore {
             
             return threadId;
         } catch (error) {
-            console.error('[Redis] Erro ao buscar thread do cliente:', {
+            logger.error('[Redis] Erro ao buscar thread do cliente:', {
                 customerId,
                 erro: error.message,
                 stack: error.stack
@@ -562,7 +576,7 @@ class RedisStore {
             
             return metadata;
         } catch (error) {
-            console.error('[Redis] Erro ao buscar metadados das threads:', {
+            logger.error('[Redis] Erro ao buscar metadados das threads:', {
                 erro: error.message,
                 stack: error.stack
             });
@@ -574,7 +588,7 @@ class RedisStore {
         try {
             return await this.client.sAdd(key, members);
         } catch (error) {
-            console.error('[Redis] Erro ao adicionar ao set:', {
+            logger.error('[Redis] Erro ao adicionar ao set:', {
                 key,
                 members,
                 error: error.message
@@ -587,7 +601,7 @@ class RedisStore {
         try {
             return await this.client.sRem(key, members);
         } catch (error) {
-            console.error('[Redis] Erro ao remover do set:', {
+            logger.error('[Redis] Erro ao remover do set:', {
                 key,
                 members,
                 error: error.message
@@ -600,7 +614,7 @@ class RedisStore {
         try {
             return await this.client.sMembers(key);
         } catch (error) {
-            console.error('[Redis] Erro ao listar membros do set:', {
+            logger.error('[Redis] Erro ao listar membros do set:', {
                 key,
                 error: error.message
             });
@@ -612,7 +626,7 @@ class RedisStore {
         try {
             return await this.client.sIsMember(key, member);
         } catch (error) {
-            console.error('[Redis] Erro ao verificar membro do set:', {
+            logger.error('[Redis] Erro ao verificar membro do set:', {
                 key,
                 member,
                 error: error.message
@@ -625,7 +639,7 @@ class RedisStore {
         try {
             return await this.client.sCard(key);
         } catch (error) {
-            console.error('[Redis] Erro ao contar membros do set:', {
+            logger.error('[Redis] Erro ao contar membros do set:', {
                 key,
                 error: error.message
             });
@@ -637,7 +651,7 @@ class RedisStore {
         try {
             return await this.client.sMove(source, destination, member);
         } catch (error) {
-            console.error('[Redis] Erro ao mover membro entre sets:', {
+            logger.error('[Redis] Erro ao mover membro entre sets:', {
                 source,
                 destination,
                 member,
@@ -656,7 +670,7 @@ class RedisStore {
             }
             return null;
         } catch (error) {
-            console.error('[Redis] Erro ao obter thread do assistant:', error);
+            logger.error('[Redis] Erro ao obter thread do assistant:', error);
             throw error;
         }
     }
@@ -668,7 +682,7 @@ class RedisStore {
             // Define TTL de 30 dias
             await this.client.expire(key, 30 * 24 * 60 * 60);
         } catch (error) {
-            console.error('[Redis] Erro ao salvar thread do assistant:', error);
+            logger.error('[Redis] Erro ao salvar thread do assistant:', error);
             throw error;
         }
     }
@@ -682,7 +696,7 @@ class RedisStore {
             }
             return null;
         } catch (error) {
-            console.error('[Redis] Erro ao obter run do assistant:', error);
+            logger.error('[Redis] Erro ao obter run do assistant:', error);
             throw error;
         }
     }
@@ -694,7 +708,7 @@ class RedisStore {
             // Define TTL de 1 hora
             await this.client.expire(key, 60 * 60);
         } catch (error) {
-            console.error('[Redis] Erro ao salvar run do assistant:', error);
+            logger.error('[Redis] Erro ao salvar run do assistant:', error);
             throw error;
         }
     }
@@ -704,7 +718,7 @@ class RedisStore {
             const key = `assistant:run:${threadId}`;
             await this.client.del(key);
         } catch (error) {
-            console.error('[Redis] Erro ao remover run do assistant:', error);
+            logger.error('[Redis] Erro ao remover run do assistant:', error);
             throw error;
         }
     }
@@ -714,10 +728,10 @@ class RedisStore {
             const keys = await this.client.keys(`*:${userId}*`);
             if (keys.length > 0) {
                 await this.client.del(...keys);
-                console.log('[Redis] Contexto do usuário deletado:', userId);
+                logger.log('[Redis] Contexto do usuário deletado:', userId);
             }
         } catch (error) {
-            console.error('[Redis] Erro ao deletar contexto do usuário:', error);
+            logger.error('[Redis] Erro ao deletar contexto do usuário:', error);
             // Não lança erro para manter a consistência com outros métodos de delete
         }
     }
@@ -741,16 +755,16 @@ class RedisStore {
                 return result;
             } catch (error) {
                 retryCount++;
-                console.error(`[Redis] Erro na transação (tentativa ${retryCount}/${maxRetries}):`, error);
+                logger.error(`[Redis] Erro na transação (tentativa ${retryCount}/${maxRetries}):`, error);
                 
                 if (error.message.includes('EXECABORT') && retryCount < maxRetries) {
-                    console.warn(`[Redis] Retry ${retryCount}/${maxRetries} após EXECABORT`);
+                    logger.warn(`[Redis] Retry ${retryCount}/${maxRetries} após EXECABORT`);
                     await new Promise(resolve => setTimeout(resolve, 100 * Math.pow(2, retryCount)));
                     continue;
                 }
                 
                 if (retryCount === maxRetries) {
-                    console.error('[Redis] Máximo de tentativas excedido:', error);
+                    logger.error('[Redis] Máximo de tentativas excedido:', error);
                 }
                 
                 throw error;
@@ -762,7 +776,7 @@ class RedisStore {
         try {
             return this.client.multi();
         } catch (error) {
-            console.error('[Redis] Erro ao criar transação:', error);
+            logger.error('[Redis] Erro ao criar transação:', error);
             throw error;
         }
     }
@@ -772,7 +786,7 @@ class RedisStore {
             await this.client.watch(key);
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao observar chave:', error);
+            logger.error('[Redis] Erro ao observar chave:', error);
             return false;
         }
     }
@@ -782,7 +796,7 @@ class RedisStore {
             await this.client.unwatch();
             return true;
         } catch (error) {
-            console.error('[Redis] Erro ao remover observação:', error);
+            logger.error('[Redis] Erro ao remover observação:', error);
             return false;
         }
     }
@@ -791,7 +805,7 @@ class RedisStore {
         try {
             return this.client.multi();
         } catch (error) {
-            console.error('[Redis] Erro ao criar pipeline:', error);
+            logger.error('[Redis] Erro ao criar pipeline:', error);
             throw error;
         }
     }
@@ -800,7 +814,7 @@ class RedisStore {
         try {
             return await this.client.lRange(key, start, stop);
         } catch (error) {
-            console.error('[Redis] Erro ao executar LRANGE:', { key, error });
+            logger.error('[Redis] Erro ao executar LRANGE:', { key, error });
             return [];
         }
     }
@@ -809,7 +823,7 @@ class RedisStore {
         try {
             return await this.client.lPush(key, ...values);
         } catch (error) {
-            console.error('[Redis] Erro ao executar LPUSH:', { key, error });
+            logger.error('[Redis] Erro ao executar LPUSH:', { key, error });
             throw error;
         }
     }
@@ -818,7 +832,7 @@ class RedisStore {
         try {
             return await this.client.lTrim(key, start, stop);
         } catch (error) {
-            console.error('[Redis] Erro ao executar LTRIM:', { key, error });
+            logger.error('[Redis] Erro ao executar LTRIM:', { key, error });
             throw error;
         }
     }
