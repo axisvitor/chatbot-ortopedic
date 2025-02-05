@@ -804,6 +804,51 @@ class TrackingService {
             return 0;
         }
     }
+
+    // Atualiza o status de todos os códigos de rastreio
+    async updateAllTrackingStatus() {
+        try {
+            // Busca todos os códigos de rastreio no Redis
+            const pattern = `${REDIS_CONFIG.prefix.tracking}*`;
+            const keys = await this.redisStore.keys(pattern);
+            
+            if (!keys || keys.length === 0) {
+                console.log('ℹ️ Nenhum código de rastreio encontrado para atualizar');
+                return;
+            }
+
+            console.log(`📦 Atualizando ${keys.length} códigos de rastreio...`);
+            
+            // Processa em lotes de 40 (limite da API)
+            const batchSize = 40;
+            for (let i = 0; i < keys.length; i += batchSize) {
+                const batch = keys.slice(i, i + batchSize);
+                const trackingNumbers = [];
+                
+                // Extrai números de rastreio das chaves
+                for (const key of batch) {
+                    const trackingNumber = key.split(':').pop();
+                    if (trackingNumber) {
+                        trackingNumbers.push(trackingNumber);
+                    }
+                }
+                
+                // Atualiza o lote
+                if (trackingNumbers.length > 0) {
+                    await this.updateTrackingStatus(trackingNumbers);
+                    // Aguarda 1 segundo entre lotes para não sobrecarregar a API
+                    if (i + batchSize < keys.length) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+            }
+            
+            console.log('✅ Atualização de status concluída');
+        } catch (error) {
+            console.error('❌ Erro ao atualizar status:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = { TrackingService };

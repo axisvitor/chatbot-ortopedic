@@ -111,9 +111,9 @@ async function initializeServices() {
             console.log('✅ RedisStore conectado');
 
             try {
-                // Inicializa CacheService
+                // Inicializa CacheService com o mesmo RedisStore
                 cacheService = new CacheService();
-                await cacheService.redisStore.connect();
+                cacheService.redisStore = redisStore; // Usa o mesmo RedisStore já conectado
                 console.log('✅ CacheService inicializado');
             } catch (error) {
                 console.error('❌ Erro ao inicializar CacheService:', error);
@@ -156,6 +156,7 @@ async function initializeServices() {
 
             // Reinicializa serviços com dependência do WhatsApp
             trackingService = new TrackingService(whatsappService);
+            trackingService.redisStore = redisStore; // Usa o mesmo RedisStore
             console.log('✅ TrackingService reinicializado com WhatsApp');
 
             orderValidationService = new OrderValidationService(nuvemshopService, whatsappService);
