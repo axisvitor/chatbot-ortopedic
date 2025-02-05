@@ -20,13 +20,52 @@ const REDIS_CONFIG = {
 
 // Configurações da Nuvemshop
 const NUVEMSHOP_CONFIG = {
+    // Configurações básicas da API
     apiUrl: validateEnvVar('NUVEMSHOP_API_URL'),
     accessToken: validateEnvVar('NUVEMSHOP_ACCESS_TOKEN'),
     userId: validateEnvVar('NUVEMSHOP_USER_ID'),
+    
+    // Configurações do webhook
     webhook: {
-        secret: validateEnvVar('NUVEMSHOP_WEBHOOK_SECRET'),
-        topics: ['order/created', 'order/paid', 'order/fulfilled']
-    }
+        topics: [
+            'orders/created',
+            'orders/paid',
+            'orders/fulfilled',
+            'orders/cancelled',
+            'orders/updated'
+        ],
+        timeout: 5000 // 5 segundos
+    },
+
+    // Configurações de API necessárias
+    api: {
+        timeout: 30000, // 30 segundos
+        retryAttempts: 3,
+        retryDelays: [1000, 3000, 5000], // 1s, 3s, 5s
+        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
+    },
+
+    // Configurações de cache necessárias
+    cache: {
+        ttl: {
+            orders: 3600  // 1 hora
+        },
+        prefix: {
+            orders: 'nuvemshop:orders:'
+        }
+    },
+
+    // Configurações de validação necessárias
+    validation: {
+        maxOrdersPerPage: 40
+    },
+
+    // Flag de habilitado
+    enabled: Boolean(
+        process.env.NUVEMSHOP_API_URL && 
+        process.env.NUVEMSHOP_ACCESS_TOKEN && 
+        process.env.NUVEMSHOP_USER_ID
+    )
 };
 
 // Configurações do Tracking
@@ -59,8 +98,7 @@ const TRACKING_CONFIG = {
                 posted: 15 * 60,        // 15 minutos para recém postado
                 default: 5 * 60         // 5 minutos para outros status
             }
-        },
-        prefix: 'cache:17track:'
+        }
     }
 };
 
