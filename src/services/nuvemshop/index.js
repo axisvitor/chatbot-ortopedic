@@ -16,15 +16,17 @@ class NuvemshopService {
         this.httpClient = new NuvemshopHttpClient();
         this.formatter = new NuvemshopFormatter();
         this.i18n = new NuvemshopI18n();
-        this.cache = new NuvemshopCache(cacheService);
+        this.cacheService = cacheService;
+        this.cache = cacheService ? new NuvemshopCache(cacheService) : null;
         
         // Inicializa serviços com dependências
-        this.orderService = new OrderService(this.httpClient, this.cache, this.formatter);
-        this.productService = new ProductService(this.httpClient, this.cache, this.formatter);
-        this.customerService = new CustomerService(this.httpClient, this.cache, this.formatter);
+        this.orderService = new OrderService(cacheService);
+        this.productService = new ProductService(cacheService);
+        this.customerService = new CustomerService(cacheService);
         this.webhookHandler = new WebhookHandler(this.cache);
 
         logger.info('NuvemshopServiceInitialized', {
+            hasCacheService: !!cacheService,
             timestamp: new Date().toISOString()
         });
     }

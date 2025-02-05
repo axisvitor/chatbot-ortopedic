@@ -7,7 +7,13 @@ class OrderService extends NuvemshopBase {
         super(cacheService);
         
         if (!cacheService) {
-            logger.warn('[NuvemshopOrder] Iniciado sem serviço de cache');
+            logger.warn('[NuvemshopOrder] Iniciado sem serviço de cache', {
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            logger.info('[NuvemshopOrder] Iniciado com serviço de cache', {
+                timestamp: new Date().toISOString()
+            });
         }
     }
 
