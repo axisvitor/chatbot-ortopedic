@@ -18,7 +18,8 @@ const {
     BusinessHoursService,
     OpenAIVisionService,
     FinancialService,
-    DepartmentService
+    DepartmentService,
+    CacheService
 } = require('./services');
 const cron = require('node-cron');
 
@@ -30,6 +31,7 @@ const {
 
 // Declaração dos serviços
 let redisStore;
+let cacheService;
 let groqServices;
 let webhookService;
 let whatsappService;
@@ -108,11 +110,15 @@ async function initializeServices() {
             await redisStore.connect();
             console.log('✅ RedisStore conectado');
 
+            // Inicializa CacheService com RedisStore
+            cacheService = new CacheService();
+            console.log('✅ CacheService inicializado');
+
             // Serviços independentes
             businessHoursService = new BusinessHoursService();
             console.log('✅ BusinessHoursService inicializado');
 
-            nuvemshopService = new NuvemshopService(redisStore);
+            nuvemshopService = new NuvemshopService(cacheService);
             console.log('✅ NuvemshopService inicializado');
 
             groqServices = new GroqServices();
