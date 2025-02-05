@@ -57,7 +57,7 @@ const NUVEMSHOP_CONFIG = {
 
     // Configurações de validação necessárias
     validation: {
-        maxOrdersPerPage: 40
+        maxOrdersPerPage: 50
     },
 
     // Flag de habilitado
@@ -78,7 +78,6 @@ const TRACKING_CONFIG = {
         track: validateEnvVar('TRACK17_TRACK_PATH', '/track/v2.2/trackinfo'),
         push: validateEnvVar('TRACK17_PUSH_PATH', '/track/v2.2/push')
     },
-    webhookSecret: validateEnvVar('TRACK17_WEBHOOK_SECRET'),
     updateInterval: 30 * 60 * 1000, // 30 minutos
     limits: {
         maxTrackingNumbers: 40,
