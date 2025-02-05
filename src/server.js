@@ -108,14 +108,23 @@ async function initializeServices() {
 
             // Inicializa serviços base primeiro
             redisStore = new RedisStore();
-            await redisStore.connect();
-            logger.info('[Server] RedisStore conectado', {
-                timestamp: new Date().toISOString()
-            });
+            try {
+                await redisStore.connect();
+                logger.info('[Server] RedisStore conectado', {
+                    timestamp: new Date().toISOString()
+                });
 
-            // Verifica se o Redis está realmente conectado
-            if (!redisStore.isConnected()) {
-                throw new Error('Redis não está conectado após inicialização');
+                // Verifica se o Redis está realmente conectado
+                if (!redisStore.isConnected()) {
+                    throw new Error('Redis não está conectado após inicialização');
+                }
+            } catch (error) {
+                logger.error('[Server] Erro ao conectar ao Redis:', {
+                    erro: error.message,
+                    stack: error.stack,
+                    timestamp: new Date().toISOString()
+                });
+                throw error;
             }
 
             try {

@@ -34,15 +34,21 @@ class RedisStore {
         });
 
         this.client.on('connect', () => {
-            logger.log('[Redis] Redis conectado com sucesso');
+            logger.info('[Redis] Redis conectado com sucesso', {
+                timestamp: new Date().toISOString()
+            });
         });
 
         this.client.on('reconnecting', () => {
-            logger.log('[Redis] Tentando reconectar ao Redis...');
+            logger.info('[Redis] Tentando reconectar ao Redis...', {
+                timestamp: new Date().toISOString()
+            });
         });
 
         this.client.on('end', () => {
-            logger.log('[Redis] Conexão com Redis encerrada');
+            logger.info('[Redis] Conexão com Redis encerrada', {
+                timestamp: new Date().toISOString()
+            });
         });
 
         // Conecta automaticamente ao Redis
@@ -72,10 +78,7 @@ class RedisStore {
     async connect() {
         try {
             if (!this.client.isOpen) {
-                await this.client.connect();
-                logger.info('[Redis] Conectado com sucesso', {
-                    timestamp: new Date().toISOString()
-                });
+                await this._connect();
             }
             // Verifica se realmente está conectado
             await this.ping();
@@ -162,7 +165,7 @@ class RedisStore {
     async del(key) {
         try {
             await this.client.del(key);
-            logger.log('[Redis] Chave deletada com sucesso:', {
+            logger.info('[Redis] Chave deletada com sucesso:', {
                 key,
                 timestamp: new Date().toISOString()
             });
@@ -181,7 +184,7 @@ class RedisStore {
         try {
             const keys = await this.client.keys(pattern);
             if (keys.length > 0) {
-                logger.log('[Redis] Deletando chaves por padrão:', {
+                logger.info('[Redis] Deletando chaves por padrão:', {
                     pattern,
                     keys,
                     count: keys.length,
@@ -243,7 +246,7 @@ class RedisStore {
                 `order_validation:proof:${userId}*`
             ];
 
-            logger.log('[Redis] Deletando dados do usuário:', {
+            logger.info('[Redis] Deletando dados do usuário:', {
                 userId,
                 patterns,
                 timestamp: new Date().toISOString()
@@ -296,7 +299,7 @@ class RedisStore {
                 `proof:${threadId}*`
             ];
 
-            logger.log('[Redis] Deletando dados da thread:', {
+            logger.info('[Redis] Deletando dados da thread:', {
                 threadId,
                 patterns,
                 timestamp: new Date().toISOString()
@@ -728,7 +731,7 @@ class RedisStore {
             const keys = await this.client.keys(`*:${userId}*`);
             if (keys.length > 0) {
                 await this.client.del(...keys);
-                logger.log('[Redis] Contexto do usuário deletado:', userId);
+                logger.info('[Redis] Contexto do usuário deletado:', userId);
             }
         } catch (error) {
             logger.error('[Redis] Erro ao deletar contexto do usuário:', error);
