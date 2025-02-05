@@ -19,7 +19,7 @@ const {
     FinancialService,
     DepartmentService,
     CacheService,
-    TrackingService
+    TrackingServiceSync
 } = require('./services');
 const cron = require('node-cron');
 const logger = console;
@@ -41,7 +41,7 @@ let audioService;
 let imageService;
 let mediaManagerService;
 let businessHoursService;
-let trackingService;
+let trackingServiceSync;
 let orderValidationService;
 let nuvemshopService;
 let openAIService;
@@ -152,8 +152,8 @@ async function initializeServices() {
             });
 
             // Tracking usa seu próprio RedisStoreSync
-            trackingService = new TrackingService();
-            logger.info('[Server] TrackingService inicializado', {
+            trackingServiceSync = new TrackingServiceSync();
+            logger.info('[Server] TrackingServiceSync inicializado', {
                 timestamp: new Date().toISOString()
             });
 
@@ -219,7 +219,7 @@ async function initializeServices() {
             // OpenAI precisa de vários serviços
             openAIService = new OpenAIService(
                 nuvemshopService,
-                trackingService,
+                trackingServiceSync,
                 businessHoursService,
                 orderValidationService,
                 financialService,
@@ -299,7 +299,7 @@ function initializeScheduledTasks() {
     cron.schedule('0 */2 * * *', async () => {
         try {
             logger.info('[Server] 🔄 Atualizando status de rastreamento...');
-            await trackingService.updateAllTrackingStatus();
+            await trackingServiceSync.updateAllTrackingStatus();
         } catch (error) {
             logger.error('[Server] ❌ Erro ao atualizar status de rastreamento:', error);
         }
