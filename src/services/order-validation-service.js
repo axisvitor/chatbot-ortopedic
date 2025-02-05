@@ -1159,8 +1159,14 @@ class OrderValidationService {
      */
     async checkPendingOrders() {
         try {
-            // Busca pedidos das últimas 24 horas
-            const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            // Busca pedidos das últimas 24 horas, mas nunca do futuro
+            const now = new Date();
+            const since = new Date(Math.min(
+                now.getTime() - 24 * 60 * 60 * 1000,
+                now.getTime()
+            ));
+
+            // Converte para UTC para evitar problemas de timezone
             const orders = await this.nuvemshopService.orderService.getOrders({
                 created_at_min: since.toISOString(),
                 status: ['pending', 'paid', 'authorized']
