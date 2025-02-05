@@ -23,7 +23,7 @@ class NuvemshopService {
         this.orderService = new OrderService(this.cacheService);
         this.productService = new ProductService(this.cacheService);
         this.customerService = new CustomerService(this.cacheService);
-        this.webhookHandler = new WebhookHandler(this.cache);
+        this.webhookHandler = new WebhookHandler(this.cacheService);
 
         logger.info('NuvemshopServiceInitialized', {
             hasCacheService: !!this.cacheService,

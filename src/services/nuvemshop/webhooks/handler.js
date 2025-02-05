@@ -7,7 +7,17 @@ const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 
 class WebhookHandler {
     constructor(cacheService) {
-        this.validator = new WebhookValidator();
+        if (!cacheService) {
+            logger.warn('[WebhookHandler] Iniciado sem serviço de cache', {
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            logger.info('[WebhookHandler] Iniciado com serviço de cache', {
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        this.validator = new WebhookValidator(cacheService);
         this.orderService = new OrderService(cacheService);
         this.productService = new ProductService(cacheService);
         this.customerService = new CustomerService(cacheService);

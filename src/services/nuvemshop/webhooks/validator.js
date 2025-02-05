@@ -1,9 +1,22 @@
 const crypto = require('crypto');
-const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 const logger = require('../../../utils/logger');
+const { NuvemshopBase } = require('../base');
+const { NUVEMSHOP_CONFIG } = require('../../../config/settings');
 
-class WebhookValidator {
-    constructor() {
+class WebhookValidator extends NuvemshopBase {
+    constructor(cacheService) {
+        super(cacheService);
+
+        if (!cacheService) {
+            logger.warn('[WebhookValidator] Iniciado sem serviço de cache', {
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            logger.info('[WebhookValidator] Iniciado com serviço de cache', {
+                timestamp: new Date().toISOString()
+            });
+        }
+
         this.config = NUVEMSHOP_CONFIG.webhook;
     }
 
