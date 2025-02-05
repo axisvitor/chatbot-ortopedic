@@ -1,12 +1,13 @@
 require('dotenv').config({ path: '../../../.env' });
-const { RedisStore } = require('./utils/redis-store');
+const { RedisStoreSync } = require('./utils/redis-store-sync');
 const axios = require('axios');
 const logger = require('./utils/logger');
 const { NUVEMSHOP_CONFIG } = require('../../config/settings');
+const { TrackingServiceSync } = require('./services/tracking-service-sync');
 
 class NuvemshopTrackingSync {
     constructor() {
-        this.redis = new RedisStore();
+        this.redis = new RedisStoreSync();
         this.config = NUVEMSHOP_CONFIG;
         
         if (!this.config.accessToken || !this.config.userId || !this.config.apiUrl) {

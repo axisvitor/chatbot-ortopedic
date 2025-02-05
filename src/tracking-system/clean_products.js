@@ -1,9 +1,7 @@
-const { RedisStore } = require('./utils/redis-store');
-const { logger } = require('./utils/logger');
+const { RedisStoreSync } = require('./utils/redis-store-sync');
+const logger = require('./utils/logger');
 
 async function cleanProducts() {
-    const redis = new RedisStore();
-    
     try {
         // Verifica a conexão primeiro
         const isConnected = await redis.checkConnection();

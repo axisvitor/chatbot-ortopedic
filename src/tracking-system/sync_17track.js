@@ -1,14 +1,14 @@
 const { Track17Service } = require('./services/track17-service');
 const { Track17PushService } = require('./services/track17-push');
-const { RedisStore } = require('./utils/redis-store');
 const logger = require('./utils/logger');
+const { RedisStoreSync } = require('./utils/redis-store-sync');
 const { TRACKING_CONFIG, REDIS_CONFIG } = require('./config/settings');
 
 class Track17Sync {
     constructor() {
         this.track17 = new Track17Service();
         this.track17Push = new Track17PushService();
-        this.redis = new RedisStore();
+        this.redis = new RedisStoreSync();
         this.batchSize = 40; // Limite da API do 17track
         this.syncInterval = TRACKING_CONFIG.updateInterval;
         this.config = TRACKING_CONFIG;

@@ -4,7 +4,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../../../.env') });
 const logger = require('./logger');
 const { REDIS_CONFIG } = require('../../config/settings');
 
-class RedisStore {
+class RedisStoreSync {
     constructor() {
         const config = {
             socket: {
@@ -326,4 +326,4 @@ class RedisStore {
     }
 }
 
-module.exports = { RedisStore };
+module.exports = { RedisStoreSync };

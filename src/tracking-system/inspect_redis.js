@@ -1,11 +1,11 @@
 require('dotenv').config({ path: '../../.env' });
-const { RedisStore } = require('./utils/redis-store');
-const logger = console;
+const logger = require('./utils/logger');
+const { RedisStoreSync } = require('./utils/redis-store-sync');
 
 async function inspectRedis() {
-    const redis = new RedisStore();
-    
     try {
+        const redis = new RedisStoreSync();
+        
         // Connect to Redis
         await redis.checkConnection();
         logger.info('Connected to Redis successfully');

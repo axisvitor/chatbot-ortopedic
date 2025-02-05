@@ -1,10 +1,10 @@
 const express = require('express');
-const router = express.Router();
-const { RedisStore } = require('../utils/redis-store');
-const { WHATSAPP_CONFIG, TRACKING_CONFIG } = require('../../config/settings');
 const logger = require('../utils/logger');
+const { RedisStoreSync } = require('../utils/redis-store-sync');
+const { TRACKING_CONFIG } = require('../config/settings');
 
-const redis = new RedisStore();
+const router = express.Router();
+const redis = new RedisStoreSync();
 
 // Middleware para verificar autenticidade do webhook
 const verifyWebhook = (req, res, next) => {

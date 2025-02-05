@@ -1,9 +1,13 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
+const helmet = require('helmet');
 const logger = require('./utils/logger');
 const nuvemshopWebhook = require('./webhooks/nuvemshop-webhook');
 const { Scheduler } = require('./scheduler');
-const { RedisStore } = require('./utils/redis-store');
+const { RedisStoreSync } = require('./utils/redis-store-sync');
+const { REDIS_CONFIG } = require('../config/settings');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -18,7 +22,7 @@ app.use('/webhooks/nuvemshop', nuvemshopWebhook);
 // Rota de healthcheck melhorada
 app.get('/health', async (req, res) => {
     try {
-        const redis = new RedisStore();
+        const redis = new RedisStoreSync();
         const redisStatus = await redis.checkConnection();
         
         const lastNuvemshopSync = await redis.get('last_nuvemshop_sync') || 'Nunca';

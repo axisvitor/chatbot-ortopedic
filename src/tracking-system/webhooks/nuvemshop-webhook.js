@@ -1,11 +1,11 @@
 const express = require('express');
-const router = express.Router();
-const { RedisStore } = require('../utils/redis-store');
-const { Track17Service } = require('../services/track17-service');
-const { REDIS_CONFIG, WHATSAPP_CONFIG, NUVEMSHOP_CONFIG, TRACKING_CONFIG } = require('../../config/settings');
 const logger = require('../utils/logger');
+const { RedisStoreSync } = require('../utils/redis-store-sync');
+const { NUVEMSHOP_CONFIG, TRACKING_CONFIG } = require('../config/settings');
+const { Track17Service } = require('../services/track17-service');
 
-const redis = new RedisStore();
+const router = express.Router();
+const redis = new RedisStoreSync();
 const track17 = new Track17Service();
 
 // Middleware para verificar autenticidade do webhook

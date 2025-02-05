@@ -1,10 +1,10 @@
-const { RedisStore } = require('../utils/redis-store');
+const { RedisStoreSync } = require('../utils/redis-store-sync');
 const logger = require('../utils/logger');
 const { REDIS_CONFIG, TRACKING_CONFIG } = require('../config/settings');
 
 class CacheServiceSync {
     constructor() {
-        this.redis = new RedisStore();
+        this.redis = new RedisStoreSync();
         this.defaultTTL = TRACKING_CONFIG.cache.ttl.default;
         this.prefix = REDIS_CONFIG.prefix.tracking;
     }

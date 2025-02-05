@@ -2,12 +2,12 @@ const cron = require('node-cron');
 const { Track17Sync } = require('./sync_17track');
 const { NuvemshopTrackingSync } = require('./sync_tracking_codes');
 const logger = require('./utils/logger');
-const { RedisStore } = require('./utils/redis-store');
-const { REDIS_CONFIG } = require('../../config/settings');
+const { RedisStoreSync } = require('./utils/redis-store-sync');
+const { REDIS_CONFIG } = require('../config/settings');
 
 class Scheduler {
     constructor() {
-        this.redis = new RedisStore();
+        this.redis = new RedisStoreSync();
         this.jobs = [];
 
         // Status keys
