@@ -280,11 +280,13 @@ class CustomsSummary {
     }
 
     startScheduler() {
-        // Roda todos os dias às 20:00
+        // Roda todos os dias às 20:00 de Brasília
         const cron = require('node-cron');
         cron.schedule('0 20 * * *', () => {
             console.log('Gerando resumo diário de taxas...');
             this.generateDailySummary();
+        }, {
+            timezone: "America/Sao_Paulo"
         });
         
         console.log('Agendador de resumo diário iniciado');
