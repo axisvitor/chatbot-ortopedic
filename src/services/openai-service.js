@@ -409,7 +409,7 @@ class OpenAIService {
 
     /**
      * Remove um run ativo
-     * @param {string} threadId - ID da thread
+     * @param {string} threadId - ID do thread
      */
     async removeActiveRun(threadId) {
         try {
@@ -493,36 +493,64 @@ class OpenAIService {
             }
 
             logger.info('📨 [OpenAI] Processando mensagens enfileiradas:', {
-                threadId,
-                messageCount: messages.length
+                metadata: {
+                    messageCount: messages.length,
+                    service: 'ortopedic-bot',
+                    threadId,
+                    timestamp: new Date().toISOString()
+                }
             });
 
-            // Processa em batch
-            const batchSize = this.rateLimitConfig.batchSize;
-            for (let i = 0; i < messages.length; i += batchSize) {
-                const batch = messages.slice(i, i + batchSize);
-                
-                // Consolida mensagens do batch
-                const consolidatedMessage = batch
-                    .map(item => item.message.content || item.message)
-                    .join('\n---\n');
+            // Aguarda qualquer run ativo terminar
+            const activeRun = await this.redisStore.getActiveRun(threadId);
+            if (activeRun) {
+                logger.info('⏳ [OpenAI] Aguardando run ativo terminar:', {
+                    metadata: {
+                        activeRun,
+                        service: 'ortopedic-bot',
+                        threadId,
+                        timestamp: new Date().toISOString()
+                    }
+                });
+                await new Promise(resolve => setTimeout(resolve, this.MESSAGE_DELAY));
+            }
 
-                // Adiciona mensagem consolidada
-                await this.addMessageAndRun(threadId, {
+            // Consolida todas as mensagens em uma única
+            const consolidatedMessage = messages
+                .map(item => item.message.content || item.message)
+                .join('\n---\n');
+
+            // Adiciona a mensagem consolidada e processa
+            const response = await this.addMessageAndRun(
+                threadId,
+                {
                     role: 'user',
                     content: consolidatedMessage
-                }, batch[0].customerId);
+                },
+                messages[0].customerId
+            );
 
-                // Aguarda o delay entre batches
-                if (i + batchSize < messages.length) {
-                    await new Promise(resolve => setTimeout(resolve, this.MESSAGE_DELAY));
+            logger.info('✅ [OpenAI] Mensagens processadas:', {
+                metadata: {
+                    messageCount: messages.length,
+                    service: 'ortopedic-bot',
+                    threadId,
+                    timestamp: new Date().toISOString()
                 }
-            }
+            });
+
+            return response;
         } catch (error) {
             logger.error('❌ [OpenAI] Erro ao processar mensagens enfileiradas:', {
-                threadId,
-                error: error.message,
-                stack: error.stack
+                metadata: {
+                    error: {
+                        message: error.message,
+                        stack: error.stack
+                    },
+                    service: 'ortopedic-bot',
+                    threadId,
+                    timestamp: new Date().toISOString()
+                }
             });
             throw error;
         }
@@ -1390,10 +1418,13 @@ class OpenAIService {
     async processMessage(messageData) {
         try {
             logger.info('🤖 [Assistant] Iniciando processamento:', {
-                customerId: messageData.customerId,
-                messageId: messageData.messageId,
-                messageLength: messageData.messageText?.length,
-                timestamp: new Date().toISOString()
+                metadata: {
+                    customerId: messageData.customerId,
+                    messageId: messageData.messageId,
+                    messageLength: messageData.messageText?.length,
+                    service: 'ortopedic-bot',
+                    timestamp: new Date().toISOString()
+                }
             });
 
             const threadId = await this._getThreadId(messageData.customerId);
@@ -1408,13 +1439,20 @@ class OpenAIService {
             const activeRun = await this.redisStore.getActiveRun(threadId);
             if (activeRun) {
                 logger.info('⏳ [Assistant] Run ativo detectado, enfileirando mensagem:', {
-                    threadId,
-                    customerId: messageData.customerId,
-                    activeRun
+                    metadata: {
+                        activeRun,
+                        customerId: messageData.customerId,
+                        service: 'ortopedic-bot',
+                        threadId,
+                        timestamp: new Date().toISOString()
+                    }
                 });
-                return this.queueMessage(threadId, {
-                    content: messageData.messageText
-                }, messageData.customerId);
+
+                // Enfileira a mensagem
+                await this.queueMessage(threadId, messageData);
+
+                // Retorna uma mensagem amigável informando que a mensagem foi enfileirada
+                return "⌛ Estou finalizando o processamento da mensagem anterior. Em instantes responderei sua nova mensagem.";
             }
 
             // Adiciona a mensagem e cria um novo run
@@ -1424,94 +1462,33 @@ class OpenAIService {
                 messageData.customerId
             );
 
-            logger.info('✅ [Assistant] Resposta gerada:', {
-                threadId,
-                responseLength: response?.length,
-                timestamp: new Date().toISOString()
+            logger.info('✅ [Assistant] Mensagem processada:', {
+                metadata: {
+                    customerId: messageData.customerId,
+                    messageId: messageData.messageId,
+                    service: 'ortopedic-bot',
+                    threadId,
+                    timestamp: new Date().toISOString()
+                }
             });
 
             return response;
         } catch (error) {
             logger.error('❌ [Assistant] Erro ao processar mensagem:', {
-                erro: error.message,
-                stack: error.stack,
-                customerId: messageData.customerId,
-                messageId: messageData.messageId,
-                timestamp: new Date().toISOString()
+                metadata: {
+                    error: {
+                        customerId: messageData.customerId,
+                        erro: error.message,
+                        messageId: messageData.messageId,
+                        stack: error.stack,
+                        timestamp: new Date().toISOString()
+                    },
+                    service: 'ortopedic-bot',
+                    timestamp: new Date().toISOString()
+                }
             });
             throw error;
         }
-    }
-
-    /**
-     * Aguarda a resposta do assistant
-     * @private
-     * @param {Object} run - Objeto do run
-     * @param {string} threadId - ID da thread
-     * @returns {Promise<string>} Resposta do assistant
-     */
-    async _waitForResponse(run, threadId) {
-        let attempts = 0;
-        const maxAttempts = 30;
-        const delayMs = 1000;
-
-        while (attempts < maxAttempts) {
-            try {
-                const runStatus = await this.client.beta.threads.runs.retrieve(
-                    threadId,
-                    run.id
-                );
-
-                switch (runStatus.status) {
-                    case 'completed':
-                        // Busca a última mensagem do assistente
-                        const messages = await this.client.beta.threads.messages.list(threadId);
-                        const lastMessage = messages.data[0];
-                        
-                        if (!lastMessage) {
-                            throw new Error('Nenhuma mensagem encontrada na resposta do assistente');
-                        }
-
-                        // Extrai o texto da mensagem
-                        let messageText = '';
-                        for (const content of lastMessage.content) {
-                            if (content.type === 'text') {
-                                messageText = content.text.value;
-                                break;
-                            }
-                        }
-
-                        return messageText;
-
-                    case 'failed':
-                        throw new Error(`Run falhou: ${runStatus.last_error?.message || 'Erro desconhecido'}`);
-
-                    case 'expired':
-                        throw new Error('Run expirou');
-
-                    case 'requires_action':
-                        if (runStatus.required_action?.type === 'submit_tool_outputs') {
-                            await this.handleToolCalls(runStatus, threadId);
-                        }
-                        break;
-
-                    default:
-                        // Continua aguardando
-                        attempts++;
-                        await new Promise(resolve => setTimeout(resolve, delayMs));
-                }
-            } catch (error) {
-                logger.error('❌ [OpenAI] Erro ao aguardar resposta:', {
-                    threadId,
-                    runId: run.id,
-                    error: error.message,
-                    stack: error.stack
-                });
-                throw error;
-            }
-        }
-
-        throw new Error('Timeout aguardando resposta do assistant');
     }
 
     /**
