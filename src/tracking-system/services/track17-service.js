@@ -1,12 +1,12 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
-const { CacheService } = require('./cache-service');
+const { CacheServiceSync } = require('./cache-service-sync');
 const { TRACKING_CONFIG, REDIS_CONFIG } = require('../../../config/settings');
 
 class Track17Service {
     constructor() {
         this.config = TRACKING_CONFIG;
-        this.cache = new CacheService();
+        this.cache = new CacheServiceSync();
         
         if (!this.config.apiKey || !this.config.endpoint) {
             logger.error('Configurações do 17track incompletas!');

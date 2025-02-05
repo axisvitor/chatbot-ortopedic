@@ -148,92 +148,6 @@ const REDIS_CONFIG = {
     }
 };
 
-// Nuvemshop Configuration
-const NUVEMSHOP_CONFIG = {
-    // Configurações da API
-    apiUrl: env.NUVEMSHOP_API_URL,
-    accessToken: env.NUVEMSHOP_ACCESS_TOKEN,
-    userId: env.NUVEMSHOP_USER_ID,
-    scope: env.NUVEMSHOP_SCOPE.split(','),
-    
-    // Configurações do webhook
-    webhook: {
-        topics: [
-            'orders/created',
-            'orders/paid',
-            'orders/fulfilled',
-            'orders/cancelled',
-            'orders/updated',
-            'products/created',
-            'products/updated',
-            'products/deleted',
-            'customers/created',
-            'customers/updated'
-        ],
-        retryAttempts: 3,
-        retryDelay: 1000, // 1 segundo
-        timeout: 5000 // 5 segundos
-    },
-
-    // Configurações de API
-    api: {
-        timeout: 30000, // 30 segundos
-        retryAttempts: 3,
-        retryDelays: [1000, 3000, 5000], // 1s, 3s, 5s
-        rateLimit: {
-            bucketSize: 40,      // Tamanho máximo do bucket
-            requestsPerSecond: 2, // Taxa de 2 requisições por segundo
-            headers: {
-                limit: 'x-rate-limit-limit',
-                remaining: 'x-rate-limit-remaining',
-                reset: 'x-rate-limit-reset'
-            }
-        },
-        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
-    },
-
-    // Configurações de cache
-    cache: {
-        ttl: {
-            orders: 3600,        // 1 hora
-            products: 7200,      // 2 horas
-            customers: 86400,    // 24 horas
-            webhooks: 300        // 5 minutos
-        },
-        prefix: {
-            orders: 'nuvemshop:orders:',
-            products: 'nuvemshop:products:',
-            customers: 'nuvemshop:customers:',
-            webhooks: 'nuvemshop:webhooks:'
-        }
-    },
-
-    // Configurações de segurança
-    security: {
-        rateLimitWindow: 60000, // 1 minuto
-        maxRequestsPerWindow: 100
-    },
-
-    // Configurações de validação
-    validation: {
-        maxOrdersPerPage: 50, // Limite de pedidos por página
-        maxProductsPerPage: 100, // Limite de produtos por página
-        maxCustomersPerPage: 100, // Limite de clientes por página
-        orderStatuses: ['open', 'closed', 'cancelled'],
-        requiredFields: {
-            orders: ['id', 'number', 'status', 'shipping_tracking', 'created_at'],
-            products: ['id', 'title', 'handle', 'variants'],
-            customers: ['id', 'name', 'email']
-        }
-    },
-
-    // Configurações de internacionalização
-    i18n: {
-        defaultLanguage: 'pt-BR',
-        supportedLanguages: ['pt-BR', 'es', 'en']
-    }
-};
-
 // OpenAI Configuration
 const OPENAI_CONFIG = {
     apiKey: env.OPENAI_API_KEY,
@@ -268,15 +182,6 @@ const GROQ_CONFIG = {
     get embeddingsUrl() { return `${this.baseUrl}/embeddings` },
     get visionUrl() { return `${this.baseUrl}/chat/completions` },
     get audioUrl() { return `${this.baseUrl}/audio/transcriptions` }
-};
-
-// Rate Limit Configuration
-const RATE_LIMIT_CONFIG = {
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 100, // limite de 100 requisições por windowMs
-    message: 'Muitas requisições deste IP, por favor tente novamente mais tarde.',
-    standardHeaders: true,
-    legacyHeaders: false
 };
 
 // WhatsApp Configuration
@@ -359,71 +264,48 @@ const WHATSAPP_CONFIG = {
     }
 };
 
-// 17track Configuration
+// Tracking Configuration
 const TRACKING_CONFIG = {
-    // API Configuration
     endpoint: env.TRACK17_API_URL,
     apiKey: env.TRACK17_API_KEY,
-    apiUrl: env.TRACK17_API_URL,  // Adicionando apiUrl
-    token: env.TRACK17_API_KEY,   // Adicionando token
-    
-    // API Paths
     paths: {
-        register: env.TRACK17_REGISTER_PATH || '/track/v2.2/register',
-        status: env.TRACK17_STATUS_PATH || '/track/v2.2/gettrackinfo',
-        track: env.TRACK17_TRACK_PATH || '/track/v2.2/trackinfo',
-        push: env.TRACK17_PUSH_PATH || '/track/v2.2/push'
+        register: env.TRACK17_REGISTER_PATH,
+        status: env.TRACK17_STATUS_PATH,
+        track: env.TRACK17_TRACK_PATH,
+        push: env.TRACK17_PUSH_PATH
     },
-
-    // Supported Carriers
-    carriers: [
-        'correios',
-        'jadlog',
-        'sequoia',
-        'total',
-        'fedex',
-        'dhl',
-        'ups'
-    ],
-
-    // API Limits
+    webhookSecret: env.TRACK17_WEBHOOK_SECRET,
+    updateInterval: 30 * 60 * 1000, // 30 minutos
     limits: {
         maxTrackingNumbers: 40,
-        maxRequestsPerHour: 1000,
-        maxWebhooksPerDay: 10000
+        rateLimit: {
+            maxRequests: 1000,
+            interval: 3600000 // 1 hora
+        }
     },
-
-    // Webhook Configuration
-    webhook: {
-        secret: env.TRACK17_WEBHOOK_SECRET,
-        events: [
-            'tracking.created',
-            'tracking.updated',
-            'tracking.delivered',
-            'tracking.exception'
-        ]
-    },
-
-    // Cache Configuration
+    carriers: ['correios', 'jadlog', 'sequoia'],
     cache: {
-        prefix: 'track17:',
         ttl: {
-            tracking: 300,       // 5 minutos
-            register: 3600,      // 1 hora
-            push: 300,          // 5 minutos
-            webhook: 86400      // 24 horas
-        }
-    },
-
-    // Retry Configuration
-    retry: {
-        attempts: 3,
-        backoff: {
-            min: 1000,          // 1 segundo
-            max: 5000,          // 5 segundos
-            factor: 2
-        }
+            default: 30 * 60, // 30 minutos
+            status: {
+                final: 24 * 60 * 60,    // 24 horas para status finais
+                problem: 2 * 60 * 60,   // 2 horas para status com problema
+                transit: 30 * 60,       // 30 minutos para em trânsito
+                posted: 15 * 60,        // 15 minutos para recém postado
+                default: 5 * 60         // 5 minutos para outros status
+            }
+        },
+        prefix: 'cache:17track:'
     }
+};
+
+// Rate Limit Configuration
+const RATE_LIMIT_CONFIG = {
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 100, // limite de 100 requisições por windowMs
+    message: 'Muitas requisições deste IP, por favor tente novamente mais tarde.',
+    standardHeaders: true,
+    legacyHeaders: false
 };
 
 // Business Hours Configuration
@@ -553,18 +435,101 @@ const CACHE_CONFIG = {
     trackingTTL: 12 * 60 * 60 // 12 horas em segundos
 };
 
+// Nuvemshop Configuration
+const NUVEMSHOP_CONFIG = {
+    // Configurações da API
+    apiUrl: env.NUVEMSHOP_API_URL,
+    accessToken: env.NUVEMSHOP_ACCESS_TOKEN,
+    userId: env.NUVEMSHOP_USER_ID,
+    scope: env.NUVEMSHOP_SCOPE.split(','),
+    
+    // Configurações do webhook
+    webhook: {
+        topics: [
+            'orders/created',
+            'orders/paid',
+            'orders/fulfilled',
+            'orders/cancelled',
+            'orders/updated',
+            'products/created',
+            'products/updated',
+            'products/deleted',
+            'customers/created',
+            'customers/updated'
+        ],
+        retryAttempts: 3,
+        retryDelay: 1000, // 1 segundo
+        timeout: 5000 // 5 segundos
+    },
+
+    // Configurações de API
+    api: {
+        timeout: 30000, // 30 segundos
+        retryAttempts: 3,
+        retryDelays: [1000, 3000, 5000], // 1s, 3s, 5s
+        rateLimit: {
+            bucketSize: 40,      // Tamanho máximo do bucket
+            requestsPerSecond: 2, // Taxa de 2 requisições por segundo
+            headers: {
+                limit: 'x-rate-limit-limit',
+                remaining: 'x-rate-limit-remaining',
+                reset: 'x-rate-limit-reset'
+            }
+        },
+        userAgent: 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
+    },
+
+    // Configurações de cache
+    cache: {
+        ttl: {
+            orders: 3600,        // 1 hora
+            products: 7200,      // 2 horas
+            customers: 86400,    // 24 horas
+            webhooks: 300        // 5 minutos
+        },
+        prefix: {
+            orders: 'nuvemshop:orders:',
+            products: 'nuvemshop:products:',
+            customers: 'nuvemshop:customers:',
+            webhooks: 'nuvemshop:webhooks:'
+        }
+    },
+
+    // Configurações de segurança
+    security: {
+        rateLimitWindow: 60000, // 1 minuto
+        maxRequestsPerWindow: 100
+    },
+
+    // Configurações de validação
+    validation: {
+        maxOrdersPerPage: 50, // Limite de pedidos por página
+        maxProductsPerPage: 100, // Limite de produtos por página
+        maxCustomersPerPage: 100, // Limite de clientes por página
+        orderStatuses: ['open', 'closed', 'cancelled'],
+        requiredFields: {
+            orders: ['id', 'number', 'status', 'shipping_tracking', 'created_at'],
+            products: ['id', 'title', 'handle', 'variants'],
+            customers: ['id', 'name', 'email']
+        }
+    },
+
+    // Configurações de internacionalização
+    i18n: {
+        defaultLanguage: 'pt-BR',
+        supportedLanguages: ['pt-BR', 'es', 'en']
+    }
+};
+
 module.exports = {
     PORT,
     REDIS_CONFIG,
-    NUVEMSHOP_CONFIG,
     OPENAI_CONFIG,
     GROQ_CONFIG,
     WHATSAPP_CONFIG,
     TRACKING_CONFIG,
-    RATE_LIMIT_CONFIG,
     BUSINESS_HOURS,
     MEDIA_CONFIG,
-    LOGGING_CONFIG,
-    CACHE_CONFIG,
-    FFMPEG_CONFIG
+    NUVEMSHOP_CONFIG,
+    RATE_LIMIT_CONFIG
 };

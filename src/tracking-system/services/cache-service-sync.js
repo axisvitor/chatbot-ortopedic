@@ -1,11 +1,12 @@
 const { RedisStore } = require('../utils/redis-store');
 const logger = require('../utils/logger');
+const { REDIS_CONFIG, TRACKING_CONFIG } = require('../../../config/settings');
 
-class CacheService {
+class CacheServiceSync {
     constructor() {
         this.redis = new RedisStore();
-        this.defaultTTL = 30 * 60; // 30 minutos em segundos
-        this.prefix = 'cache:17track:';
+        this.defaultTTL = TRACKING_CONFIG.cache.ttl.default;
+        this.prefix = REDIS_CONFIG.prefix.tracking;
     }
 
     /**
@@ -33,19 +34,19 @@ class CacheService {
         switch (status) {
             case 'entregue':
             case 'expirado':
-                ttl = 24 * 60 * 60; // 24 horas para status finais
+                ttl = TRACKING_CONFIG.cache.ttl.status.final;
                 break;
             case 'problema':
-                ttl = 2 * 60 * 60; // 2 horas para status com problema
+                ttl = TRACKING_CONFIG.cache.ttl.status.problem;
                 break;
             case 'em_transito':
-                ttl = 30 * 60; // 30 minutos para em trânsito
+                ttl = TRACKING_CONFIG.cache.ttl.status.transit;
                 break;
             case 'postado':
-                ttl = 15 * 60; // 15 minutos para recém postado
+                ttl = TRACKING_CONFIG.cache.ttl.status.posted;
                 break;
             default:
-                ttl = 5 * 60; // 5 minutos para outros status
+                ttl = TRACKING_CONFIG.cache.ttl.status.default;
         }
 
         return (now - lastUpdate) > (ttl * 1000);
@@ -114,15 +115,15 @@ class CacheService {
         switch (status) {
             case 'entregue':
             case 'expirado':
-                return 24 * 60 * 60; // 24 horas
+                return TRACKING_CONFIG.cache.ttl.status.final;
             case 'problema':
-                return 2 * 60 * 60; // 2 horas
+                return TRACKING_CONFIG.cache.ttl.status.problem;
             case 'em_transito':
-                return 30 * 60; // 30 minutos
+                return TRACKING_CONFIG.cache.ttl.status.transit;
             case 'postado':
-                return 15 * 60; // 15 minutos
+                return TRACKING_CONFIG.cache.ttl.status.posted;
             default:
-                return 5 * 60; // 5 minutos
+                return TRACKING_CONFIG.cache.ttl.status.default;
         }
     }
 
@@ -141,4 +142,4 @@ class CacheService {
     }
 }
 
-module.exports = { CacheService };
+module.exports = { CacheServiceSync };
