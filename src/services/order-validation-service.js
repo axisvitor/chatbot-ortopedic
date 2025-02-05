@@ -1167,31 +1167,110 @@ class OrderValidationService {
             });
 
             if (!orders || !orders.length) {
+                logger.info('NenhumPedidoPendente', {
+                    timestamp: new Date().toISOString()
+                });
                 return;
             }
 
-            for (const order of orders) {
-                // Verifica se já processamos este pedido recentemente
-                const cacheKey = `pending_check:${order.id}`;
-                const processed = await this.redisStore.get(cacheKey);
-                if (processed) continue;
+            logger.info('ProcessandoPedidosPendentes', {
+                quantidade: orders.length,
+                timestamp: new Date().toISOString()
+            });
 
-                // Marca como processado por 1 hora
-                await this.redisStore.set(cacheKey, true, 3600);
-
-                // Verifica pagamento pendente
-                if (order.payment_status === 'pending') {
-                    await this._handlePendingPayment(order);
-                }
-
-                // Verifica rastreio pendente
-                if (order.status === 'paid' && !order.shipping_tracking_number) {
-                    await this._handlePendingTracking(order);
+            // Processa em lotes de 5 pedidos
+            const batchSize = 5;
+            for (let i = 0; i < orders.length; i += batchSize) {
+                const batch = orders.slice(i, i + batchSize);
+                await Promise.all(batch.map(order => this._processPendingOrder(order)));
+                
+                // Aguarda 1 segundo entre lotes para não sobrecarregar
+                if (i + batchSize < orders.length) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                 }
             }
+
+            logger.info('PedidosPendentesProcessados', {
+                quantidade: orders.length,
+                timestamp: new Date().toISOString()
+            });
         } catch (error) {
-            console.error('Erro ao verificar pedidos pendentes:', error);
+            logger.error('ErroProcessarPedidosPendentes', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
             throw error;
+        }
+    }
+
+    /**
+     * Processa um pedido pendente individual
+     * @private
+     */
+    async _processPendingOrder(order) {
+        try {
+            // Verifica se já processamos este pedido recentemente
+            const cacheKey = `pending_check:${order.id}`;
+            const processed = await this.redisStore.get(cacheKey);
+            if (processed) {
+                logger.debug('PedidoJaProcessado', {
+                    orderId: order.id,
+                    orderNumber: order.number,
+                    timestamp: new Date().toISOString()
+                });
+                return;
+            }
+
+            // Marca como processado por 1 hora
+            await this.redisStore.set(cacheKey, true, 3600);
+
+            const tasks = [];
+
+            // Verifica pagamento pendente
+            if (order.payment_status === 'pending') {
+                tasks.push(this._handlePendingPayment(order).catch(error => {
+                    logger.error('ErroProcessarPagamentoPendente', {
+                        orderId: order.id,
+                        orderNumber: order.number,
+                        erro: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                }));
+            }
+
+            // Verifica rastreio pendente
+            if (order.status === 'paid' && !order.shipping_tracking_number) {
+                tasks.push(this._handlePendingTracking(order).catch(error => {
+                    logger.error('ErroProcessarRastreioPendente', {
+                        orderId: order.id,
+                        orderNumber: order.number,
+                        erro: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                }));
+            }
+
+            // Executa todas as tarefas em paralelo
+            await Promise.all(tasks);
+
+            logger.info('PedidoProcessado', {
+                orderId: order.id,
+                orderNumber: order.number,
+                status: order.status,
+                paymentStatus: order.payment_status,
+                hasTracking: !!order.shipping_tracking_number,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            logger.error('ErroProcessarPedido', {
+                orderId: order.id,
+                orderNumber: order.number,
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            // Não propaga o erro para não afetar outros pedidos
         }
     }
 
@@ -1203,7 +1282,14 @@ class OrderValidationService {
         // Verifica se já notificamos sobre este pagamento
         const notifyKey = `payment_notify:${order.id}`;
         const notified = await this.redisStore.get(notifyKey);
-        if (notified) return;
+        if (notified) {
+            logger.debug('NotificacaoPagamentoJaEnviada', {
+                orderId: order.id,
+                orderNumber: order.number,
+                timestamp: new Date().toISOString()
+            });
+            return;
+        }
 
         // Notifica equipe financeira
         await this._financialService.notifyPendingPayment({
@@ -1215,6 +1301,12 @@ class OrderValidationService {
 
         // Marca como notificado por 12 horas
         await this.redisStore.set(notifyKey, true, 43200);
+
+        logger.info('NotificacaoPagamentoEnviada', {
+            orderId: order.id,
+            orderNumber: order.number,
+            timestamp: new Date().toISOString()
+        });
     }
 
     /**
@@ -1225,7 +1317,14 @@ class OrderValidationService {
         // Verifica se já notificamos sobre este rastreio
         const notifyKey = `tracking_notify:${order.id}`;
         const notified = await this.redisStore.get(notifyKey);
-        if (notified) return;
+        if (notified) {
+            logger.debug('NotificacaoRastreioJaEnviada', {
+                orderId: order.id,
+                orderNumber: order.number,
+                timestamp: new Date().toISOString()
+            });
+            return;
+        }
 
         // Notifica equipe de envios
         if (this._whatsAppService) {
@@ -1238,6 +1337,12 @@ class OrderValidationService {
 
         // Marca como notificado por 12 horas
         await this.redisStore.set(notifyKey, true, 43200);
+
+        logger.info('NotificacaoRastreioEnviada', {
+            orderId: order.id,
+            orderNumber: order.number,
+            timestamp: new Date().toISOString()
+        });
     }
 }
 

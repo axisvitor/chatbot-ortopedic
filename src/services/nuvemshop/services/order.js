@@ -227,40 +227,33 @@ class OrderService extends NuvemshopBase {
      * @param {Object} params - Parâmetros de busca
      * @returns {Promise<Array>} Lista de pedidos
      */
-    async getOrders(params = {}) {
+    async getOrders(params = {}, retryCount = 0) {
         try {
-            // Validação e ajuste da data created_at_min
+            // Validação de parâmetros
             if (params.created_at_min) {
-                const createdAtMin = new Date(params.created_at_min);
-                const now = new Date();
-                
-                // Se a data for inválida, usa a data atual
-                if (isNaN(createdAtMin.getTime())) {
-                    logger.warn('DataInvalida', {
-                        dataOriginal: params.created_at_min,
-                        dataNormalizada: now.toISOString(),
-                        timestamp: now.toISOString()
-                    });
-                    params.created_at_min = now.toISOString();
-                } else if (createdAtMin > now) {
-                    logger.warn('DataFuturaNormalizadaParaHoje', {
-                        dataOriginal: params.created_at_min,
-                        dataNormalizada: now.toISOString(),
-                        timestamp: now.toISOString()
-                    });
-                    params.created_at_min = now.toISOString();
+                const minDate = new Date(params.created_at_min);
+                if (isNaN(minDate.getTime())) {
+                    throw new Error('Data inicial inválida');
                 }
+            }
+
+            // Se não houver data inicial, usa últimas 24h
+            if (!params.created_at_min) {
+                const now = new Date();
+                const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                params.created_at_min = yesterday.toISOString();
             }
 
             // Log da requisição
             logger.debug('BuscandoPedidos', {
                 parametros: params,
+                tentativa: retryCount + 1,
                 timestamp: new Date().toISOString()
             });
 
             const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params,
-                timeout: 60000 // Aumenta timeout para 60s
+                timeout: 60000 // 60s timeout
             });
 
             // Log de sucesso
@@ -278,39 +271,76 @@ class OrderService extends NuvemshopBase {
                 status: error.response?.status,
                 data: error.response?.data,
                 params: params,
+                tentativa: retryCount + 1,
                 timestamp: new Date().toISOString()
             };
 
-            // Log específico baseado no tipo de erro
-            if (error.response?.status === 500) {
-                logger.error('ErroInternoNuvemshop', {
+            // Máximo de 3 tentativas
+            const MAX_RETRIES = 3;
+
+            // Trata erros específicos
+            if (error.response?.status === 500 && retryCount < MAX_RETRIES) {
+                logger.warn('RetentativaNuvemshop', {
                     ...errorInfo,
-                    sugestao: 'Verificar status da API da Nuvemshop e tentar novamente em alguns minutos'
+                    proximaTentativa: retryCount + 1,
+                    esperaSegundos: 5
                 });
-            } else if (error.response?.status === 429) {
-                logger.error('ErroLimiteRequisicoes', {
+
+                // Espera 5 segundos e tenta novamente
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                return this.getOrders(params, retryCount + 1);
+            } 
+            else if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
+                const resetTime = error.response.headers['x-rate-limit-reset'];
+                const waitTime = Math.min(
+                    (new Date(resetTime) - new Date()) + 1000, // +1s de margem
+                    30000 // máximo 30s de espera
+                );
+
+                logger.warn('LimiteRequisicoes', {
                     ...errorInfo,
                     limite: error.response.headers['x-rate-limit-limit'],
                     restante: error.response.headers['x-rate-limit-remaining'],
-                    reset: error.response.headers['x-rate-limit-reset']
+                    reset: error.response.headers['x-rate-limit-reset'],
+                    esperaMs: waitTime
                 });
-            } else if (!error.response) {
+
+                // Espera até o reset e tenta novamente
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                return this.getOrders(params, retryCount + 1);
+            }
+            else if (!error.response && retryCount < MAX_RETRIES) {
                 logger.error('ErroConexaoNuvemshop', {
                     ...errorInfo,
-                    code: error.code
+                    code: error.code,
+                    sugestao: 'Verificar conectividade com a API'
                 });
-            } else {
-                logger.error('ErroBuscarPedidos', errorInfo);
+
+                // Espera 3 segundos e tenta novamente
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                return this.getOrders(params, retryCount + 1);
             }
+            else {
+                // Log do erro após todas as tentativas
+                if (error.response?.status === 500) {
+                    logger.error('ErroInternoNuvemshop', {
+                        ...errorInfo,
+                        sugestao: 'Verificar status da API da Nuvemshop'
+                    });
+                } else {
+                    logger.error('ErroBuscarPedidos', errorInfo);
+                }
 
-            // Trata o erro de forma mais amigável
-            const enhancedError = new Error(`Erro ao buscar pedidos: ${error.message}`);
-            enhancedError.originalError = error;
-            enhancedError.status = error.response?.status;
-            enhancedError.data = error.response?.data;
-            enhancedError.params = params;
+                // Trata o erro de forma mais amigável
+                const enhancedError = new Error(`Erro ao buscar pedidos: ${error.message}`);
+                enhancedError.originalError = error;
+                enhancedError.status = error.response?.status;
+                enhancedError.data = error.response?.data;
+                enhancedError.params = params;
+                enhancedError.retryCount = retryCount;
 
-            throw enhancedError;
+                throw enhancedError;
+            }
         }
     }
 
