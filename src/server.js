@@ -110,9 +110,15 @@ async function initializeServices() {
             await redisStore.connect();
             console.log('✅ RedisStore conectado');
 
-            // Inicializa CacheService com RedisStore
-            cacheService = new CacheService();
-            console.log('✅ CacheService inicializado');
+            try {
+                // Inicializa CacheService
+                cacheService = new CacheService();
+                await cacheService.redisStore.connect();
+                console.log('✅ CacheService inicializado');
+            } catch (error) {
+                console.error('❌ Erro ao inicializar CacheService:', error);
+                throw error;
+            }
 
             // Serviços independentes
             businessHoursService = new BusinessHoursService();
