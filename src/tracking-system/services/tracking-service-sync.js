@@ -1,7 +1,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const { CacheServiceSync } = require('./cache-service-sync');
-const { TRACKING_CONFIG } = require('../../../config/settings');
+const { TRACKING_CONFIG } = require('../config/settings');
 
 class TrackingServiceSync {
     // Status emojis para cada estado do rastreamento

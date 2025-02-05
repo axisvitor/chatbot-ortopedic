@@ -1,6 +1,6 @@
 const { RedisStore } = require('../utils/redis-store');
 const logger = require('../utils/logger');
-const { REDIS_CONFIG, TRACKING_CONFIG } = require('../../config/settings');
+const { REDIS_CONFIG, TRACKING_CONFIG } = require('../config/settings');
 
 class CacheServiceSync {
     constructor() {
