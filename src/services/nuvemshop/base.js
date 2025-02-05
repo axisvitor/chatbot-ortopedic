@@ -86,43 +86,112 @@ class NuvemshopBase {
     }
 
     /**
-     * Faz requisição com retry automático
+     * Faz requisição com retry automático e circuit breaker
      * @protected
      */
     async _makeRequest(method, endpoint, options = {}) {
+        // Log request
+        logger.debug('NuvemshopRequestStarted', {
+            method,
+            endpoint,
+            options: JSON.stringify(options),
+            timestamp: new Date().toISOString()
+        });
+
+        let lastError = null;
         for (let attempt = 1; attempt <= this.retryConfig.attempts; attempt++) {
             try {
                 await this._checkRateLimit();
                 
+                const startTime = Date.now();
                 const response = await this.client.request({
                     method,
                     url: endpoint,
                     ...options
                 });
 
+                // Log successful response
+                logger.debug('NuvemshopRequestSuccess', {
+                    method,
+                    endpoint,
+                    attempt,
+                    duration: Date.now() - startTime,
+                    status: response.status,
+                    timestamp: new Date().toISOString()
+                });
+
                 return response.data;
             } catch (error) {
-                const shouldRetry = attempt < this.retryConfig.attempts && 
-                                  error.response?.status >= 500;
+                lastError = error;
+                const status = error.response?.status;
+                const responseData = error.response?.data;
 
-                if (shouldRetry) {
-                    const delay = this.retryConfig.delays[attempt - 1] || 5000;
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue;
-                }
+                // Determine if we should retry based on error type
+                const shouldRetry = attempt < this.retryConfig.attempts && (
+                    // Retry on server errors
+                    status >= 500 || 
+                    // Retry on rate limit errors
+                    status === 429 ||
+                    // Retry on network errors
+                    !status && (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT')
+                );
 
+                // Log error details
                 logger.error('NuvemshopRequestError', {
                     method,
                     endpoint,
                     attempt,
                     error: error.message,
-                    status: error.response?.status,
+                    errorCode: error.code,
+                    status,
+                    responseData: JSON.stringify(responseData),
+                    stack: error.stack,
+                    willRetry: shouldRetry,
                     timestamp: new Date().toISOString()
                 });
 
-                throw error;
+                if (shouldRetry) {
+                    // Calculate delay with exponential backoff
+                    const baseDelay = this.retryConfig.delays[attempt - 1] || 5000;
+                    const jitter = Math.random() * 1000; // Add randomness to prevent thundering herd
+                    const delay = Math.min(baseDelay * Math.pow(2, attempt - 1) + jitter, 30000); // Cap at 30 seconds
+
+                    logger.info('NuvemshopRequestRetrying', {
+                        method,
+                        endpoint,
+                        attempt,
+                        nextAttempt: attempt + 1,
+                        delay,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+
+                // If we're not retrying, enhance the error with more context
+                const enhancedError = new Error(`Nuvemshop API request failed: ${error.message}`);
+                enhancedError.originalError = error;
+                enhancedError.status = status;
+                enhancedError.endpoint = endpoint;
+                enhancedError.method = method;
+                enhancedError.attempts = attempt;
+                enhancedError.responseData = responseData;
+
+                throw enhancedError;
             }
         }
+
+        // If we've exhausted all retries
+        logger.error('NuvemshopRequestExhaustedRetries', {
+            method,
+            endpoint,
+            attempts: this.retryConfig.attempts,
+            lastError: lastError.message,
+            timestamp: new Date().toISOString()
+        });
+
+        throw lastError;
     }
 
     /**

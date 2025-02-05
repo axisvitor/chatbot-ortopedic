@@ -32,56 +32,87 @@ class OrderService extends NuvemshopBase {
             // Remove caracteres não numéricos
             const cleanNumber = String(orderNumber).replace(/\D/g, '');
             
-            // Busca usando o endpoint de busca geral primeiro
-            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
-                params: {
-                    q: cleanNumber,
-                    fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number,shipping_tracking_url'
-                }
-            });
+            if (!cleanNumber) {
+                logger.warn('NumeroPedidoInvalido', {
+                    numeroOriginal: orderNumber,
+                    timestamp: new Date().toISOString()
+                });
+                return null;
+            }
 
-            if (response.status === 200 && response.data) {
-                // Encontra o pedido com o número exato
-                const order = Array.isArray(response.data) ? 
-                    response.data.find(o => String(o.number) === cleanNumber) :
-                    (String(response.data.number) === cleanNumber ? response.data : null);
+            try {
+                // Busca usando o endpoint de busca geral primeiro
+                const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                    params: {
+                        q: cleanNumber,
+                        fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number,shipping_tracking_url'
+                    }
+                });
 
-                if (order) {
-                    logger.info('PedidoEncontrado', {
-                        numeroOriginal: orderNumber,
-                        numeroLimpo: cleanNumber,
-                        id: order.id,
-                        status: order.status,
-                        rastreio: order.shipping_tracking_number,
-                        timestamp: new Date().toISOString()
-                    });
-                    return order;
+                if (response.status === 200 && response.data) {
+                    // Encontra o pedido com o número exato
+                    const order = Array.isArray(response.data) ? 
+                        response.data.find(o => String(o.number) === cleanNumber) :
+                        (String(response.data.number) === cleanNumber ? response.data : null);
+
+                    if (order) {
+                        logger.info('PedidoEncontrado', {
+                            numeroOriginal: orderNumber,
+                            numeroLimpo: cleanNumber,
+                            id: order.id,
+                            status: order.status,
+                            rastreio: order.shipping_tracking_number,
+                            timestamp: new Date().toISOString()
+                        });
+                        return order;
+                    }
                 }
+            } catch (searchError) {
+                // Log error but continue with direct search
+                logger.warn('ErroBuscaGeral', {
+                    erro: searchError.message,
+                    numero: orderNumber,
+                    timestamp: new Date().toISOString()
+                });
             }
             
-            // Se não encontrou, tenta buscar diretamente pelo número
-            const directResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
-                params: {
-                    number: cleanNumber,
-                    fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number,shipping_tracking_url'
+            try {
+                // Se não encontrou, tenta buscar diretamente pelo número
+                const directResponse = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                    params: {
+                        number: cleanNumber,
+                        fields: 'id,number,status,payment_status,shipping_status,customer,products,shipping_tracking_number,shipping_tracking_url'
+                    }
+                });
+
+                if (directResponse.status === 200 && directResponse.data) {
+                    const order = Array.isArray(directResponse.data) ?
+                        directResponse.data[0] :
+                        directResponse.data;
+
+                    if (order) {
+                        logger.info('PedidoEncontradoBuscaDireta', {
+                            numeroOriginal: orderNumber,
+                            numeroLimpo: cleanNumber,
+                            id: order.id,
+                            status: order.status,
+                            rastreio: order.shipping_tracking_number,
+                            timestamp: new Date().toISOString()
+                        });
+                        return order;
+                    }
                 }
-            });
+            } catch (directError) {
+                // Log error but don't throw yet
+                logger.warn('ErroBuscaDireta', {
+                    erro: directError.message,
+                    numero: orderNumber,
+                    timestamp: new Date().toISOString()
+                });
 
-            if (directResponse.status === 200 && directResponse.data) {
-                const order = Array.isArray(directResponse.data) ?
-                    directResponse.data[0] :
-                    directResponse.data;
-
-                if (order) {
-                    logger.info('PedidoEncontradoBuscaDireta', {
-                        numeroOriginal: orderNumber,
-                        numeroLimpo: cleanNumber,
-                        id: order.id,
-                        status: order.status,
-                        rastreio: order.shipping_tracking_number,
-                        timestamp: new Date().toISOString()
-                    });
-                    return order;
+                // If both searches failed with server errors, throw the last error
+                if (directError.response?.status >= 500) {
+                    throw directError;
                 }
             }
 
@@ -91,13 +122,35 @@ class OrderService extends NuvemshopBase {
             });
             return null;
         } catch (error) {
-            logger.error('ErroBuscarPedido', {
+            // Enhanced error logging
+            const errorContext = {
                 erro: error.message,
+                status: error.response?.status,
+                responseData: error.response?.data,
                 stack: error.stack,
                 pedido: orderNumber,
                 timestamp: new Date().toISOString()
-            });
-            throw error;
+            };
+
+            // Log different error levels based on the type of error
+            if (error.response?.status >= 500) {
+                logger.error('ErroServidorNuvemshop', errorContext);
+            } else if (error.response?.status === 429) {
+                logger.error('ErroLimiteRequisicoes', errorContext);
+            } else if (!error.response) {
+                logger.error('ErroRedeNuvemshop', errorContext);
+            } else {
+                logger.error('ErroBuscarPedido', errorContext);
+            }
+
+            // Enhance error with context
+            const enhancedError = new Error(`Erro ao buscar pedido ${orderNumber}: ${error.message}`);
+            enhancedError.originalError = error;
+            enhancedError.orderNumber = orderNumber;
+            enhancedError.status = error.response?.status;
+            enhancedError.responseData = error.response?.data;
+
+            throw enhancedError;
         }
     }
 
@@ -175,30 +228,52 @@ class OrderService extends NuvemshopBase {
      * @returns {Promise<Object>} Pedidos e informações de paginação
      */
     async getOrders(options = {}) {
-        const cacheKey = this.generateCacheKey('orders', 'list', options);
-        return this.getCachedData(
-            cacheKey,
-            async () => {
-                const params = {
-                    page: options.page || 1,
-                    per_page: Math.min(options.per_page || 50, 200),
-                    ...options
-                };
+        try {
+            const cacheKey = this.generateCacheKey('orders', 'list', options);
+            const cachedData = await this.getCachedData(cacheKey);
+            if (cachedData) {
+                return cachedData;
+            }
 
-                const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, { params });
-                
-                return {
-                    data: response.data,
-                    pagination: {
-                        total: parseInt(response.headers['x-total-count'] || 0),
-                        currentPage: params.page,
-                        perPage: params.per_page,
-                        links: this.parseLinkHeader(response.headers.link)
-                    }
-                };
-            },
-            NUVEMSHOP_CONFIG.cache.ordersTtl
-        );
+            const params = {
+                page: options.page || 1,
+                per_page: Math.min(options.per_page || 50, 200),
+                ...options
+            };
+
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, { params });
+            
+            const data = {
+                data: response.data,
+                pagination: {
+                    total: parseInt(response.headers['x-total-count'] || 0),
+                    currentPage: params.page,
+                    perPage: params.per_page,
+                    links: this.parseLinkHeader(response.headers.link)
+                }
+            };
+
+            await this.setCachedData(cacheKey, data, NUVEMSHOP_CONFIG.cache.ordersTtl);
+
+            return data;
+        } catch (error) {
+            logger.error('[Nuvemshop] Erro ao obter pedidos:', {
+                erro: error.message,
+                status: error.response?.status,
+                data: error.response?.data,
+                options,
+                timestamp: new Date().toISOString()
+            });
+
+            // Se for erro 500, tenta novamente após 5 segundos
+            if (error.response?.status === 500) {
+                logger.info('[Nuvemshop] Tentando novamente em 5 segundos...');
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                return this.getOrders(options);
+            }
+
+            throw error;
+        }
     }
 
     /**
