@@ -8,10 +8,7 @@
     "dev": "nodemon --no-warnings src/server.js",
     "track": "node src/tracking-system/app.js",
     "sync": "node src/tracking-system/sync_tracking_codes.js",
-    "test:track": "node src/tracking-system/test_tracking.js",
-    "test:redis": "node src/tracking-system/test_redis.js",
-    "test:nuvem": "node src/tracking-system/test_nuvemshop.js",
-    "register90": "node src/tracking-system/scripts/register_recent_orders.js"
+    "automation": "node src/automations/run_automation.js"
   },
   "keywords": [
     "chatbot",

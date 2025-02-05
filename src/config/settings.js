@@ -25,17 +25,17 @@ const DEFAULT_VALUES = {
     REDIS_PASSWORD: '',
     OPENAI_API_KEY: 'dummy_key',
     ASSISTANT_ID: 'dummy_assistant',
-    WAPI_URL: 'http://localhost:8080',
-    WAPI_TOKEN: 'dummy_token',
-    WAPI_CONNECTION_KEY: 'dummy_key',
+    WAPI_URL: 'https://host06.serverapi.dev',
+    WAPI_TOKEN: 'wi7n6IE2TRn5CaX4HK3vK3ZBH9uaYU4b8',
+    WAPI_CONNECTION_KEY: 'w-api_n4FDjWRWo5',
     NUVEMSHOP_ACCESS_TOKEN: 'dummy_token',
     NUVEMSHOP_API_URL: 'https://api.nuvemshop.com.br/v1/dummy_id',
     NUVEMSHOP_USER_ID: 'dummy_user',
     NUVEMSHOP_SCOPE: 'read_content,read_products,read_orders',
-    FINANCIAL_DEPT_NUMBER: '123456',
+    FINANCIAL_DEPT_NUMBER: '5594991307744',
     SUPPORT_DEPT_NUMBER: '123457',
     SALES_DEPT_NUMBER: '123458',
-    TECHNICAL_DEPT_NUMBER: '123459',
+    TECHNICAL_DEPT_NUMBER: '5594991307744',
     TRACK17_API_KEY: 'dummy_key',
     TRACK17_API_URL: 'https://api.17track.net/v2',
     TRACK17_REGISTER_PATH: '/register',
@@ -284,6 +284,7 @@ const WHATSAPP_CONFIG = {
     apiUrl: env.WAPI_URL,
     token: env.WAPI_TOKEN,
     connectionKey: env.WAPI_CONNECTION_KEY,
+    whatsappNumber: env.TECHNICAL_DEPT_NUMBER,  // Adicionando whatsappNumber
     departments: {
         financial: env.FINANCIAL_DEPT_NUMBER,
         support: env.SUPPORT_DEPT_NUMBER,
@@ -355,8 +356,7 @@ const WHATSAPP_CONFIG = {
             path: 'webhook/msg_recebidas_ou_enviadas',
             method: 'POST'
         }
-    },
-    whatsappNumber: env.WHATSAPP_NUMBER  
+    }
 };
 
 // 17track Configuration
@@ -364,6 +364,8 @@ const TRACKING_CONFIG = {
     // API Configuration
     endpoint: env.TRACK17_API_URL,
     apiKey: env.TRACK17_API_KEY,
+    apiUrl: env.TRACK17_API_URL,  // Adicionando apiUrl
+    token: env.TRACK17_API_KEY,   // Adicionando token
     
     // API Paths
     paths: {

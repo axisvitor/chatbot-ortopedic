@@ -6,38 +6,67 @@ const { TRACKING_CONFIG } = require('../../config/settings');
 class TrackingService {
     // Status emojis para cada estado do rastreamento
     static STATUS_EMOJIS = {
-        'pending': '⏳',
-        'in_transit': '🚚',
-        'out_for_delivery': '🚗',
-        'delivered': '✅',
-        'returned': '↩️',
-        'expired': '⚠️',
-        'exception': '❌',
-        'unknown': '❓'
+        'not_found': '❓',       // Não encontrado
+        'info_received': '📝',   // Informações recebidas
+        'in_transit': '🚚',      // Em trânsito
+        'pickup': '📦',          // Retirada
+        'out_for_delivery': '🚗', // Fora para entrega
+        'undelivered': '⚠️',     // Não entregue
+        'delivered': '✅',        // Entregue
+        'alert': '⚡',           // Alerta (customs, return, etc)
+        'expired': '⏰'          // Expirado
     };
 
     // Mapeamento de status do 17track para nossos status padronizados
     static STATUS_MAPPING = {
-        // Status pendente
-        'pending': ['pending', 'info_received', 'not_found'],
+        // Não encontrado
+        'not_found': ['not_found', 'no_info', 'invalid'],
+        
+        // Informações recebidas
+        'info_received': ['info_received', 'shipping_info_received', 'label_created'],
         
         // Em trânsito
-        'in_transit': ['in_transit', 'transit', 'pick_up', 'pickup', 'accepted'],
+        'in_transit': [
+            'in_transit', 
+            'transit', 
+            'departed_country', 
+            'arrived_destination_country',
+            'customs_clearance',
+            'domestic_transit'
+        ],
+        
+        // Retirada
+        'pickup': ['pickup', 'ready_for_pickup', 'arrived_pickup_point'],
         
         // Saiu para entrega
-        'out_for_delivery': ['out_for_delivery', 'delivery', 'delivering'],
+        'out_for_delivery': ['out_for_delivery', 'with_courier', 'delivering'],
+        
+        // Não entregue
+        'undelivered': [
+            'delivery_failed',
+            'recipient_unavailable',
+            'delivery_delayed',
+            'address_issue',
+            'delivery_attempted'
+        ],
         
         // Entregue
-        'delivered': ['delivered', 'complete', 'completed'],
+        'delivered': ['delivered', 'successful_delivery', 'completed'],
         
-        // Retornado
-        'returned': ['returned', 'return', 'returning'],
+        // Alerta (inclui problemas alfandegários)
+        'alert': [
+            'customs_hold',
+            'returned_to_sender',
+            'customs_issue',
+            'lost',
+            'damaged',
+            'prohibited_items',
+            'restricted_items',
+            'tax_payment_required'
+        ],
         
         // Expirado
-        'expired': ['expired', 'timeout'],
-        
-        // Exceção
-        'exception': ['exception', 'failed', 'failure']
+        'expired': ['expired', 'no_updates', 'tracking_expired']
     };
 
     constructor() {

@@ -1,40 +1,18 @@
-# Chatbot Ortopédico 🤖
+# Chatbot Ortopédico - Sistema de Rastreamento
 
-Sistema de atendimento automatizado via WhatsApp para e-commerce ortopédico, utilizando GPT-4 para processamento de linguagem natural.
+Sistema automatizado para rastreamento de pacotes e envio de notificações via WhatsApp.
 
-## 🌟 Principais Funcionalidades
+## Funcionalidades
 
-### Atendimento ao Cliente
+- Rastreamento automático de pacotes via API 17track
+- Detecção de pacotes com:
+  - Taxas pendentes/retenção alfandegária
+  - Status de alerta
+  - Problemas de entrega
+- Envio de resumos diários via WhatsApp
+- Integração com Nuvemshop para gerenciamento de pedidos
 
-- Processamento de mensagens em texto, áudio e imagens
-- Respostas contextualizadas e personalizadas
-- Manutenção de histórico de conversas
-- Encaminhamento inteligente para departamentos
-
-### Rastreamento de Pedidos 📦
-
-- Consulta automática de status em múltiplas transportadoras
-- Notificações proativas de atualizações
-- Tratamento especial para pedidos taxados
-- Alertas automáticos sobre atrasos
-
-### Processamento de Pagamentos 💳
-
-- Análise automática de comprovantes via OCR
-- Confirmação instantânea de recebimento
-- Integração com setor financeiro
-- Histórico de transações
-
-## 🛠️ Tecnologias
-
-- **Backend**: Node.js
-- **IA**: OpenAI GPT-4
-- **Banco de Dados**: Redis
-- **Mensageria**: WhatsApp Business API
-- **E-commerce**: Nuvemshop API
-- **Rastreamento**: APIs de múltiplas transportadoras
-
-## 📦 Instalação
+## Configuração
 
 1. Clone o repositório:
 ```bash
@@ -45,65 +23,50 @@ cd chatbot-ortopedic
 2. Instale as dependências:
 ```bash
 npm install
+pip install -r requirements.txt
 ```
 
 3. Configure as variáveis de ambiente:
-```bash
-cp .env.example .env
-# Edite o arquivo .env com suas configurações
+- Copie `.env.example` para `.env`
+- Preencha as variáveis necessárias:
+  - `TRACK17_API_URL`: URL da API 17track
+  - `TRACK17_API_KEY`: Chave da API 17track
+  - `WAPI_URL`: URL da API WhatsApp
+  - `WAPI_TOKEN`: Token da API WhatsApp
+  - `WAPI_CONNECTION_KEY`: Chave de conexão WhatsApp
+  - `TECHNICAL_DEPT_NUMBER`: Número para notificações técnicas
+
+## Estrutura do Projeto
+
+```
+src/
+├── automations/          # Automações e tarefas agendadas
+│   └── daily-summary/    # Resumo diário de pacotes
+├── tracking-system/      # Sistema de rastreamento
+│   └── services/        # Serviços de integração
+└── services/            # Outros serviços (Nuvemshop, etc)
 ```
 
-4. Inicie o servidor:
+## Deploy
+
+O projeto está configurado para deploy no Railway:
+
+1. Configure as variáveis de ambiente no Railway
+2. Conecte seu repositório GitHub
+3. O Railway detectará automaticamente a configuração
+
+## Desenvolvimento
+
+Para rodar localmente:
 ```bash
-npm start
+npm run dev
 ```
 
-## 🚀 Deploy no Railway
+Para executar as automações:
+```bash
+npm run automation
+```
 
-1. Fork este repositório no GitHub
+## Licença
 
-2. Crie uma nova conta no [Railway](https://railway.app/) se ainda não tiver
-
-3. No Railway, crie um novo projeto a partir do GitHub:
-   - Clique em "New Project"
-   - Selecione "Deploy from GitHub repo"
-   - Escolha o repositório forkado
-
-4. Configure as variáveis de ambiente:
-   - Vá em "Variables"
-   - Adicione todas as variáveis listadas no `.env.example`
-
-5. O deploy será iniciado automaticamente
-   - O Railway usará o Dockerfile para build
-   - A aplicação será iniciada com `npm start`
-   - Healthcheck configurado em `/health`
-
-6. Monitore os logs e métricas no dashboard do Railway
-
-## 📚 Documentação
-
-- [Arquitetura](./docs/architecture.md)
-- [Instalação](./docs/installation.md)
-- [Funções do Assistant](./docs/functions.md)
-- [Serviços](./docs/services.md)
-- [Integrações](./docs/integrations.md)
-- [Armazenamento](./docs/storage.md)
-- [Deploy](./docs/deployment.md)
-- [Contribuindo](./docs/contributing.md)
-- [Segurança](./docs/security.md)
-
-## 🔒 Segurança
-
-- Criptografia de ponta a ponta
-- Conformidade com LGPD
-- Validação de entrada de dados
-- Proteção contra injeção
-- Logs seguros
-
-## 📝 Licença
-
-Este projeto é privado e proprietário. Todos os direitos reservados.
-
-## 👥 Suporte
-
-Para suporte, entre em contato através do WhatsApp: (77) 98167-8577
+Este projeto está licenciado sob a MIT License - veja o arquivo [LICENSE](LICENSE) para detalhes.
