@@ -1169,7 +1169,7 @@ class OrderValidationService {
             // Converte para UTC para evitar problemas de timezone
             const orders = await this.nuvemshopService.orderService.getOrders({
                 created_at_min: since.toISOString(),
-                status: ['pending', 'paid', 'authorized']
+                status: ['open', 'paid', 'authorized'] // usando os status corretos da API
             });
 
             if (!orders || !orders.length) {

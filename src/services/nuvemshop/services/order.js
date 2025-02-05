@@ -244,6 +244,22 @@ class OrderService extends NuvemshopBase {
                 params.created_at_min = yesterday.toISOString();
             }
 
+            // Garante que o status esteja no formato correto
+            if (params.status && !Array.isArray(params.status)) {
+                params.status = [params.status];
+            }
+
+            // Mapeia os status para os valores aceitos pela API
+            const statusMapping = {
+                'pending': 'open',
+                'paid': 'paid',
+                'authorized': 'authorized'
+            };
+
+            if (params.status) {
+                params.status = params.status.map(s => statusMapping[s] || s);
+            }
+
             // Log da requisição
             logger.debug('BuscandoPedidos', {
                 parametros: params,
@@ -251,8 +267,17 @@ class OrderService extends NuvemshopBase {
                 timestamp: new Date().toISOString()
             });
 
+            // Configura os headers corretos
+            const headers = {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'Authentication': `bearer ${NUVEMSHOP_CONFIG.token}`,
+                'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
+            };
+
             const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
                 params,
+                headers,
                 timeout: 60000 // 60s timeout
             });
 
