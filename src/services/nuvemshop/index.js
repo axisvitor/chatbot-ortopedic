@@ -20,13 +20,13 @@ class NuvemshopService {
         this.cache = cacheService ? new NuvemshopCache(cacheService) : null;
         
         // Inicializa serviços com dependências
-        this.orderService = new OrderService(cacheService);
-        this.productService = new ProductService(cacheService);
-        this.customerService = new CustomerService(cacheService);
+        this.orderService = new OrderService(this.cacheService);
+        this.productService = new ProductService(this.cacheService);
+        this.customerService = new CustomerService(this.cacheService);
         this.webhookHandler = new WebhookHandler(this.cache);
 
         logger.info('NuvemshopServiceInitialized', {
-            hasCacheService: !!cacheService,
+            hasCacheService: !!this.cacheService,
             timestamp: new Date().toISOString()
         });
     }

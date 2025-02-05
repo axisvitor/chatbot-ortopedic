@@ -10,9 +10,8 @@ const moment = require('moment');
 
 class OrderValidationService {
     constructor(nuvemshopClient = null, whatsAppService = null) {
-        this.nuvemshopService = new NuvemshopService();
         this.redisStore = new RedisStore();
-        this.nuvemshopService.cacheService = this.redisStore;
+        this.nuvemshopService = new NuvemshopService(this.redisStore);
         this.orderApi = new OrderApi(nuvemshopClient || this.nuvemshopService.client);
         this.imageProcessor = new ImageProcessingService();
         this.MAX_ATTEMPTS = 5; // Limite de tentativas por usuário
