@@ -604,63 +604,78 @@ class OpenAIService {
         return response;
     }
 
-    async addMessageAndRun(threadId, message) {
+    async addMessageAndRun(threadId, message, customerId) {
         try {
-            // Valida parâmetros
-            if (!threadId || !message) {
-                throw new Error('ThreadId e message são obrigatórios');
-            }
-
-            if (!message.messageText && !message.content) {
-                throw new Error('Mensagem não pode estar vazia');
-            }
-
-            // Adiciona a mensagem à thread
-            await this.client.beta.threads.messages.create(
-                threadId,
-                { 
-                    role: 'user', 
-                    content: message.messageText || message.content 
-                }
+            // Verifica se há um run ativo
+            const activeRuns = await this.client.beta.threads.runs.list(threadId);
+            const hasActiveRun = activeRuns.data.some(run => 
+                ['queued', 'in_progress', 'requires_action'].includes(run.status)
             );
 
-            // Cancela qualquer run ativo anterior
-            await this.cancelActiveRun(threadId);
-
-            // Executa o assistant e aguarda criação do run
-            const run = await this.runAssistant(threadId);
-            
-            // Verifica se o run foi criado corretamente
-            if (!run || !run.id) {
-                throw new Error('Run não foi criado corretamente');
+            if (hasActiveRun) {
+                logger.warn('🔄 [OpenAI] Run ativo detectado, aguardando conclusão:', {
+                    threadId,
+                    customerId
+                });
+                
+                // Aguarda até que não haja mais runs ativos (máximo 30 segundos)
+                let attempts = 0;
+                while (attempts < 30) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    const currentRuns = await this.client.beta.threads.runs.list(threadId);
+                    const stillHasActiveRun = currentRuns.data.some(run => 
+                        ['queued', 'in_progress', 'requires_action'].includes(run.status)
+                    );
+                    
+                    if (!stillHasActiveRun) {
+                        break;
+                    }
+                    
+                    attempts++;
+                }
+                
+                // Se ainda houver run ativo após 30 segundos, lança erro
+                if (attempts >= 30) {
+                    throw new Error('Timeout aguardando conclusão do run anterior');
+                }
             }
 
-            // Aguarda o registro ser confirmado
-            const hasRun = await this.hasActiveRun(threadId);
-            if (!hasRun) {
-                throw new Error('Falha ao registrar run ativo');
-            }
-
-            return run;
-
-        } catch (error) {
-            logger.error('ErrorAddingMessageAndRun', {
-                error: {
-                    message: error.message,
-                    stack: error.stack
-                },
+            // Adiciona a mensagem e cria novo run
+            const messageResponse = await this.client.beta.threads.messages.create(
                 threadId,
-                timestamp: new Date().toISOString()
+                message
+            );
+
+            logger.info('✉️ [OpenAI] Mensagem adicionada:', {
+                threadId,
+                messageId: messageResponse.id,
+                customerId
+            });
+
+            const run = await this.client.beta.threads.runs.create(
+                threadId,
+                { assistant_id: this.assistantId }
+            );
+
+            logger.info('▶️ [OpenAI] Run iniciado:', {
+                threadId,
+                runId: run.id,
+                customerId
+            });
+
+            return { messageResponse, run };
+        } catch (error) {
+            logger.error('❌ [OpenAI] Erro ao adicionar mensagem e criar run:', {
+                threadId,
+                customerId,
+                error: error.message,
+                stack: error.stack
             });
             throw error;
         }
     }
 
-    /**
-     * Cancela um run ativo
-     * @param {string} threadId - ID do thread
-     * @returns {Promise<void>}
-     */
     async cancelActiveRun(threadId) {
         try {
             const activeRun = await this.redisStore.getActiveRun(threadId);
