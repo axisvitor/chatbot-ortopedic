@@ -143,25 +143,26 @@ async function registerTracking(order) {
             code: order.shipping_tracking,
             carrier: order.shipping_carrier_name || 'Correios',
             customerName: order.customer.name,
-            estimatedDelivery: order.shipping_estimated_delivery
+            estimatedDelivery: order.shipping_estimated_delivery,
+            status: 'pending',
+            events: [],
+            registered: false,
+            registeredAt: null,
+            lastUpdate: null,
+            meta: {
+                orderId: order.id,
+                orderNumber: order.number
+            }
         };
+
+        // Salva no Redis primeiro
+        await redis.saveTrackingCode(trackingData.code, trackingData);
 
         // Registra no 17track
         await track17.registerTrackingNumber(trackingData.code, trackingData.carrier);
 
-        // Salva no Redis
-        const orderKey = `${NUVEMSHOP_CONFIG.cache.prefix.orders}${order.number}`;
-        const orderData = {
-            id: order.id,
-            number: order.number,
-            tracking: {
-                code: trackingData.code,
-                carrier: trackingData.carrier,
-                registeredAt: new Date().toISOString()
-            }
-        };
-
-        await redis.set(orderKey, JSON.stringify(orderData), NUVEMSHOP_CONFIG.cache.ttl.orders);
+        // Marca como registrado
+        await redis.markCodesAsRegistered([trackingData.code]);
 
         logger.info('[Nuvemshop] Código de rastreio registrado com sucesso:', {
             orderId: order.number,

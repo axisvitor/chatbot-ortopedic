@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { RedisStoreSync } = require('../utils/redis-store-sync');
-const { TRACKING_CONFIG } = require('../config/settings');
+const { TRACKING_CONFIG, REDIS_CONFIG } = require('../config/settings');
 
 const router = express.Router();
 const redis = new RedisStoreSync();
@@ -96,19 +96,27 @@ async function processTrackingUpdate(update) {
             return;
         }
 
-        // Salva atualização no Redis
-        const trackingKey = `${TRACKING_CONFIG.cache.prefix}tracking:${update.number}`;
-        const trackingData = {
-            status: update.status,
-            lastUpdate: new Date().toISOString(),
-            events: update.events || [],
-            meta: {
-                source: '17track',
-                webhookReceived: true
-            }
-        };
+        // Atualiza o status no Redis
+        try {
+            const trackingKey = `${REDIS_CONFIG.prefix.tracking.status}${update.number}`;
+            const trackingData = await redis.get(trackingKey);
 
-        await redis.set(trackingKey, JSON.stringify(trackingData), TRACKING_CONFIG.cache.ttl.tracking);
+            if (trackingData) {
+                const data = JSON.parse(trackingData);
+                data.status = update.status;
+                data.events = update.events || [];
+                data.lastUpdate = new Date().toISOString();
+
+                await redis.set(trackingKey, JSON.stringify(data), REDIS_CONFIG.ttl.tracking.status);
+            }
+        } catch (error) {
+            logger.error('[17Track] Erro ao atualizar status no Redis:', {
+                trackingNumber: update.number,
+                error: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+        }
 
         // Verifica se precisa notificar
         if (shouldNotifyUpdate(update)) {

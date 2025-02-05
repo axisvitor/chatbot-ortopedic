@@ -14,7 +14,30 @@ const REDIS_CONFIG = {
     port: parseInt(validateEnvVar('REDIS_PORT', '6379')),
     password: validateEnvVar('REDIS_PASSWORD', ''),
     prefix: {
-        tracking: 'loja:tracking:'
+        tracking: {
+            base: 'loja:tracking:',
+            code: 'loja:tracking:code:',
+            status: 'loja:tracking:status:',
+            batch: 'loja:tracking:batch:',
+            single: 'loja:tracking:single:',
+            sync: {
+                track17: 'loja:tracking:sync:track17:',
+                nuvemshop: 'loja:tracking:sync:nuvemshop:'
+            }
+        },
+        nuvemshop: {
+            orders: 'loja:nuvemshop:orders:'
+        }
+    },
+    ttl: {
+        tracking: {
+            status: 24 * 60 * 60, // 24 horas
+            batch: 30 * 60,       // 30 minutos
+            single: 15 * 60       // 15 minutos
+        },
+        nuvemshop: {
+            orders: 60 * 60       // 1 hora
+        }
     }
 };
 

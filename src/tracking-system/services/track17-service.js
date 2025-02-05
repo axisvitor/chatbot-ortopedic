@@ -51,7 +51,7 @@ class Track17Service {
         }
 
         // Verifica cache primeiro
-        const cacheKey = `${REDIS_CONFIG.prefix.tracking}info`;
+        const cacheKey = `${REDIS_CONFIG.prefix.tracking.sync.track17}info`;
         const cached = await this.cache.get(cacheKey);
         if (cached) {
             logger.info('Usando dados em cache para:', {
@@ -129,7 +129,7 @@ class Track17Service {
             };
 
             // Registra sucesso/falha no cache
-            const cacheKey = `${REDIS_CONFIG.prefix.tracking}register_status`;
+            const cacheKey = `${REDIS_CONFIG.prefix.tracking.sync.track17}register_status`;
             await this.cache.set(
                 cacheKey,
                 result,
@@ -139,6 +139,81 @@ class Track17Service {
             return result;
         } catch (error) {
             this._handleError(error, 'registerForTracking', { trackingNumbers });
+            throw error;
+        }
+    }
+
+    /**
+     * Obtém informações da API
+     */
+    async getApiInfo() {
+        try {
+            // Tenta obter do cache primeiro
+            const cacheKey = `${REDIS_CONFIG.prefix.tracking.sync.track17}info`;
+            const cached = await this.cache.get(cacheKey);
+            if (cached) {
+                return JSON.parse(cached);
+            }
+
+            // Se não estiver em cache, busca da API
+            const response = await this.client.get('/track/v2.2/getapiinfo');
+            const info = response.data;
+
+            // Salva no cache
+            await this.cache.set(cacheKey, JSON.stringify(info), 3600); // 1 hora
+
+            return info;
+        } catch (error) {
+            logger.error('[17Track] Erro ao obter informações da API:', {
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Registra número de rastreio no 17track
+     */
+    async registerTrackingNumber(code, carrier) {
+        try {
+            // Verifica se já está registrado
+            const trackingData = await this.cache.getTrackingCode(code);
+            if (trackingData && trackingData.registered) {
+                logger.info('[17Track] Código já registrado:', { code });
+                return;
+            }
+
+            // Registra no 17track
+            const response = await this.client.post('/track/v2.2/register', {
+                tracking_number: code,
+                carrier_code: carrier.toLowerCase()
+            });
+
+            // Verifica status do registro
+            const cacheKey = `${REDIS_CONFIG.prefix.tracking.sync.track17}register_status`;
+            await this.cache.set(cacheKey, JSON.stringify({
+                code,
+                status: response.data.status,
+                timestamp: new Date().toISOString()
+            }), 3600); // 1 hora
+
+            logger.info('[17Track] Código registrado com sucesso:', {
+                code,
+                carrier,
+                status: response.data.status
+            });
+
+            return response.data;
+        } catch (error) {
+            logger.error('[17Track] Erro ao registrar código:', {
+                code,
+                carrier,
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
             throw error;
         }
     }

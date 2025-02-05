@@ -11,9 +11,9 @@ class Scheduler {
         this.jobs = [];
 
         // Status keys
-        this.statusKeys = {
-            track17: `${REDIS_CONFIG.prefix.tracking}last_track17_sync`,
-            nuvemshop: `${REDIS_CONFIG.prefix.tracking}last_nuvemshop_sync`
+        this.lastSyncKeys = {
+            track17: `${REDIS_CONFIG.prefix.tracking.sync.track17}last_sync`,
+            nuvemshop: `${REDIS_CONFIG.prefix.tracking.sync.nuvemshop}last_sync`
         };
     }
 
@@ -34,7 +34,7 @@ class Scheduler {
                 
                 // Atualiza status com TTL
                 await this.redis.set(
-                    this.statusKeys.track17, 
+                    this.lastSyncKeys.track17, 
                     JSON.stringify({
                         lastSync: new Date().toISOString(),
                         status: 'success'
@@ -54,7 +54,7 @@ class Scheduler {
 
                 // Registra erro com TTL
                 await this.redis.set(
-                    this.statusKeys.track17,
+                    this.lastSyncKeys.track17,
                     JSON.stringify({
                         lastSync: new Date().toISOString(),
                         status: 'error',
@@ -77,7 +77,7 @@ class Scheduler {
                 
                 // Atualiza status com TTL
                 await this.redis.set(
-                    this.statusKeys.nuvemshop,
+                    this.lastSyncKeys.nuvemshop,
                     JSON.stringify({
                         lastSync: new Date().toISOString(),
                         status: 'success'
@@ -97,7 +97,7 @@ class Scheduler {
 
                 // Registra erro com TTL
                 await this.redis.set(
-                    this.statusKeys.nuvemshop,
+                    this.lastSyncKeys.nuvemshop,
                     JSON.stringify({
                         lastSync: new Date().toISOString(),
                         status: 'error',
@@ -133,8 +133,8 @@ class Scheduler {
     async getSyncStatus() {
         try {
             const [track17Status, nuvemshopStatus] = await Promise.all([
-                this.redis.get(this.statusKeys.track17),
-                this.redis.get(this.statusKeys.nuvemshop)
+                this.redis.get(this.lastSyncKeys.track17),
+                this.redis.get(this.lastSyncKeys.nuvemshop)
             ]);
 
             return {
