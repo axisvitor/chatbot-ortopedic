@@ -5,13 +5,26 @@ const { logger } = require('./logger');
 class DatabaseService {
     constructor() {
         this.dbPath = path.join(__dirname, '../../data/tracking_data.json');
+        this.ensureDirectoryExists();
+    }
+
+    async ensureDirectoryExists() {
+        try {
+            await fs.mkdir(path.dirname(this.dbPath), { recursive: true });
+            logger.info('Diretório de dados criado/verificado com sucesso:', {
+                path: path.dirname(this.dbPath)
+            });
+        } catch (error) {
+            logger.error('Erro ao criar diretório de dados:', {
+                error: error.message,
+                path: path.dirname(this.dbPath)
+            });
+            throw error;
+        }
     }
 
     async saveTrackingData(trackingUpdates) {
         try {
-            // Garante que o diretório existe
-            await fs.mkdir(path.dirname(this.dbPath), { recursive: true });
-
             // Lê dados existentes
             let existingData = [];
             try {

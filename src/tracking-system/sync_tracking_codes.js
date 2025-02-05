@@ -1,5 +1,6 @@
 require('dotenv').config({ path: '../../../.env' });
 const { RedisStoreSync } = require('./utils/redis-store-sync');
+const DatabaseService = require('./utils/database-service');
 const axios = require('axios');
 const logger = require('./utils/logger');
 const { NUVEMSHOP_CONFIG } = require('../../config/settings');
@@ -8,6 +9,7 @@ const { TrackingServiceSync } = require('./services/tracking-service-sync');
 class NuvemshopTrackingSync {
     constructor() {
         this.redis = new RedisStoreSync();
+        this.database = new DatabaseService();
         this.config = NUVEMSHOP_CONFIG;
         
         if (!this.config.accessToken || !this.config.userId || !this.config.apiUrl) {
@@ -99,33 +101,46 @@ class NuvemshopTrackingSync {
             
             const trackingCodes = new Set();
             let totalProcessed = 0;
-            
+            const trackingUpdates = [];
+
             for (const order of orders) {
-                if (order.shipping_tracking) {
-                    trackingCodes.add(order.shipping_tracking);
-                    totalProcessed++;
-                    
-                    // Cache do código de rastreio com TTL configurável
+                if (order.shipping_tracking_number) {
+                    const trackingData = {
+                        orderId: order.id,
+                        orderNumber: order.number,
+                        trackingCode: order.shipping_tracking_number,
+                        trackingUrl: order.shipping_tracking_url || null,
+                        updatedAt: new Date().toISOString(),
+                        status: order.shipping_status || 'pending'
+                    };
+
+                    // Salva no Redis para cache
                     await this.redis.set(
-                        `${this.config.cache.prefix}tracking:${order.shipping_tracking}`,
-                        {
-                            orderId: order.number,
-                            status: order.status,
-                            tracking: order.shipping_tracking,
-                            updatedAt: new Date().toISOString()
-                        },
-                        this.config.cache.ttl.orders.details
+                        `${this.config.cache.prefix}tracking:${order.id}`,
+                        trackingData,
+                        this.config.cache.ttl.tracking.codes
                     );
+
+                    trackingCodes.add(order.shipping_tracking_number);
+                    trackingUpdates.push(trackingData);
+                    totalProcessed++;
                 }
             }
-            
-            logger.info('Sincronização finalizada:', {
-                totalOrders: orders.length,
-                totalProcessed,
-                uniqueTrackingCodes: trackingCodes.size
+
+            // Salva no arquivo JSON para persistência de longo prazo
+            if (trackingUpdates.length > 0) {
+                await this.database.saveTrackingData(trackingUpdates);
+            }
+
+            logger.info('Sincronização concluída:', {
+                totalProcessados: totalProcessed,
+                codigosUnicos: trackingCodes.size
             });
-            
-            return Array.from(trackingCodes);
+
+            return {
+                processed: totalProcessed,
+                uniqueCodes: trackingCodes.size
+            };
             
         } catch (error) {
             logger.error('Erro na sincronização:', {
