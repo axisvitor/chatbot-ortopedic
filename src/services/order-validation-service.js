@@ -7,12 +7,12 @@ const { NuvemshopService } = require('./nuvemshop');
 const { ImageProcessingService } = require('./image-processing-service');
 const { FinancialService } = require('./financial-service');
 const moment = require('moment');
+const logger = require('../utils/logger');
 
 class OrderValidationService {
     constructor(nuvemshopClient = null, whatsAppService = null) {
         this.redisStore = new RedisStore();
-        this.nuvemshopService = new NuvemshopService(this.redisStore);
-        this.orderApi = new OrderApi(nuvemshopClient || this.nuvemshopService.client);
+        this.orderApi = new OrderApi(nuvemshopClient);
         this.imageProcessor = new ImageProcessingService();
         this.MAX_ATTEMPTS = 5; // Limite de tentativas por usuário
         this.BLOCK_TIME = 1800; // 30 minutos em segundos
@@ -22,6 +22,23 @@ class OrderValidationService {
         this.whatsAppService = whatsAppService;
         this.trackingService = whatsAppService ? new TrackingService(whatsAppService) : null;
         this.financialService = new FinancialService(whatsAppService);
+    }
+
+    async initialize() {
+        try {
+            // Conecta ao Redis
+            await this.redisStore.connect();
+            logger.info('[OrderValidation] RedisStore conectado');
+
+            // Inicializa serviços que dependem do Redis
+            this.nuvemshopService = new NuvemshopService(this.redisStore);
+            logger.info('[OrderValidation] NuvemshopService inicializado com Redis');
+
+            return true;
+        } catch (error) {
+            logger.error('[OrderValidation] Erro ao inicializar:', error);
+            throw error;
+        }
     }
 
     /**

@@ -50,16 +50,16 @@ class RedisStore {
 
     async _connect() {
         try {
-            if (!this.client.isOpen) {
-                await this.client.connect();
-            }
-            // Verifica se realmente está conectado
-            await this.ping();
-            console.log('[Redis] Conexão estabelecida e verificada');
+            await this.client.connect();
+            console.log('[Redis] Conectado com sucesso');
         } catch (error) {
             console.error('[Redis] Erro ao conectar:', error);
             throw error;
         }
+    }
+
+    isConnected() {
+        return this.client && this.client.isOpen;
     }
 
     async connect() {
@@ -98,10 +98,6 @@ class RedisStore {
             console.error('[Redis] Erro ao fazer ping no Redis:', error);
             return false;
         }
-    }
-
-    isConnected() {
-        return this.client && this.client.isOpen;
     }
 
     async get(key) {

@@ -162,6 +162,7 @@ async function initializeServices() {
 
             // Reinicializa serviços com dependência do WhatsApp
             orderValidationService = new OrderValidationService(nuvemshopService, whatsappService);
+            await orderValidationService.initialize();
             console.log('✅ OrderValidationService reinicializado com dependências');
 
             financialService = new FinancialService(whatsappService);

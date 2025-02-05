@@ -11,9 +11,16 @@ class NuvemshopBase {
         this.cacheService = cacheService;
         this.config = NUVEMSHOP_CONFIG;
 
+        // Verifica se o cacheService está conectado
+        if (cacheService && cacheService.isConnected && cacheService.isConnected()) {
+            this.cache = new NuvemshopCache(cacheService);
+            logger.info('[NuvemshopBase] Cache inicializado com sucesso');
+        } else {
+            this.cache = null;
+            logger.warn('[NuvemshopBase] Cache não inicializado - Redis não conectado');
+        }
+
         this.httpClient = new NuvemshopHttpClient();
-        // Inicializa o cache com o serviço fornecido
-        this.cache = cacheService ? new NuvemshopCache(cacheService) : null;
         this.client = this.httpClient.getClient();
 
         // Inicializa cliente HTTP
