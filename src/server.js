@@ -18,9 +18,9 @@ const {
     OpenAIVisionService,
     FinancialService,
     DepartmentService,
-    CacheService,
-    TrackingServiceSync
+    CacheService
 } = require('./services');
+const { TrackingServiceSync } = require('./tracking-system/services/tracking-service-sync');
 const cron = require('node-cron');
 const logger = console;
 
