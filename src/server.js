@@ -18,9 +18,9 @@ const {
     OpenAIVisionService,
     FinancialService,
     DepartmentService,
-    CacheService
+    CacheService,
+    TrackingService
 } = require('./services');
-const { TrackingServiceSync } = require('./tracking-system/services/tracking-service-sync');
 const cron = require('node-cron');
 const logger = console;
 
@@ -152,8 +152,8 @@ async function initializeServices() {
             });
 
             // Tracking usa seu próprio RedisStoreSync
-            trackingService = new TrackingServiceSync();
-            logger.info('[Server] TrackingService inicializado com RedisStoreSync', {
+            trackingService = new TrackingService();
+            logger.info('[Server] TrackingService inicializado', {
                 timestamp: new Date().toISOString()
             });
 

@@ -141,36 +141,61 @@ class TrackingService {
         try {
             console.log('🔍 [Tracking] Consultando status:', { trackingNumber });
 
+            // Verifica se o número de rastreio é válido
+            if (!trackingNumber || typeof trackingNumber !== 'string') {
+                throw new Error('Número de rastreio inválido ou não fornecido');
+            }
+
             const data = [
                 {
-                    number: trackingNumber
-                    // Sem especificar carrier para usar detecção automática
+                    number: trackingNumber,
+                    carrier: '2151' // Código dos Correios
                 }
             ];
             
             const response = await this._makeRequest(this.config.paths.status, data);
             
+            // Verifica se a resposta é válida
+            if (!response || !response.data || response.data.code !== 0) {
+                const errorMessage = response?.data?.data?.errors?.[0]?.message || 'Dados de rastreamento não encontrados';
+                console.error('❌ [Tracking] Erro na resposta da API:', {
+                    trackingNumber,
+                    error: errorMessage,
+                    responseCode: response?.data?.code
+                });
+                throw new Error(errorMessage);
+            }
+
             // Limpa e simplifica os dados antes de logar
             const cleanedData = this._cleanTrackingData(response);
             
+            if (!cleanedData) {
+                throw new Error('Não foi possível processar os dados de rastreamento');
+            }
+
             // Log apenas dos dados relevantes
             console.log('📦 [Tracking] Dados do rastreamento:', {
                 trackingNumber,
                 status: cleanedData?.status,
                 latestEvent: cleanedData?.latest_event
             });
-
-            if (!cleanedData) {
-                throw new Error('Dados de rastreamento não encontrados ou inválidos');
-            }
             
             return cleanedData;
         } catch (error) {
             console.error('❌ [Tracking] Erro ao consultar status:', {
                 trackingNumber,
-                error: error.message
+                error: error.message,
+                stack: error.stack
             });
-            throw error;
+
+            // Retorna um objeto de erro mais informativo
+            return {
+                error: true,
+                message: error.message,
+                status: 'error',
+                trackingNumber,
+                timestamp: new Date().toISOString()
+            };
         }
     }
 
@@ -662,7 +687,7 @@ class TrackingService {
 
             const response = await this._makeRequest(this.config.paths.status, data);
             
-            if (!response || response.code !== 0 || !response.data || !response.data.accepted) {
+            if (!response || response.code !== 0 || !response.data || response.data.code !== 0) {
                 throw new Error('Resposta inválida da API');
             }
 
