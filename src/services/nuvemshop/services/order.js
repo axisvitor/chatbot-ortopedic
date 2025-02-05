@@ -223,56 +223,94 @@ class OrderService extends NuvemshopBase {
     }
 
     /**
-     * Busca pedidos com paginação
-     * @param {Object} options - Opções de busca
-     * @returns {Promise<Object>} Pedidos e informações de paginação
+     * Busca pedidos com filtros
+     * @param {Object} params - Parâmetros de busca
+     * @returns {Promise<Array>} Lista de pedidos
      */
-    async getOrders(options = {}) {
+    async getOrders(params = {}) {
         try {
-            const cacheKey = this.generateCacheKey('orders', 'list', options);
-            const cachedData = await this.getCachedData(cacheKey);
-            if (cachedData) {
-                return cachedData;
+            // Validação e ajuste da data created_at_min
+            if (params.created_at_min) {
+                const createdAtMin = new Date(params.created_at_min);
+                const now = new Date();
+                
+                // Se a data for inválida, usa a data atual
+                if (isNaN(createdAtMin.getTime())) {
+                    logger.warn('DataInvalida', {
+                        dataOriginal: params.created_at_min,
+                        dataNormalizada: now.toISOString(),
+                        timestamp: now.toISOString()
+                    });
+                    params.created_at_min = now.toISOString();
+                } else if (createdAtMin > now) {
+                    logger.warn('DataFuturaNormalizadaParaHoje', {
+                        dataOriginal: params.created_at_min,
+                        dataNormalizada: now.toISOString(),
+                        timestamp: now.toISOString()
+                    });
+                    params.created_at_min = now.toISOString();
+                }
             }
 
-            const params = {
-                page: options.page || 1,
-                per_page: Math.min(options.per_page || 50, 200),
-                ...options
-            };
-
-            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, { params });
-            
-            const data = {
-                data: response.data,
-                pagination: {
-                    total: parseInt(response.headers['x-total-count'] || 0),
-                    currentPage: params.page,
-                    perPage: params.per_page,
-                    links: this.parseLinkHeader(response.headers.link)
-                }
-            };
-
-            await this.setCachedData(cacheKey, data, NUVEMSHOP_CONFIG.cache.ordersTtl);
-
-            return data;
-        } catch (error) {
-            logger.error('[Nuvemshop] Erro ao obter pedidos:', {
-                erro: error.message,
-                status: error.response?.status,
-                data: error.response?.data,
-                options,
+            // Log da requisição
+            logger.debug('BuscandoPedidos', {
+                parametros: params,
                 timestamp: new Date().toISOString()
             });
 
-            // Se for erro 500, tenta novamente após 5 segundos
+            const response = await this.client.get(`/${NUVEMSHOP_CONFIG.userId}/orders`, {
+                params,
+                timeout: 60000 // Aumenta timeout para 60s
+            });
+
+            // Log de sucesso
+            logger.info('PedidosEncontrados', {
+                quantidade: Array.isArray(response.data) ? response.data.length : 0,
+                parametros: params,
+                timestamp: new Date().toISOString()
+            });
+
+            return response.data;
+        } catch (error) {
+            // Extrai informações relevantes do erro
+            const errorInfo = {
+                message: error.message,
+                status: error.response?.status,
+                data: error.response?.data,
+                params: params,
+                timestamp: new Date().toISOString()
+            };
+
+            // Log específico baseado no tipo de erro
             if (error.response?.status === 500) {
-                logger.info('[Nuvemshop] Tentando novamente em 5 segundos...');
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                return this.getOrders(options);
+                logger.error('ErroInternoNuvemshop', {
+                    ...errorInfo,
+                    sugestao: 'Verificar status da API da Nuvemshop e tentar novamente em alguns minutos'
+                });
+            } else if (error.response?.status === 429) {
+                logger.error('ErroLimiteRequisicoes', {
+                    ...errorInfo,
+                    limite: error.response.headers['x-rate-limit-limit'],
+                    restante: error.response.headers['x-rate-limit-remaining'],
+                    reset: error.response.headers['x-rate-limit-reset']
+                });
+            } else if (!error.response) {
+                logger.error('ErroConexaoNuvemshop', {
+                    ...errorInfo,
+                    code: error.code
+                });
+            } else {
+                logger.error('ErroBuscarPedidos', errorInfo);
             }
 
-            throw error;
+            // Trata o erro de forma mais amigável
+            const enhancedError = new Error(`Erro ao buscar pedidos: ${error.message}`);
+            enhancedError.originalError = error;
+            enhancedError.status = error.response?.status;
+            enhancedError.data = error.response?.data;
+            enhancedError.params = params;
+
+            throw enhancedError;
         }
     }
 
