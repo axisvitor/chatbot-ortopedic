@@ -124,9 +124,15 @@ async function initializeServices() {
             businessHoursService = new BusinessHoursService();
             console.log('✅ BusinessHoursService inicializado');
 
-            nuvemshopService = new NuvemshopService(cacheService);
-            console.log('✅ NuvemshopService inicializado');
+            // Serviços que dependem do cache
+            nuvemshopService = new NuvemshopService(redisStore); // Passando redisStore diretamente
+            console.log('✅ NuvemshopService inicializado com RedisStore');
 
+            // Tracking usa seu próprio RedisStoreSync
+            trackingService = new TrackingServiceSync();
+            console.log('✅ TrackingService inicializado com RedisStoreSync');
+
+            // Outros serviços independentes
             groqServices = new GroqServices();
             console.log('✅ GroqServices inicializado');
 
@@ -155,9 +161,6 @@ async function initializeServices() {
             console.log('✅ MediaManager atualizado com AudioService');
 
             // Reinicializa serviços com dependência do WhatsApp
-            trackingService = new TrackingServiceSync();
-            console.log('✅ TrackingService reinicializado');
-
             orderValidationService = new OrderValidationService(nuvemshopService, whatsappService);
             console.log('✅ OrderValidationService reinicializado com dependências');
 

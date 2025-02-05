@@ -1,6 +1,6 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
-const { CacheServiceSync } = require('./cache-service-sync');
+const { RedisStoreSync } = require('../utils/redis-store-sync');
 const { TRACKING_CONFIG, REDIS_CONFIG } = require('../config/settings');
 
 class TrackingServiceSync {
@@ -71,11 +71,11 @@ class TrackingServiceSync {
 
     constructor() {
         this.config = TRACKING_CONFIG;
-        this.cache = new CacheServiceSync();
+        this.redis = new RedisStoreSync();
         
         if (!this.config.apiKey) {
             logger.error('API Key do 17track não configurada!');
-            throw new Error('TRACK17_API_KEY é obrigatório');
+            throw new Error('API Key do 17track não configurada!');
         }
     }
 
@@ -84,7 +84,7 @@ class TrackingServiceSync {
             logger.info(`[Tracking] Consultando status para: ${trackingNumber}`);
             
             // Verifica no cache primeiro
-            const cached = await this.cache.get(`tracking:${trackingNumber}`);
+            const cached = await this.redis.get(`tracking:${trackingNumber}`);
             if (cached) {
                 logger.info(`[Tracking] Usando dados do cache para ${trackingNumber}`);
                 return cached;
@@ -145,7 +145,7 @@ class TrackingServiceSync {
             };
 
             // Salva no cache por 30 minutos
-            await this.cache.set(`tracking:${trackingNumber}`, result, 1800);
+            await this.redis.set(`tracking:${trackingNumber}`, result, 1800);
             
             return result;
             
@@ -212,7 +212,7 @@ class TrackingServiceSync {
             
             // Busca todos os códigos de rastreio no cache
             const pattern = `${REDIS_CONFIG.prefix.tracking}*`;
-            const keys = await this.cache.getKeys(pattern);
+            const keys = await this.redis.getKeys(pattern);
             
             if (!keys || keys.length === 0) {
                 logger.info('[Tracking] Nenhum código de rastreio encontrado para atualizar');
