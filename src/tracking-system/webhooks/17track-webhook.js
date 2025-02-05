@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { RedisStoreSync } = require('../utils/redis-store-sync');
-const { TRACKING_CONFIG } = require('../config/settings');
+const { TRACKING_CONFIG } = require('./config/settings');
 
 const router = express.Router();
 const redis = new RedisStoreSync();

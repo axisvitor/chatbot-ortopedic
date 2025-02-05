@@ -18,15 +18,6 @@ const REDIS_CONFIG = {
     }
 };
 
-// Configurações do WhatsApp
-const WHATSAPP_CONFIG = {
-    apiUrl: validateEnvVar('WHATSAPP_API_URL'),
-    apiKey: validateEnvVar('WHATSAPP_API_KEY'),
-    templates: {
-        tracking: validateEnvVar('WHATSAPP_TRACKING_TEMPLATE', 'tracking_update')
-    }
-};
-
 // Configurações da Nuvemshop
 const NUVEMSHOP_CONFIG = {
     apiUrl: validateEnvVar('NUVEMSHOP_API_URL'),
@@ -76,6 +67,5 @@ const TRACKING_CONFIG = {
 module.exports = {
     REDIS_CONFIG,
     TRACKING_CONFIG,
-    WHATSAPP_CONFIG,
     NUVEMSHOP_CONFIG
 };
