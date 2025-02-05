@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const { Track17Sync, NuvemshopTrackingSync } = require('./index');
 const logger = require('./utils/logger');
 const { RedisStore } = require('./utils/redis-store');
-const { REDIS_CONFIG } = require('../config/settings');
+const { REDIS_CONFIG } = require('../../config/settings');
 
 class Scheduler {
     constructor() {

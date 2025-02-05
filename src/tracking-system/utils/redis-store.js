@@ -2,7 +2,7 @@ const { createClient } = require('redis');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../../../.env') });
 const logger = require('./logger');
-const { REDIS_CONFIG } = require('../../../config/settings');
+const { REDIS_CONFIG } = require('../../config/settings');
 
 class RedisStore {
     constructor() {

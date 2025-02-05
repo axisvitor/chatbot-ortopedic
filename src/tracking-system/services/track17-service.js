@@ -1,7 +1,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const { CacheService } = require('./cache-service');
-const { TRACKING_CONFIG, REDIS_CONFIG } = require('../../config/settings');
+const { TRACKING_CONFIG, REDIS_CONFIG } = require('../../../config/settings');
 
 class Track17Service {
     constructor() {

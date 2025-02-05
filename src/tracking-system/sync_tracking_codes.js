@@ -2,7 +2,7 @@ require('dotenv').config({ path: '../../../.env' });
 const { RedisStore } = require('./utils/redis-store');
 const axios = require('axios');
 const logger = require('./utils/logger');
-const { NUVEMSHOP_CONFIG } = require('../config/settings');
+const { NUVEMSHOP_CONFIG } = require('../../config/settings');
 
 class NuvemshopTrackingSync {
     constructor() {

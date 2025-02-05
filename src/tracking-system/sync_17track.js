@@ -2,7 +2,7 @@ const { Track17Service } = require('./services/track17-service');
 const { Track17PushService } = require('./services/track17-push');
 const { RedisStore } = require('./utils/redis-store');
 const logger = require('./utils/logger');
-const { TRACKING_CONFIG, REDIS_CONFIG } = require('../config/settings');
+const { TRACKING_CONFIG, REDIS_CONFIG } = require('./config/settings');
 
 class Track17Sync {
     constructor() {
