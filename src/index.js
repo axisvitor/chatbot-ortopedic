@@ -29,7 +29,15 @@ const {
     // Nuvemshop APIs
     NuvemshopAPIBase,
     NuvemshopOrderAPI,
-    NuvemshopProductAPI
+    NuvemshopProductAPI,
+
+    // Tracking System
+    Track17Service,
+    Track17PushService,
+    TrackingServiceSync,
+    Track17Sync,
+    NuvemshopTrackingSync,
+    Scheduler
 } = require('./services');
 
 // Store
@@ -103,6 +111,14 @@ module.exports = {
     isValidBase64Image,
     Queue,
     decryptMedia,
+
+    // Tracking System
+    Track17Service,
+    Track17PushService,
+    TrackingServiceSync,
+    Track17Sync,
+    NuvemshopTrackingSync,
+    Scheduler,
     
     // Configurations
     REDIS_CONFIG,
