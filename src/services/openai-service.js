@@ -909,21 +909,33 @@ class OpenAIService {
             const pendingOrder = await this.redisStore.get(`openai:pending_order:${threadId}`);
             
             if (!waiting || waiting !== 'payment_proof') {
-                return 'Não há solicitação de comprovante pendente. Por favor, primeiro me informe o número do pedido.';
+                return {
+                    found: false,
+                    message: 'Não há solicitação de comprovante pendente. Por favor, primeiro me informe o número do pedido.'
+                };
             }
 
             if (pendingOrder && orderNumber && pendingOrder !== orderNumber) {
-                return ` O número do pedido informado (#${orderNumber}) é diferente do pedido pendente (#${pendingOrder}). Por favor, confirme o número correto do pedido.`;
+                return {
+                    error: true,
+                    message: ` O número do pedido informado (#${orderNumber}) é diferente do pedido pendente (#${pendingOrder}). Por favor, confirme o número correto do pedido.`
+                };
             }
 
             if (!image) {
-                return ' Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.';
+                return {
+                    error: true,
+                    message: ' Não recebi nenhuma imagem. Por favor, envie uma foto clara do comprovante de pagamento.'
+                };
             }
 
             // Validar o pedido
             const order = await this.nuvemshopService.getOrderByNumber(orderNumber);
             if (!order) {
-                return ` Não encontrei o pedido #${orderNumber}. Por favor, verifique o número e tente novamente.`;
+                return {
+                    error: true,
+                    message: `Pedido #${orderNumber} não encontrado. Por favor, verifique o número e tente novamente.`
+                };
             }
 
             // Processar o comprovante
@@ -938,7 +950,10 @@ class OpenAIService {
             // Limpar o comprovante pendente após processamento
             await this.redisStore.del(`openai:pending_proof:${threadId}`);
 
-            return ' Comprovante recebido! Nosso time irá analisar e confirmar o pagamento em breve.';
+            return {
+                error: false,
+                message: ' Comprovante recebido! Nosso time irá analisar e confirmar o pagamento em breve.'
+            };
         } catch (error) {
             logger.error('ErrorProcessingPaymentProof', { threadId, orderNumber, error });
             throw error;
@@ -1404,7 +1419,7 @@ class OpenAIService {
 
             // Adiciona a mensagem e cria um novo run
             const response = await this.addMessageAndRun(
-                threadId, 
+                threadId,
                 { content: messageData.messageText },
                 messageData.customerId
             );
@@ -1423,6 +1438,116 @@ class OpenAIService {
                 customerId: messageData.customerId,
                 messageId: messageData.messageId,
                 timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Aguarda a resposta do assistant
+     * @private
+     * @param {Object} run - Objeto do run
+     * @param {string} threadId - ID da thread
+     * @returns {Promise<string>} Resposta do assistant
+     */
+    async _waitForResponse(run, threadId) {
+        let attempts = 0;
+        const maxAttempts = 30;
+        const delayMs = 1000;
+
+        while (attempts < maxAttempts) {
+            try {
+                const runStatus = await this.client.beta.threads.runs.retrieve(
+                    threadId,
+                    run.id
+                );
+
+                switch (runStatus.status) {
+                    case 'completed':
+                        // Busca a última mensagem do assistente
+                        const messages = await this.client.beta.threads.messages.list(threadId);
+                        const lastMessage = messages.data[0];
+                        
+                        if (!lastMessage) {
+                            throw new Error('Nenhuma mensagem encontrada na resposta do assistente');
+                        }
+
+                        // Extrai o texto da mensagem
+                        let messageText = '';
+                        for (const content of lastMessage.content) {
+                            if (content.type === 'text') {
+                                messageText = content.text.value;
+                                break;
+                            }
+                        }
+
+                        return messageText;
+
+                    case 'failed':
+                        throw new Error(`Run falhou: ${runStatus.last_error?.message || 'Erro desconhecido'}`);
+
+                    case 'expired':
+                        throw new Error('Run expirou');
+
+                    case 'requires_action':
+                        if (runStatus.required_action?.type === 'submit_tool_outputs') {
+                            await this.handleToolCalls(runStatus, threadId);
+                        }
+                        break;
+
+                    default:
+                        // Continua aguardando
+                        attempts++;
+                        await new Promise(resolve => setTimeout(resolve, delayMs));
+                }
+            } catch (error) {
+                logger.error('❌ [OpenAI] Erro ao aguardar resposta:', {
+                    threadId,
+                    runId: run.id,
+                    error: error.message,
+                    stack: error.stack
+                });
+                throw error;
+            }
+        }
+
+        throw new Error('Timeout aguardando resposta do assistant');
+    }
+
+    /**
+     * Processa uma mensagem do cliente para gerar uma resposta personalizada
+     * @param {string} customerId - ID do cliente
+     * @param {string} message - Mensagem do cliente
+     * @returns {Promise<string>} Resposta personalizada
+     */
+    async processCustomerMessage(customerId, message) {
+        try {
+            const threadId = await this._getThreadId(customerId);
+            
+            logger.info('👤 [OpenAI] Processando mensagem do cliente:', {
+                customerId,
+                threadId,
+                messageLength: message?.length
+            });
+
+            const response = await this.addMessageAndRun(
+                threadId,
+                { content: message },
+                customerId
+            );
+
+            logger.info('✅ [OpenAI] Resposta gerada:', {
+                customerId,
+                threadId,
+                responseLength: response?.length
+            });
+
+            return response;
+        } catch (error) {
+            logger.error('❌ [OpenAI] Erro ao processar mensagem do cliente:', {
+                customerId,
+                error: error.message,
+                stack: error.stack
             });
             throw error;
         }
