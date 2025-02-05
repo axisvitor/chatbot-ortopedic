@@ -805,49 +805,27 @@ class TrackingService {
         }
     }
 
-    // Atualiza o status de todos os códigos de rastreio
-    async updateAllTrackingStatus() {
+    async _updateWaitingTime(trackingNumber) {
         try {
-            // Busca todos os códigos de rastreio no Redis
-            const pattern = `${REDIS_CONFIG.prefix.tracking}*`;
-            const keys = await this.redisStore.keys(pattern);
-            
-            if (!keys || keys.length === 0) {
-                console.log('ℹ️ Nenhum código de rastreio encontrado para atualizar');
-                return;
-            }
-
-            console.log(`📦 Atualizando ${keys.length} códigos de rastreio...`);
-            
-            // Processa em lotes de 40 (limite da API)
-            const batchSize = 40;
-            for (let i = 0; i < keys.length; i += batchSize) {
-                const batch = keys.slice(i, i + batchSize);
-                const trackingNumbers = [];
-                
-                // Extrai números de rastreio das chaves
-                for (const key of batch) {
-                    const trackingNumber = key.split(':').pop();
-                    if (trackingNumber) {
-                        trackingNumbers.push(trackingNumber);
-                    }
-                }
-                
-                // Atualiza o lote
-                if (trackingNumbers.length > 0) {
-                    await this.updateTrackingStatus(trackingNumbers);
-                    // Aguarda 1 segundo entre lotes para não sobrecarregar a API
-                    if (i + batchSize < keys.length) {
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
-            }
-            
-            console.log('✅ Atualização de status concluída');
+            const key = `${REDIS_CONFIG.prefix.waiting_since}${trackingNumber}`;
+            await this.redisStore.set(key, Date.now(), REDIS_CONFIG.ttl.tracking);
         } catch (error) {
-            console.error('❌ Erro ao atualizar status:', error);
-            throw error;
+            console.error('❌ [Tracking] Erro ao registrar tempo de espera:', error);
         }
+    }
+
+    async _getWaitingTime(trackingNumber) {
+        try {
+            const key = `${REDIS_CONFIG.prefix.waiting_since}${trackingNumber}`;
+            return await this.redisStore.get(key) || 0;
+        } catch (error) {
+            console.error('❌ [Tracking] Erro ao obter tempo de espera:', error);
+            return 0;
+        }
+    }
+
+    _getCacheKey(trackingNumber) {
+        return `${REDIS_CONFIG.prefix.tracking}${trackingNumber}`;
     }
 }
 

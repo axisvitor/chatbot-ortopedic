@@ -1,7 +1,15 @@
 const cron = require('node-cron');
 const { logger } = require('./utils/logger');
+const { Track17Service } = require('./services/track17-service');
+const { Track17PushService } = require('./services/track17-push');
+const { TrackingServiceSync } = require('./services/tracking-service-sync');
+const { Track17Sync } = require('./sync_17track');
+const { NuvemshopTrackingSync } = require('./sync_tracking_codes');
 const NuvemshopService = require('../services/nuvemshop');
 const TrackingService = require('./services/tracking-service');
+const { CacheService } = require('./services/cache-service');
+const { RedisStore } = require('./utils/redis-store');
+const { Scheduler } = require('./scheduler');
 
 class TrackingSystem {
     constructor() {
@@ -39,6 +47,23 @@ class TrackingSystem {
     }
 }
 
-// Inicia o sistema
-const trackingSystem = new TrackingSystem();
-trackingSystem.startScheduler();
+// Exporta todos os módulos
+module.exports = {
+    TrackingSystem,
+    Track17Service,
+    Track17PushService,
+    TrackingServiceSync,
+    Track17Sync,
+    NuvemshopTrackingSync,
+    NuvemshopService,
+    TrackingService,
+    CacheService,
+    RedisStore,
+    Scheduler
+};
+
+// Inicia o sistema apenas se este arquivo for executado diretamente
+if (require.main === module) {
+    const trackingSystem = new TrackingSystem();
+    trackingSystem.startScheduler();
+}

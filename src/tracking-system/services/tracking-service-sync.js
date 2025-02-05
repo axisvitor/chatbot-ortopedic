@@ -3,7 +3,7 @@ const logger = require('../utils/logger');
 const { CacheService } = require('./cache-service');
 const { TRACKING_CONFIG } = require('../../config/settings');
 
-class TrackingService {
+class TrackingServiceSync {
     // Status emojis para cada estado do rastreamento
     static STATUS_EMOJIS = {
         'not_found': '❓',       // Não encontrado
@@ -118,7 +118,7 @@ class TrackingService {
             let normalizedStatus = 'unknown';
 
             // Encontra o status normalizado
-            for (const [status, patterns] of Object.entries(TrackingService.STATUS_MAPPING)) {
+            for (const [status, patterns] of Object.entries(TrackingServiceSync.STATUS_MAPPING)) {
                 if (patterns.some(pattern => rawStatus.includes(pattern))) {
                     normalizedStatus = status;
                     break;
@@ -204,6 +204,57 @@ class TrackingService {
         
         throw lastError;
     }
+
+    // Atualiza o status de todos os códigos de rastreio
+    async updateAllTrackingStatus() {
+        try {
+            logger.info('[Tracking] Iniciando atualização em massa dos status de rastreamento');
+            
+            // Busca todos os códigos de rastreio no cache
+            const pattern = `${REDIS_CONFIG.prefix.tracking}*`;
+            const keys = await this.cache.getKeys(pattern);
+            
+            if (!keys || keys.length === 0) {
+                logger.info('[Tracking] Nenhum código de rastreio encontrado para atualizar');
+                return;
+            }
+
+            logger.info(`[Tracking] Atualizando ${keys.length} códigos de rastreio`);
+            
+            // Processa em lotes de 40 (limite da API)
+            const batchSize = 40;
+            for (let i = 0; i < keys.length; i += batchSize) {
+                const batch = keys.slice(i, i + batchSize);
+                const trackingNumbers = [];
+                
+                // Extrai números de rastreio das chaves
+                for (const key of batch) {
+                    const trackingNumber = key.split(':').pop();
+                    if (trackingNumber) {
+                        trackingNumbers.push(trackingNumber);
+                    }
+                }
+                
+                // Atualiza o lote
+                if (trackingNumbers.length > 0) {
+                    await this.getTrackingInfo(trackingNumbers);
+                    
+                    // Aguarda 1 segundo entre lotes para não sobrecarregar a API
+                    if (i + batchSize < keys.length) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                }
+
+                logger.info(`[Tracking] Processados ${Math.min(i + batchSize, keys.length)}/${keys.length} códigos`);
+            }
+            
+            logger.info('[Tracking] Atualização em massa concluída com sucesso');
+            
+        } catch (error) {
+            logger.error('[Tracking] Erro ao atualizar status em massa:', error);
+            throw error;
+        }
+    }
 }
 
-module.exports = { TrackingService };
+module.exports = { TrackingServiceSync };

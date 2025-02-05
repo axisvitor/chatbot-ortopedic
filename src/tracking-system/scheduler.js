@@ -1,6 +1,5 @@
 const cron = require('node-cron');
-const { Track17Sync } = require('./sync_17track');
-const { NuvemshopTrackingSync } = require('./sync_tracking_codes');
+const { Track17Sync, NuvemshopTrackingSync } = require('./index');
 const logger = require('./utils/logger');
 const { RedisStore } = require('./utils/redis-store');
 const { REDIS_CONFIG } = require('../config/settings');

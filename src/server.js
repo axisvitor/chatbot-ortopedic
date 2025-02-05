@@ -4,7 +4,6 @@ const rateLimit = require('express-rate-limit');
 const { RedisStore } = require('./store/redis-store');
 const { 
     WhatsAppService,
-    TrackingService,
     OrderValidationService,
     GroqServices,
     AudioService,
@@ -21,6 +20,7 @@ const {
     DepartmentService,
     CacheService
 } = require('./services');
+const { TrackingServiceSync } = require('./tracking-system/services/tracking-service-sync');
 const cron = require('node-cron');
 
 // Configurações
@@ -155,9 +155,8 @@ async function initializeServices() {
             console.log('✅ MediaManager atualizado com AudioService');
 
             // Reinicializa serviços com dependência do WhatsApp
-            trackingService = new TrackingService(whatsappService);
-            trackingService.redisStore = redisStore; // Usa o mesmo RedisStore
-            console.log('✅ TrackingService reinicializado com WhatsApp');
+            trackingService = new TrackingServiceSync();
+            console.log('✅ TrackingService reinicializado');
 
             orderValidationService = new OrderValidationService(nuvemshopService, whatsappService);
             console.log('✅ OrderValidationService reinicializado com dependências');
