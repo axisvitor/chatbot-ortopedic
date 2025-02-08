@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const axios = require('axios');
 const logger = require('../../utils/logger');
-const { NUVEMSHOP_CONFIG } = require('../../config/settings');
+const { NUVEMSHOP_CONFIG, env } = require('../../config/settings');
 const { NuvemshopHttpClient } = require('./utils/http-client');
 const { NuvemshopCache } = require('./utils/cache');
 const { NuvemshopFormatter } = require('./utils/formatter');
