@@ -37,7 +37,7 @@ class NuvemshopBase {
             baseURL: this.config.apiUrl,
             timeout: this.config.api.timeout,
             headers: {
-                'Authentication': `bearer ${this.config.accessToken}`,
+                'Authentication': `bearer ${process.env.NUVEMSHOP_ACCESS_TOKEN}`,
                 'Content-Type': 'application/json',
                 'User-Agent': this.config.api.userAgent,
                 'Accept': 'application/json'
