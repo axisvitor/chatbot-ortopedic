@@ -82,7 +82,7 @@ const app = express();
 app.set('trust proxy', req => {
     return req.path === '/health';
 });
-const port = env.PORT || PORT;
+const port = parseInt(env.PORT, 10);
 
 logger.info(`📝 Porta configurada: ${port}`);
 
@@ -504,8 +504,8 @@ async function startServer(maxRetries = 3) {
             // Inicializa tarefas agendadas
             initializeScheduledTasks();
             
-            server = app.listen(port, () => {
-                logger.info(`[Server] 🚀 Servidor rodando na porta ${port}`);
+            app.listen(port, () => {
+                logger.info(`🚀 Servidor rodando na porta ${port}`);
                 logger.info('[Server] ✅ Todos os serviços inicializados com sucesso');
             });
 
