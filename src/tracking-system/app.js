@@ -10,7 +10,7 @@ const { RedisStoreSync } = require('./utils/redis-store-sync');
 const { REDIS_CONFIG } = require('../config/settings');
 
 const app = express();
-const port = env.PORT || 3000;
+const port = process.env.PORT || 3000;
 const scheduler = new Scheduler();
 
 // Middleware para processar JSON
@@ -20,7 +20,7 @@ app.use(express.json());
 app.use('/webhooks/nuvemshop', nuvemshopWebhook);
 
 // Rota de healthcheck melhorada
-app.get('/health', async (req, res) => {
+app.get('/health', async (res) => {
     try {
         const redis = new RedisStoreSync();
         const redisStatus = await redis.checkConnection();

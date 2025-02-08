@@ -549,7 +549,7 @@ class WhatsAppService {
                 `*Ação Necessária:* Verificar taxação e processar pagamento`;
 
             // Envia para o número do departamento financeiro
-            const numeroFinanceiro = env.FINANCIAL_DEPT_NUMBER;
+            const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
             if (numeroFinanceiro) {
                 await this.sendText(numeroFinanceiro, mensagemFinanceiro);
             }
@@ -1177,6 +1177,23 @@ class WhatsAppService {
                 const delay = initialDelay * Math.pow(2, retries - 1);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
+        }
+    }
+
+    async sendFinancialNotification(order) {
+        try {
+            const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
+            const message = `Novo pedido ${order.number} no valor de R$${order.total} aguardando pagamento da taxa.`;
+
+            await this.sendMessage(numeroFinanceiro, message);
+
+            console.log(' Notificação enviada ao financeiro:', {
+                numeroFinanceiro,
+                message,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            console.error(' Erro ao enviar notificação ao financeiro:', error);
         }
     }
 }

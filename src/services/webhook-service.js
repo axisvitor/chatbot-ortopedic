@@ -461,9 +461,18 @@ class WebhookService {
                           `👤 Cliente: ${order.customer.name}\n\n` +
                           `*Produtos:*\n${order.products.map(p => `▫️ ${p.quantity}x ${p.name}`).join('\n')}`;
 
-            // Notifica departamentos relevantes via WhatsApp
-            await this.whatsappService.sendMessage(env.SALES_DEPT_NUMBER, message);
-            
+            // Envia a mensagem para o departamento de vendas
+            if (process.env.SHIPPING_DEPT_NUMBER) {
+                await this.whatsappService.sendMessage(process.env.SHIPPING_DEPT_NUMBER, message);
+                console.log('[Webhook] Notificação de novo pedido enviada:', {
+                    numeroShipping: process.env.SHIPPING_DEPT_NUMBER,
+                    message,
+                    timestamp: new Date().toISOString()
+                });
+            } else {
+                console.warn('[Webhook] Número do departamento de vendas não configurado');
+            }
+
             // Se for pedido internacional
             if (order.shipping_address?.country !== 'BR') {
                 await this.whatsappService.forwardToFinancial(data, order.number);
@@ -500,7 +509,7 @@ class WebhookService {
             }
 
             // Notifica equipe de expedição
-            await this.whatsappService.sendMessage(env.SHIPPING_DEPT_NUMBER, message);
+            await this.whatsappService.sendMessage(process.env.SHIPPING_DEPT_NUMBER, message);
 
             console.log('[Webhook] Notificação de pagamento enviada:', {
                 orderId: order.number,
@@ -525,8 +534,8 @@ class WebhookService {
                           `👤 Cliente: ${order.customer.name}`;
 
             // Notifica departamentos relevantes
-            await this.whatsappService.sendMessage(env.SALES_DEPT_NUMBER, message);
-            await this.whatsappService.sendMessage(env.FINANCIAL_DEPT_NUMBER, message);
+            await this.whatsappService.sendMessage(process.env.SALES_DEPT_NUMBER, message);
+            await this.whatsappService.sendMessage(process.env.FINANCIAL_DEPT_NUMBER, message);
 
             // Se houver reembolso necessário
             if (order.financial_status === 'paid') {
@@ -535,7 +544,7 @@ class WebhookService {
                                     `Valor: ${this.nuvemshopService.formatPrice(order.total)}\n` +
                                     `Método: ${order.payment_details.method}`;
                 
-                await this.whatsappService.sendMessage(env.FINANCIAL_DEPT_NUMBER, refundMessage);
+                await this.whatsappService.sendMessage(process.env.FINANCIAL_DEPT_NUMBER, refundMessage);
             }
 
             console.log('[Webhook] Notificação de cancelamento enviada:', {

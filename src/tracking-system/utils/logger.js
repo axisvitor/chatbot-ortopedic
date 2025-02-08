@@ -1,9 +1,10 @@
 const winston = require('winston');
 const path = require('path');
-const { env, LOGGING_CONFIG } = require('../../config/settings');
+const { LOGGING_CONFIG } = require('../../config/settings');
+require('dotenv').config();
 
 const logger = winston.createLogger({
-    level: LOGGING_CONFIG.level || 'info',
+    level: process.env.LOG_LEVEL || 'info',
     format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json()
