@@ -20,6 +20,7 @@ const NODE_ENV = validateEnvVar('NODE_ENV', 'development');
 // Valores padrão para desenvolvimento
 const DEFAULT_VALUES = {
     PORT: '3000',
+    LOG_LEVEL: 'info',
     REDIS_HOST: 'localhost',
     REDIS_PORT: '6379',
     REDIS_PASSWORD: '',
@@ -51,6 +52,7 @@ const DEFAULT_VALUES = {
 const REQUIRED_ENV_VARS = [
     'NODE_ENV',
     'PORT',
+    'LOG_LEVEL',
     'REDIS_HOST',
     'REDIS_PORT',
     'REDIS_PASSWORD',
@@ -506,7 +508,7 @@ const MEDIA_CONFIG = {
 // Logging Configuration
 const LOGGING_CONFIG = {
     enabled: true,
-    level: 'debug',
+    level: env.LOG_LEVEL,
     format: {
         timestamp: true,
         colorize: true,

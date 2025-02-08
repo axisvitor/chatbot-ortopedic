@@ -1,12 +1,12 @@
 const winston = require('winston');
 const { format } = winston;
-const { env } = require('../config/settings');
+const { env, LOGGING_CONFIG } = require('../config/settings');
 require('dotenv').config();
 
 class Logger {
     constructor() {
         this.logger = winston.createLogger({
-            level: env.LOG_LEVEL || 'info',
+            level: LOGGING_CONFIG.level || 'info',
             format: format.combine(
                 format.timestamp(),
                 format.metadata(),
