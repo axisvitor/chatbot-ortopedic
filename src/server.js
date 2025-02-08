@@ -28,8 +28,21 @@ const { env } = require('./config/settings');
 // Configurações
 const { 
     RATE_LIMIT_CONFIG,
-    PORT
+    REDIS_CONFIG,
+    NUVEMSHOP_CONFIG,
+    OPENAI_CONFIG,
+    GROQ_CONFIG,
+    WHATSAPP_CONFIG,
+    TRACKING_CONFIG,
+    ANTHROPIC_CONFIG,
+    BUSINESS_HOURS,
+    MEDIA_CONFIG,
+    LOGGING_CONFIG,
+    CACHE_CONFIG,
+    FFMPEG_CONFIG
 } = require('./config/settings');
+
+const port = parseInt(env.PORT, 10);
 
 // Declaração dos serviços
 let redisStore;
@@ -82,7 +95,6 @@ const app = express();
 app.set('trust proxy', req => {
     return req.path === '/health';
 });
-const port = parseInt(env.PORT, 10);
 
 logger.info(`📝 Porta configurada: ${port}`);
 
