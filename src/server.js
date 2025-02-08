@@ -23,21 +23,6 @@ const {
 const { TrackingServiceSync } = require('./tracking-system/services/tracking-service-sync');
 const cron = require('node-cron');
 const logger = console;
-const { 
-    PORT, 
-    REDIS_CONFIG, 
-    NUVEMSHOP_CONFIG, 
-    OPENAI_CONFIG, 
-    GROQ_CONFIG, 
-    WHATSAPP_CONFIG, 
-    TRACKING_CONFIG, 
-    ANTHROPIC_CONFIG, 
-    BUSINESS_HOURS, 
-    MEDIA_CONFIG, 
-    LOGGING_CONFIG, 
-    CACHE_CONFIG, 
-    FFMPEG_CONFIG 
-} = require('./config/settings');
 
 // Configurações
 const { 
@@ -95,7 +80,7 @@ const app = express();
 app.set('trust proxy', req => {
     return req.path === '/health';
 });
-const port = parseInt(PORT, 10);
+const port = process.env.PORT;
 
 logger.info(`📝 Porta configurada: ${port}`);
 
@@ -116,12 +101,12 @@ async function initializeServices() {
             logger.info('🔄 Iniciando serviços...');
             
             // Verifica variáveis de ambiente
-            if (!PORT) {
+            if (!process.env.PORT) {
                 throw new Error('Variável de ambiente PORT não definida');
             }
 
             // Inicializa serviços base primeiro
-            redisStore = new RedisStore(REDIS_CONFIG);
+            redisStore = new RedisStore();
             try {
                 await redisStore.connect();
                 logger.info('[Server] RedisStore conectado', {
@@ -143,7 +128,8 @@ async function initializeServices() {
 
             try {
                 // Inicializa CacheService com o mesmo RedisStore
-                cacheService = new CacheService(redisStore); // Usa o mesmo RedisStore já conectado
+                cacheService = new CacheService();
+                cacheService.redisStore = redisStore; // Usa o mesmo RedisStore já conectado
                 logger.info('[Server] CacheService inicializado', {
                     timestamp: new Date().toISOString()
                 });
@@ -159,7 +145,7 @@ async function initializeServices() {
             });
 
             // Serviços que dependem do cache
-            nuvemshopService = new NuvemshopService(cacheService); // Passando redisStore diretamente
+            nuvemshopService = new NuvemshopService(redisStore); // Passando redisStore diretamente
             logger.info('[Server] NuvemshopService inicializado com RedisStore', {
                 timestamp: new Date().toISOString()
             });
