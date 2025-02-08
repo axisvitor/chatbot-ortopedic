@@ -10,7 +10,7 @@ const { RedisStoreSync } = require('./utils/redis-store-sync');
 const { REDIS_CONFIG } = require('../config/settings');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = env.PORT || 3000;
 const scheduler = new Scheduler();
 
 // Middleware para processar JSON

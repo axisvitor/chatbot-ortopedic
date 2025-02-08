@@ -81,7 +81,7 @@ const app = express();
 app.set('trust proxy', req => {
     return req.path === '/health';
 });
-const port = process.env.PORT || PORT;
+const port = env.PORT || PORT;
 
 logger.info(`📝 Porta configurada: ${port}`);
 
@@ -102,7 +102,7 @@ async function initializeServices() {
             logger.info('🔄 Iniciando serviços...');
             
             // Verifica variáveis de ambiente
-            if (!process.env.PORT) {
+            if (!env.PORT) {
                 throw new Error('Variável de ambiente PORT não definida');
             }
 
@@ -503,8 +503,8 @@ async function startServer(maxRetries = 3) {
             // Inicializa tarefas agendadas
             initializeScheduledTasks();
             
-            server = app.listen(PORT, () => {
-                logger.info(`[Server] 🚀 Servidor rodando na porta ${PORT}`);
+            server = app.listen(port, () => {
+                logger.info(`[Server] 🚀 Servidor rodando na porta ${port}`);
                 logger.info('[Server] ✅ Todos os serviços inicializados com sucesso');
             });
 

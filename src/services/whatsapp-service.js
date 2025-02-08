@@ -549,7 +549,7 @@ class WhatsAppService {
                 `*Ação Necessária:* Verificar taxação e processar pagamento`;
 
             // Envia para o número do departamento financeiro
-            const numeroFinanceiro = process.env.FINANCIAL_DEPT_NUMBER;
+            const numeroFinanceiro = env.FINANCIAL_DEPT_NUMBER;
             if (numeroFinanceiro) {
                 await this.sendText(numeroFinanceiro, mensagemFinanceiro);
             }
