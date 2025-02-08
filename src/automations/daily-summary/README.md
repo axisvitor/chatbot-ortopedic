@@ -1,13 +1,41 @@
 # Daily Summary Automation
 
-This automation runs daily at 20:00 to check for packages pending customs fees and sends a summary via WhatsApp.
+Esta automação é executada diariamente às 20:00 para verificar pacotes com taxas alfandegárias pendentes e envia um resumo via WhatsApp.
 
-## Features
-- Fetches pending customs fee packages from 17track
-- Generates a summary in Haiku format
-- Sends WhatsApp message with total count and package codes
-- Runs automatically at 20:00 daily
+## Funcionalidades
+- Busca pacotes com taxas alfandegárias pendentes no 17track
+- Gera um resumo categorizado (Taxas Pendentes, Em Alerta, Com Problemas)
+- Envia mensagem via WhatsApp com o resumo formatado
+- Executa automaticamente todos os dias às 20:00
 
-## Configuration
-- API Key for Anthropic: Located in settings.js
-- WhatsApp configuration: Update the phone number in settings.js
+## Configuração
+Configure as seguintes variáveis de ambiente no arquivo `.env`:
+
+```
+WAPI_URL=sua_url_aqui
+WAPI_TOKEN=seu_token_aqui
+WAPI_CONNECTION_KEY=sua_chave_aqui
+TECHNICAL_DEPT_NUMBER=seu_numero_aqui
+```
+
+## Arquivos
+- `customs_summary.py`: Classe principal com a lógica de negócio
+- `scheduler.py`: Script para agendar a execução diária
+- `test_automation.py`: Script de teste da automação
+- `requirements.txt`: Dependências do projeto
+
+## Como Executar
+1. Instale as dependências:
+```bash
+pip install -r requirements.txt
+```
+
+2. Para testar a automação:
+```bash
+python test_automation.py
+```
+
+3. Para iniciar o agendador:
+```bash
+python scheduler.py
+```
