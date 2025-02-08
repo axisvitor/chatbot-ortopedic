@@ -23,6 +23,7 @@ const {
 const { TrackingServiceSync } = require('./tracking-system/services/tracking-service-sync');
 const cron = require('node-cron');
 const logger = console;
+const { env } = require('./config/settings');
 
 // Configurações
 const { 
