@@ -1,17 +1,31 @@
-const axios = require('axios');
+import axios from 'axios';
 
-class CustomsSummary {
-    constructor() {
-        const settings = require('../../config/settings');
-        const { endpoint, apiKey, paths } = settings.TRACKING_CONFIG;
-        const { whatsappNumber } = settings.WHATSAPP_CONFIG;
+class Logger {
+    debug(msg, ...args) {
+        console.debug(`[DEBUG] ${msg}`, ...args);
+    }
+    info(msg, ...args) {
+        console.info(`[INFO] ${msg}`, ...args);
+    }
+    error(msg, ...args) {
+        console.error(`[ERROR] ${msg}`, ...args);
+    }
+}
 
+export class CustomsSummary {
+    constructor(config, httpClient = axios, logger = new Logger()) {
+        this.validateConfig(config);
+        
+        const { endpoint, apiKey, whatsappNumber } = config;
+        
         this.whatsappNumber = whatsappNumber;
         this.trackingConfig = {
             endpoint,
-            apiKey,
-            paths
+            apiKey
         };
+        
+        this.httpClient = httpClient;
+        this.logger = logger;
 
         this.customsKeywords = [
             'customs',
@@ -24,31 +38,54 @@ class CustomsSummary {
         ];
     }
 
+    validateConfig(config) {
+        const required = ['endpoint', 'apiKey', 'whatsappNumber'];
+        const missing = required.filter(key => !config[key]);
+        if (missing.length > 0) {
+            throw new Error(`Missing required config: ${missing.join(', ')}`);
+        }
+    }
+
+    async makeRequest(fn, retries = 3) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                return await fn();
+            } catch (error) {
+                if (i === retries - 1) throw error;
+                const delay = 1000 * Math.pow(2, i);
+                this.logger.info(`Retry ${i + 1}/${retries} after ${delay}ms`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
     async generateDailySummary() {
+        this.logger.info('Iniciando geração do resumo diário');
         try {
-            console.log('\n📦 Gerando resumo diário de pacotes...');
             const packagesWithPendingCustoms = await this.getPackagesWithPendingCustoms();
             
             if (packagesWithPendingCustoms.length > 0) {
                 const message = this.formatSummaryMessage(packagesWithPendingCustoms);
                 await this.sendWhatsAppMessage(message);
-                console.log('✅ Resumo diário enviado com sucesso!');
+                this.logger.info('✅ Resumo diário enviado com sucesso!');
             } else {
-                console.log('ℹ️ Nenhum pacote com pendência alfandegária encontrado.');
+                this.logger.info('ℹ️ Nenhum pacote com pendência alfandegária encontrado.');
             }
+            
+            return { success: true, packagesCount: packagesWithPendingCustoms.length };
         } catch (error) {
-            console.error('❌ Erro ao gerar resumo diário:', error);
+            this.logger.error('Erro ao gerar resumo diário:', error);
             throw error;
         }
     }
 
     async getPackagesWithPendingCustoms() {
         try {
-            console.log('\n🔍 Buscando pacotes no 17track...');
+            this.logger.info('🔍 Buscando pacotes no 17track...');
             const { endpoint, apiKey } = this.trackingConfig;
             
             // Remover http:// ou https:// do endpoint
-            const api_url = endpoint.replace('https://', '').replace('http://', '');
+            const api_url = endpoint.replace(/^https?:\/\//, '');
             const list_url = `https://${api_url}/track/v2.2/gettracklist`;
             const track_url = `https://${api_url}/track/v2.2/gettrackinfo`;
             
@@ -57,143 +94,146 @@ class CustomsSummary {
                 'Content-Type': 'application/json'
             };
 
-            let allPackages = [];
-            let currentPage = 1;
-            let hasMorePages = true;
-
-            // Buscar todas as páginas de pacotes
-            while (hasMorePages) {
-                console.log(`\n📄 Buscando página ${currentPage}...`);
-                
-                const list_data = {
-                    tracking_status: "Tracking",
-                    page_no: currentPage,
-                    order_by: "RegisterTimeDesc"
-                };
-
-                const list_response = await axios.post(list_url, list_data, { headers });
-                
-                if (list_response.data.code !== 0) {
-                    throw new Error(`Erro ao buscar lista: ${list_response.data.message || 'Erro desconhecido'}`);
-                }
-
-                if (!list_response.data.data?.accepted) {
-                    throw new Error(`Formato de resposta inválido: ${JSON.stringify(list_response.data)}`);
-                }
-
-                const packages = list_response.data.data.accepted;
-                console.log(`✅ Encontrados ${packages.length} pacotes na página ${currentPage}`);
-
-                // Adiciona os pacotes desta página ao array total
-                allPackages = allPackages.concat(packages);
-
-                // Verifica se há mais páginas baseado no número de resultados
-                // A API do 17track geralmente retorna 40 resultados por página
-                hasMorePages = packages.length === 40; // Se a página está cheia, provavelmente há mais
-                currentPage++;
-
-                // Aguarda um pequeno intervalo entre as chamadas para não sobrecarregar a API
-                if (hasMorePages) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                }
+            const allPackages = await this.getAllPackages(list_url, headers);
+            
+            if (allPackages.length === 0) {
+                return [];
             }
 
-            console.log(`\n📦 Total de pacotes encontrados: ${allPackages.length}`);
-
-            if (allPackages.length > 0) {
-                console.log('\n🔍 Buscando detalhes dos pacotes...');
-                console.log(`URL Detalhes: ${track_url}`);
-
-                // Divide os pacotes em lotes de 40 para não sobrecarregar a API
-                const batchSize = 40;
-                let detailedPackages = [];
-
-                for (let i = 0; i < allPackages.length; i += batchSize) {
-                    const batch = allPackages.slice(i, i + batchSize);
-                    console.log(`\n📦 Processando lote ${Math.floor(i/batchSize) + 1} de ${Math.ceil(allPackages.length/batchSize)}`);
-
-                    // Preparar lista de pacotes do lote atual
-                    const track_data = batch.map(pkg => ({
-                        number: pkg.number,
-                        carrier: pkg.carrier
-                    }));
-
-                    const track_response = await axios.post(track_url, track_data, { headers });
-
-                    if (track_response.data.code !== 0) {
-                        throw new Error(`Erro ao buscar detalhes: ${track_response.data.message || 'Erro desconhecido'}`);
-                    }
-
-                    if (!track_response.data.data) {
-                        throw new Error(`Formato de resposta inválido: ${JSON.stringify(track_response.data)}`);
-                    }
-
-                    const batchDetails = track_response.data.data.accepted || [];
-                    detailedPackages = detailedPackages.concat(batchDetails);
-
-                    // Aguarda um pequeno intervalo entre os lotes
-                    if (i + batchSize < allPackages.length) {
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                }
-
-                // Filtra apenas os pacotes com pendências
-                const packagesWithIssues = detailedPackages.filter(pkg => this.checkTaxation(pkg));
-                console.log(`\n🚨 Pacotes com pendências encontrados: ${packagesWithIssues.length}`);
-                
-                return packagesWithIssues;
-            }
-
-            return [];
+            const detailedPackages = await this.getDetailedPackages(allPackages, track_url, headers);
+            const packagesWithIssues = detailedPackages.filter(pkg => this.checkTaxation(pkg));
+            
+            this.logger.info(`🚨 Pacotes com pendências encontrados: ${packagesWithIssues.length}`);
+            return packagesWithIssues;
+            
         } catch (error) {
-            console.error('❌ Erro ao buscar pacotes:', error);
+            this.logger.error('Erro ao buscar pacotes:', error);
             if (error.response) {
-                console.error('Status Code:', error.response.status);
-                console.error('Resposta:', error.response.data);
+                this.logger.error('Status Code:', error.response.status);
+                this.logger.error('Resposta:', error.response.data);
             }
             throw error;
         }
     }
 
+    async getAllPackages(list_url, headers) {
+        let allPackages = [];
+        let currentPage = 1;
+        let hasMorePages = true;
+
+        while (hasMorePages) {
+            this.logger.info(`📄 Buscando página ${currentPage}...`);
+            
+            const list_data = {
+                tracking_status: "Tracking",
+                page_no: currentPage,
+                order_by: "RegisterTimeDesc"
+            };
+
+            const response = await this.makeRequest(() => 
+                this.httpClient.post(list_url, list_data, { headers })
+            );
+            
+            if (response.data.code !== 0) {
+                throw new Error(`Erro ao buscar lista: ${response.data.message || 'Erro desconhecido'}`);
+            }
+
+            if (!response.data.data?.accepted) {
+                throw new Error(`Formato de resposta inválido: ${JSON.stringify(response.data)}`);
+            }
+
+            const packages = response.data.data.accepted;
+            this.logger.info(`✅ Encontrados ${packages.length} pacotes na página ${currentPage}`);
+
+            allPackages = allPackages.concat(packages);
+            hasMorePages = packages.length === 40;
+            currentPage++;
+
+            if (hasMorePages) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        this.logger.info(`📦 Total de pacotes encontrados: ${allPackages.length}`);
+        return allPackages;
+    }
+
+    async getDetailedPackages(packages, track_url, headers) {
+        if (packages.length === 0) return [];
+
+        this.logger.info('🔍 Buscando detalhes dos pacotes...');
+        
+        const batchSize = 40;
+        const batches = Array.from({ length: Math.ceil(packages.length / batchSize) }, (_, i) =>
+            packages.slice(i * batchSize, (i + 1) * batchSize)
+        );
+
+        let detailedPackages = [];
+        
+        for (let i = 0; i < batches.length; i++) {
+            this.logger.info(`📦 Processando lote ${i + 1} de ${batches.length}`);
+            
+            const track_data = batches[i].map(pkg => ({
+                number: pkg.number,
+                carrier: pkg.carrier
+            }));
+
+            const response = await this.makeRequest(() =>
+                this.httpClient.post(track_url, track_data, { headers })
+            );
+
+            if (response.data.code !== 0) {
+                throw new Error(`Erro ao buscar detalhes: ${response.data.message || 'Erro desconhecido'}`);
+            }
+
+            if (!response.data.data) {
+                throw new Error(`Formato de resposta inválido: ${JSON.stringify(response.data)}`);
+            }
+
+            const batchDetails = response.data.data.accepted || [];
+            detailedPackages = detailedPackages.concat(batchDetails);
+
+            if (i < batches.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        return detailedPackages;
+    }
+
     checkTaxation(pkg) {
         try {
-            if (!pkg || !pkg.track_info) {
-                console.log(`[DEBUG] Pacote inválido ou sem track_info:`, pkg);
+            if (!pkg?.track_info) {
+                this.logger.debug('Pacote inválido ou sem track_info:', pkg);
                 return false;
             }
 
-            const trackInfo = pkg.track_info;
-            const latestEvent = trackInfo.latest_event || {};
-            const latestStatus = trackInfo.latest_status || {};
-            
-            const status = (latestStatus.status || '').toLowerCase();
-            const eventDescription = (latestEvent.description || '').toLowerCase();
+            const { latest_event = {}, latest_status = {} } = pkg.track_info;
+            const status = (latest_status.status || '').toLowerCase();
+            const eventDescription = (latest_event.description || '').toLowerCase();
             const trackingNumber = pkg.number || 'N/A';
 
-            console.log(`\n[DEBUG] Verificando pacote: ${trackingNumber}`);
-            console.log(`[DEBUG] Status: ${status}`);
-            console.log(`[DEBUG] Último evento: ${eventDescription}`);
+            this.logger.debug(`Verificando pacote: ${trackingNumber}`);
+            this.logger.debug(`Status: ${status}`);
+            this.logger.debug(`Último evento: ${eventDescription}`);
 
-            // Status que precisam ser incluídos no resumo
             const problemStatuses = ['alert', 'expired', 'undelivered'];
             
-            // Verifica status problemáticos
             if (problemStatuses.includes(status)) {
-                console.log(`[DEBUG] Status problemático encontrado: ${status}`);
+                this.logger.debug(`Status problemático encontrado: ${status}`);
                 return true;
             }
                 
-            // Verifica retenção na alfândega
             if (this.customsKeywords.some(keyword => eventDescription.includes(keyword))) {
-                console.log(`[DEBUG] Pacote retido na alfândega: ${eventDescription}`);
+                this.logger.debug(`Pacote retido na alfândega: ${eventDescription}`);
                 return true;
             }
 
             return false;
             
         } catch (error) {
-            console.error(`[ERRO] Erro ao verificar status:`, error);
-            console.log(`[DEBUG] Pacote:`, pkg);
+            this.logger.error('Erro ao verificar status:', error);
+            this.logger.debug('Pacote:', pkg);
             return false;
         }
     }
@@ -271,10 +311,10 @@ class CustomsSummary {
                 'Content-Type': 'application/json'
             };
 
-            await axios.post(url, data, { headers });
-            console.log('✅ Mensagem enviada com sucesso!');
+            await this.httpClient.post(url, data, { headers });
+            this.logger.info('✅ Mensagem enviada com sucesso!');
         } catch (error) {
-            console.error('❌ Erro ao enviar mensagem:', error);
+            this.logger.error('Erro ao enviar mensagem:', error);
             throw error;
         }
     }
@@ -283,23 +323,23 @@ class CustomsSummary {
         // Roda todos os dias às 20:00 de Brasília
         const cron = require('node-cron');
         cron.schedule('0 20 * * *', () => {
-            console.log('Gerando resumo diário de taxas...');
+            this.logger.info('Gerando resumo diário de taxas...');
             this.generateDailySummary();
         }, {
             timezone: "America/Sao_Paulo"
         });
         
-        console.log('Agendador de resumo diário iniciado');
+        this.logger.info('Agendador de resumo diário iniciado');
     }
 
     // Método para testes
     async test() {
-        console.log('Iniciando teste do resumo diário...');
+        this.logger.info('Iniciando teste do resumo diário...');
         await this.generateDailySummary();
-        console.log('Teste concluído!');
+        this.logger.info('Teste concluído!');
     }
 }
 
 // Exporta a instância
-const customsSummary = new CustomsSummary();
+const customsSummary = new CustomsSummary(require('../../config/settings'));
 module.exports = customsSummary;

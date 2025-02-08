@@ -1,6 +1,12 @@
-const customsSummary = require('./customs-summary');
+import { CustomsSummary } from './customs-summary.js';
+import { TRACKING_CONFIG, WHATSAPP_CONFIG } from '../../config/settings.js';
+
+const customsSummary = new CustomsSummary({
+    ...TRACKING_CONFIG,
+    whatsappNumber: WHATSAPP_CONFIG.whatsappNumber
+});
 
 // Start the daily summary scheduler
-customsSummary.startScheduler();
+await customsSummary.startScheduler();
 
-module.exports = customsSummary;
+export default customsSummary;
