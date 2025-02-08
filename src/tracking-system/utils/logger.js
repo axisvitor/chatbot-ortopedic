@@ -1,5 +1,6 @@
 const winston = require('winston');
 const path = require('path');
+const { env } = require('../../config/settings');
 
 const logger = winston.createLogger({
     level: env.LOG_LEVEL || 'info',

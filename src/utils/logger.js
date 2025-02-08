@@ -1,5 +1,6 @@
 const winston = require('winston');
 const { format } = winston;
+const { env } = require('../config/settings');
 require('dotenv').config();
 
 class Logger {
