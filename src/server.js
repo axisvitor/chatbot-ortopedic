@@ -23,7 +23,7 @@ const {
 const { TrackingServiceSync } = require('./tracking-system/services/tracking-service-sync');
 const cron = require('node-cron');
 const logger = console;
-const { env, PORT, REDIS_CONFIG, NUVEMSHOP_CONFIG, OPENAI_CONFIG, GROQ_CONFIG, WHATSAPP_CONFIG, TRACKING_CONFIG, BUSINESS_HOURS, MEDIA_CONFIG, LOGGING_CONFIG, CACHE_CONFIG, FFMPEG_CONFIG } = require('./config/settings');
+const { env, PORT, REDIS_CONFIG, NUVEMSHOP_CONFIG, OPENAI_CONFIG, GROQ_CONFIG, WHATSAPP_CONFIG, TRACKING_CONFIG, ANTHROPIC_CONFIG, BUSINESS_HOURS, MEDIA_CONFIG, LOGGING_CONFIG, CACHE_CONFIG, FFMPEG_CONFIG } = require('./config/settings');
 
 // Configurações
 const { 

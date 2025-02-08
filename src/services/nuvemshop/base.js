@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const axios = require('axios');
 const logger = require('../../utils/logger');
-const { NUVEMSHOP_CONFIG, env } = require('../../config/settings');
+const { NUVEMSHOP_CONFIG } = require('../../config/settings');
 const { NuvemshopHttpClient } = require('./utils/http-client');
 const { NuvemshopCache } = require('./utils/cache');
 const { NuvemshopFormatter } = require('./utils/formatter');
@@ -37,7 +37,7 @@ class NuvemshopBase {
             baseURL: this.config.apiUrl,
             timeout: this.config.api.timeout,
             headers: {
-                'Authentication': `bearer ${env.NUVEMSHOP_ACCESS_TOKEN}`,
+                'Authentication': `bearer ${process.env.NUVEMSHOP_ACCESS_TOKEN}`,
                 'Content-Type': 'application/json',
                 'User-Agent': this.config.api.userAgent,
                 'Accept': 'application/json'
