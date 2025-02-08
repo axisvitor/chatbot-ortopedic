@@ -416,6 +416,32 @@ class RedisStoreSync {
             throw error;
         }
     }
+
+    /**
+     * Obtém todas as chaves que correspondem a um padrão
+     * @param {string} pattern - Padrão a ser usado na busca
+     * @returns {Promise<string[]>} Lista de chaves que correspondem ao padrão
+     */
+    async getKeys(pattern) {
+        try {
+            const keys = [];
+            let cursor = '0';
+            do {
+                const reply = await this.client.scan(cursor, { match: pattern });
+                cursor = reply.cursor;
+                keys.push(...reply.keys);
+            } while (cursor !== '0');
+            return keys;
+        } catch (error) {
+            logger.error('[Redis] Erro ao obter chaves:', {
+                pattern,
+                erro: error.message,
+                stack: error.stack,
+                timestamp: new Date().toISOString()
+            });
+            throw error;
+        }
+    }
 }
 
 module.exports = { RedisStoreSync };
