@@ -44,6 +44,10 @@ class NuvemshopBase {
             }
         });
 
+        logger.info(`[NuvemshopBase] API URL: ${this.config.apiUrl}`, {
+            timestamp: new Date().toISOString()
+        });
+
         // Configurações de retry
         this.retryConfig = {
             attempts: this.config.api.retryAttempts,
