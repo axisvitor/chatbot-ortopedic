@@ -271,7 +271,7 @@ class OrderService extends NuvemshopBase {
             const headers = {
                 'Accept': 'application/json',
                 'Content-Type': 'application/json',
-                'Authentication': `bearer ${NUVEMSHOP_CONFIG.token}`,
+                'Authentication': `bearer ${NUVEMSHOP_CONFIG.accessToken}`,
                 'User-Agent': 'API Loja Ortopedic (suporte@lojaortopedic.com.br)'
             };
 

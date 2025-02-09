@@ -1,13 +1,11 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const morgan = require('morgan');
 const helmet = require('helmet');
 const logger = require('./utils/logger');
 const nuvemshopWebhook = require('./webhooks/nuvemshop-webhook');
 const { Scheduler } = require('./scheduler');
 const { RedisStoreSync } = require('./utils/redis-store-sync');
-const { REDIS_CONFIG } = require('../config/settings');
 
 const app = express();
 const port = process.env.PORT || 3000;
